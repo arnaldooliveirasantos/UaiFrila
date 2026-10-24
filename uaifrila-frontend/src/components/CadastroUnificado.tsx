@@ -1,128 +1,133 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTheme } from '../context/ThemeContext';
-import { formatarCPF, formatarWhatsApp, formatarCNPJ } from '../utils/mascaras';
 
-export const CadastroUnificado: React.FC = () => {
-    const { theme, styles } = useTheme();
-    const [marcadorFreela, setMarcadorFreela] = useState(false);
-    const [marcadorBar, setMarcadorBar] = useState(false);
+export default function CadastroUnificado({ onCadastro }: { onCadastro?: () => void }) {
+  const { styles } = useTheme();
+  const [form, setForm] = useState({
+    nome: '', cpf: '', email: '', whatsapp: '', senha: '',
+    cnpj: '', nomeFantasia: '',
+    funcao: 'Garçom', valorHora: 20, bio: '',
+    bairro: 'Centro', comoChega: 'Moto', ajudaUber: 10,
+    is_freela: true, is_contratante: false,
+    termos: [false, false, false, false, false],
+    temMei: false
+  });
+  const [bairros, setBairros] = useState<string[]>(['Centro','Granja Marileusa','Karaíba','Santa Mônica','Umuarama','Jardim Karaíba','Morada da Colina','Patrimônio','Laranjeiras','Segismundo Pereira','Custódio Pereira','Umuarama','Jardim Europa','Jardim Célia','Luizote','Planalto','Chácaras Tubalina','Mansões Aeroporto']);
+  const [termos, setTermos] = useState<any[]>([]);
+  const API = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
-    const [termoCLT, setTermoCLT] = useState(false);
-    const [termoLGPD, setTermoLgpd] = useState(false);
-    const [cienteLimite, setCienteLimite] = useState(false);
-    const [temMEI, setTemMei] = useState('Não');
+  useEffect(() => {
+    fetch(`${API}/termos/vigente/2`).then(r=>r.json()).then(setTermos).catch(()=>{});
+  }, []);
 
-    const [nome, setNome] = useState('');
-    const [email, setEmail] = useState('');
-    const [senha, setSenha] = useState('');
-    const [cpf, setCpf] = useState('');
-    const [whatsapp, setWhatsapp] = useState('');
-    const [cnpj, setCnpj] = useState('');
-    const [fantasia, setNomeFantasia] = useState('');
+  const handleSubmit = async () => {
+    if (!form.termos.every(t=>t)) { alert('Aceite todos os termos obrigatórios'); return; }
+    try {
+      const res = await fetch(`${API}/usuarios/registrar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nome: form.nome, cpf: form.cpf, email: form.email, whatsapp: form.whatsapp, senha: form.senha,
+          cnpj: form.cnpj, nomeFantasia: form.nomeFantasia,
+          isFreela: form.is_freela, isContratante: form.is_contratante,
+          funcao: form.funcao, valorHora: form.valorHora, bio: form.bio,
+          bairro: form.bairro, comoChega: form.comoChega, ajudaUber: form.ajudaUber,
+          temMei: form.temMei
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.erro);
+      alert('Cadastro enviado! Verifique e-mail com código de confirmação.');
+      onCadastro?.();
+    } catch (e: any) { alert(e.message); }
+  };
 
-    const digitosCpf = cpf.replace(/\D/g, '');
-    const digitosWhats = whatsapp.replace(/\D/g, '');
-    const digitosCnpj = cnpj.replace(/\D/g, '');
+  return (
+    <div className="max-w-4xl mx-auto px-4 py-8">
+      <div className={`p-8 ${styles.bgQuadros}`}>
+        <h2 className="text-3xl font-black uppercase">Cadastro Unificado - Freela + Contratante (Duplex)</h2>
+        <p className="text-xs mt-2">Pode marcar os dois tipos: mesmo usuário pode trampar e contratar. Marcador diferencia.</p>
 
-    const validarCamposComuns = () => {
-        return nome.trim().length > 3 && email.includes('@') && senha.length >= 6 && digitosCpf.length === 11 && digitosWhats.length === 11;
-    };
-
-    const verificarBlindagem = () => {
-        if (!marcadorFreela && !marcadorBar) return false;
-        if (marcadorFreela) {
-            return termoCLT && termoLGPD && (temMEI === 'Sim' || cienteLimite) && validarCamposComuns();
-        }
-        if (marcadorBar) {
-            return digitosCnpj.length === 14 && fantasia.trim().length > 2 && validarCamposComuns();
-        }
-        return true;
-    };
-
-    const handleSubmeter = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!verificarBlindagem()) return;
-
-        // Uso exclusivo do arquivo de ambiente .env do ecossistema v12
-        const API_BASE = import.meta.env.VITE_API_URL;
-        
-        try {
-            const res = await fetch(`${API_BASE}/usuarios/registrar`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ nome, email, senha, cpf: digitosCpf, whatsapp: digitosWhats, cnpj: digitosCnpj, nomeFantasia: fantasia, isContratante: marcadorBar })
-            });
-
-            if (!res.ok) throw new Error('Falha de inserção no banco de dados.');
-            alert('🎉 Cadastro realizado com sucesso! Efetue seu login para começar.');
-            window.location.reload();
-        } catch (err) {
-            alert('❌ Erro ao processar gravação do cadastro próprio.');
-        }
-    };
-
-    return (
-        <div className={`w-full max-w-2xl mx-auto p-6 transition-all duration-300 ${styles.bgQuadros}`} style={styles.grid}>
-            <h2 className="text-2xl font-black uppercase text-center tracking-tight mb-4">➕ Criar Cadastro Próprio</h2>
-
-            <div className="grid grid-cols-2 gap-3 mb-6">
-                <div onClick={() => { setMarcadorFreela(!marcadorFreela); setMarcadorBar(false); }} className={`p-3 rounded-xl border-2 cursor-pointer text-center font-black text-xs uppercase transition ${marcadorFreela ? 'bg-[#0066FF] text-white border-[#0066FF]' : 'border-gray-800 text-gray-400'}`}>🏃 Freela</div>
-                <div onClick={() => { setMarcadorBar(!marcadorBar); setMarcadorFreela(false); }} className={`p-3 rounded-xl border-2 cursor-pointer text-center font-black text-xs uppercase transition ${marcadorBar ? 'bg-[#FF00FF] text-white border-[#FF00FF]' : 'border-gray-800 text-gray-400'}`}>🏢 Bar</div>
-            </div>
-
-            <form onSubmit={handleSubmeter} className="flex flex-col gap-4">
-                {(marcadorFreela || marcadorBar) && (
-                    <div className="flex flex-col gap-2">
-                        <label className="text-[10px] uppercase font-black tracking-wider">Nome Completo</label>
-                        <input type="text" value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Nome completo" className={`rounded-lg p-2.5 text-xs outline-none ${styles.input}`} required />
-                        
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div>
-                                <label className="text-[10px] uppercase font-black tracking-wider">E-mail Interno</label>
-                                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@provedor.com" className={`w-full rounded-lg p-2.5 text-xs outline-none ${styles.input}`} required />
-                            </div>
-                            <div>
-                                <label className="text-[10px] uppercase font-black tracking-wider">Senha (Mínimo 6 dígitos)</label>
-                                <input type="password" value={senha} onChange={(e) => setSenha(e.target.value)} placeholder="Sua senha secreta" className={`w-full rounded-lg p-2.5 text-xs outline-none ${styles.input}`} required />
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-1">
-                            <div>
-                                <label className="text-[10px] uppercase font-black tracking-wider">CPF</label>
-                                <input type="text" value={cpf} onChange={(e) => setCpf(formatarCPF(e.target.value))} placeholder="000.000.000-00" className={`w-full rounded-lg p-2.5 text-xs outline-none ${styles.input}`} required />
-                            </div>
-                            <div>
-                                <label className="text-[10px] uppercase font-black tracking-wider">WhatsApp</label>
-                                <input type="text" value={whatsapp} onChange={(e) => setWhatsapp(formatarWhatsApp(e.target.value))} placeholder="(34) 99999-0000" className={`w-full rounded-lg p-2.5 text-xs outline-none ${styles.input}`} required />
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {marcadorBar && (
-                    <div className={`p-4 rounded-xl flex flex-col gap-2 ${styles.boxInfo}`}>
-                        <h4 className="text-xs font-black uppercase mb-1 tracking-wide">🏢 Informações do Estabelecimento</h4>
-                        <input type="text" value={fantasia} onChange={(e) => setNomeFantasia(e.target.value)} placeholder="Nome Fantasia" className={`rounded-lg p-2 text-xs outline-none ${styles.input}`} required />
-                        <input type="text" value={cnpj} onChange={(e) => setCnpj(formatarCNPJ(e.target.value))} placeholder="00.000.000/0000-00" className={`rounded-lg p-2 text-xs outline-none ${styles.input}`} required />
-                    </div>
-                )}
-
-                {marcadorFreela && (
-                    <div className={`p-4 rounded-xl flex flex-col gap-3 text-xs ${styles.boxInfo}`}>
-                        <h4 className="text-[10px] font-black uppercase tracking-wider text-[#0066FF] border-b border-gray-800 pb-1">🔒 Cláusulas de Blindagem Jurídica</h4>
-                        <label className="flex items-start gap-2 cursor-pointer font-bold"><input type="checkbox" checked={termoCLT} onChange={(e) => setTermoCLT(e.target.checked)} /><span>Autônomo sem vínculo CLT (Art 442-B)</span></label>
-                        <label className="flex items-start gap-2 cursor-pointer font-bold"><input type="checkbox" checked={termoLGPD} onChange={(e) => setTermoLgpd(e.target.checked)} /><span>Autorizo tratamento de dados LGPD</span></label>
-                        {temMEI === 'Não' && (
-                            <label className={`flex items-start gap-2 p-2.5 rounded cursor-pointer font-black ${styles.boxWarn}`}><input type="checkbox" checked={cienteLimite} onChange={(e) => setCienteLimite(e.target.checked)} /><span>Ciente do limite de R\$ 1.500,00/mês sem MEI.</span></label>
-                        )}
-                    </div>
-                )}
-
-                <button type="submit" disabled={!verificarBlindagem()} className={`w-full py-3.5 rounded-xl font-black uppercase text-xs tracking-wider border-2 transition ${verificarBlindagem() ? 'bg-[#0066FF] text-white border-[#0066FF]' : 'bg-neutral-800 text-gray-500 border-transparent cursor-not-allowed opacity-40'}`}>
-                    🚀 Concluir Cadastro Próprio Blindado
-                </button>
-            </form>
+        {/* Tipo */}
+        <div className="mt-6 grid grid-cols-2 gap-3">
+          <label className={`p-4 border-2 cursor-pointer flex items-center gap-3 ${form.is_freela ? 'bg-[#FFC700] border-black' : 'border-black/20'}`}>
+            <input type="checkbox" checked={form.is_freela} onChange={e=>setForm({...form, is_freela: e.target.checked})} />
+            <span className="font-black uppercase text-xs">Quero Trampar (Freela)</span>
+          </label>
+          <label className={`p-4 border-2 cursor-pointer flex items-center gap-3 ${form.is_contratante ? 'bg-[#E53935] text-white border-black' : 'border-black/20'}`}>
+            <input type="checkbox" checked={form.is_contratante} onChange={e=>setForm({...form, is_contratante: e.target.checked})} />
+            <span className="font-black uppercase text-xs">Quero Contratar (Empregador)</span>
+          </label>
         </div>
-    );
-};
+
+        {/* Dados Pessoais */}
+        <h3 className="mt-8 font-black uppercase text-sm">Dados Pessoais (nome, CPF, selfie)</h3>
+        <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <input value={form.nome} onChange={e=>setForm({...form, nome: e.target.value})} placeholder="Nome completo" className={`px-4 py-3 text-sm ${styles.input}`} />
+          <input value={form.cpf} onChange={e=>setForm({...form, cpf: e.target.value})} placeholder="CPF" className={`px-4 py-3 text-sm ${styles.input}`} />
+          <input value={form.email} onChange={e=>setForm({...form, email: e.target.value})} placeholder="E-mail" className={`px-4 py-3 text-sm ${styles.input}`} />
+          <input value={form.whatsapp} onChange={e=>setForm({...form, whatsapp: e.target.value})} placeholder="WhatsApp" className={`px-4 py-3 text-sm ${styles.input}`} />
+          <input value={form.senha} onChange={e=>setForm({...form, senha: e.target.value})} type="password" placeholder="Senha" className={`px-4 py-3 text-sm ${styles.input}`} />
+          <select value={form.bairro} onChange={e=>setForm({...form, bairro: e.target.value})} className={`px-4 py-3 text-sm ${styles.input}`}>
+            {bairros.map(b=><option key={b} value={b}>{b}</option>)}
+          </select>
+        </div>
+
+        {/* Profissional */}
+        {form.is_freela && (
+          <>
+            <h3 className="mt-8 font-black uppercase text-sm">Profissional - Função Garçom R$20 / Barman R$25 / Cumim R$15 / Bandeja etc + bio</h3>
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+              <select value={form.funcao} onChange={e=>setForm({...form, funcao: e.target.value})} className={`px-4 py-3 text-sm ${styles.input}`}>
+                <option>Garçom - R$20/h</option><option>Barman - R$25/h</option><option>Cumim - R$15/h</option><option>Bandeja</option><option>Diarista</option><option>Eletricista</option>
+              </select>
+              <input type="number" value={form.valorHora} onChange={e=>setForm({...form, valorHora: Number(e.target.value)})} placeholder="Valor hora base" className={`px-4 py-3 text-sm ${styles.input}`} />
+              <select value={form.comoChega} onChange={e=>setForm({...form, comoChega: e.target.value})} className={`px-4 py-3 text-sm ${styles.input}`}>
+                <option>Moto 🏍</option><option>Carro 🚗</option><option>Ônibus</option><option>A pé</option>
+              </select>
+              <select value={form.ajudaUber} onChange={e=>setForm({...form, ajudaUber: Number(e.target.value)})} className={`px-4 py-3 text-sm ${styles.input}`}>
+                <option value={10}>Uber R$10</option><option value={15}>Uber R$15</option><option value={20}>Uber R$20</option><option value={30}>Uber R$30</option>
+              </select>
+              <input value={form.bio} onChange={e=>setForm({...form, bio: e.target.value})} placeholder="Bio" className={`md:col-span-2 px-4 py-3 text-sm ${styles.input}`} />
+            </div>
+          </>
+        )}
+
+        {/* Empresa */}
+        {form.is_contratante && (
+          <>
+            <h3 className="mt-8 font-black uppercase text-sm">Empresa - Nome fantasia, CNPJ 69.481.672/0001-62, Funcionamento, Pagamento Pix 10% / Cartão 14%</h3>
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <input value={form.nomeFantasia} onChange={e=>setForm({...form, nomeFantasia: e.target.value})} placeholder="Nome Fantasia" className={`px-4 py-3 text-sm ${styles.input}`} />
+              <input value={form.cnpj} onChange={e=>setForm({...form, cnpj: e.target.value})} placeholder="CNPJ 69.481.672/0001-62" className={`px-4 py-3 text-sm ${styles.input}`} />
+            </div>
+          </>
+        )}
+
+        {/* Termos */}
+        <h3 className="mt-8 font-black uppercase text-sm">Termos 5 obrigatórios</h3>
+        <div className="mt-3 space-y-2">
+          {[
+            'Autônomo Art 442-B CLT - Declaro que sou autônomo, sem vínculo CLT, marketplace',
+            'LGPD - Autorizo verificação CPF/RG/selfie e exclusão fotos após validação',
+            'MEI R$1500 - Limite R$1.500/mês sem MEI, acima precisa abrir MEI',
+            'Cancelamento R$40 - Multa R$40 cancelamento <4h',
+            'Intermediação CNAE 74.90-1-04 - EFI Bank escrow'
+          ].map((t,i)=>(
+            <label key={i} className="flex gap-3 p-3 border-2 border-black/10 text-xs cursor-pointer">
+              <input type="checkbox" checked={form.termos[i]} onChange={e=>{ const nt=[...form.termos]; nt[i]=e.target.checked; setForm({...form, termos: nt}); }} />
+              <span>{t}</span>
+            </label>
+          ))}
+        </div>
+
+        <div className="mt-4">
+          <label className="flex gap-2 text-xs"><input type="checkbox" checked={form.temMei} onChange={e=>setForm({...form, temMei: e.target.checked})} /> Tem MEI?</label>
+          {!form.temMei && <div className="mt-2 p-3 bg-[#FFC700] border-2 border-black text-xs font-bold">Alerta: Limite R$1.500/mês no app sem MEI. Acima disso precisa abrir MEI (R$75/mês)</div>}
+        </div>
+
+        <button onClick={handleSubmit} className={`mt-8 w-full py-4 font-black uppercase text-sm ${styles.btnPrimary}`}>Publicar Perfil Blindado</button>
+      </div>
+    </div>
+  );
+}

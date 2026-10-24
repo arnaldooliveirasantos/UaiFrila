@@ -1,0 +1,11 @@
+CREATE TABLE IF NOT EXISTS tipos_usuario (id SERIAL PRIMARY KEY, nome VARCHAR(30) UNIQUE NOT NULL);
+CREATE TABLE IF NOT EXISTS usuario_perfis (usuario_id INT REFERENCES usuarios(id) ON DELETE CASCADE, tipo_id INT REFERENCES tipos_usuario(id) ON DELETE CASCADE, PRIMARY KEY(usuario_id, tipo_id));
+CREATE TABLE IF NOT EXISTS termos_aceite (id SERIAL PRIMARY KEY, versao INT NOT NULL, tipo_usuario_id INT REFERENCES tipos_usuario(id) ON DELETE CASCADE, ativo BOOLEAN DEFAULT TRUE, criado_em TIMESTAMP DEFAULT NOW());
+CREATE TABLE IF NOT EXISTS itens_termo_aceite (id SERIAL PRIMARY KEY, termo_id INT REFERENCES termos_aceite(id) ON DELETE CASCADE, texto_item TEXT NOT NULL, ordem INT NOT NULL, ativo_no_termo BOOLEAN DEFAULT TRUE);
+CREATE TABLE IF NOT EXISTS rbac_roles (id SERIAL PRIMARY KEY, nome VARCHAR(50) UNIQUE NOT NULL);
+CREATE TABLE IF NOT EXISTS rbac_permissoes (id SERIAL PRIMARY KEY, nome VARCHAR(100) UNIQUE NOT NULL, chave VARCHAR(50) UNIQUE NOT NULL);
+CREATE TABLE IF NOT EXISTS rbac_role_permissoes (role_id INT REFERENCES rbac_roles(id) ON DELETE CASCADE, permissao_id INT REFERENCES rbac_permissoes(id) ON DELETE CASCADE, PRIMARY KEY(role_id, permissao_id));
+CREATE TABLE IF NOT EXISTS variaveis_ambiente (chave VARCHAR(100) PRIMARY KEY, valor VARCHAR(255) NOT NULL, descricao TEXT, criado_em TIMESTAMP DEFAULT NOW(), atualizado_em TIMESTAMP DEFAULT NOW());
+CREATE TABLE IF NOT EXISTS email_status (id SERIAL PRIMARY KEY, chave VARCHAR(20) UNIQUE NOT NULL, descricao VARCHAR(50) NOT NULL);
+CREATE TABLE IF NOT EXISTS email_templates (id SERIAL PRIMARY KEY, chave_uso VARCHAR(30) UNIQUE NOT NULL, email_remetente VARCHAR(150) NOT NULL, nome_exibicao VARCHAR(100) NOT NULL, titulo_assunto VARCHAR(200) NOT NULL, conteudo_corpo TEXT NOT NULL, criado_em TIMESTAMP DEFAULT NOW());
+CREATE TABLE IF NOT EXISTS email_historico_disparos (id SERIAL PRIMARY KEY, template_id INT REFERENCES email_templates(id), usuario_id INT, email_destinatario VARCHAR(150) NOT NULL, titulo_final VARCHAR(200) NOT NULL, conteudo_final TEXT NOT NULL, codigo_verificacao VARCHAR(6) NOT NULL, status_id INT REFERENCES email_status(id), expira_em TIMESTAMP NOT NULL, tentativas INT DEFAULT 0, erro_mensagem TEXT, criado_em TIMESTAMP DEFAULT NOW(), atualizado_em TIMESTAMP DEFAULT NOW());

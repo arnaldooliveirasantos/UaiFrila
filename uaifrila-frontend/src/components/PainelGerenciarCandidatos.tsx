@@ -1,66 +1,36 @@
 import React, { useEffect, useState } from 'react';
 import { useTheme } from '../context/ThemeContext';
 
-interface Candidato {
-    id: number;
-    nome: string;
-    whatsapp: string;
-    media: string;
-    trampos: number;
-    distancia: string;
-    foto: string;
-}
+export default function PainelGerenciarCandidatos() {
+  const { styles } = useTheme();
+  const [candidatos, setCandidatos] = useState<any[]>([
+    { id: 1, nome: 'João Silva', bairro: 'Centro', distancia: '1.2km', media: 4.9, trampos: 23, como_chega: 'Moto 🏍', foto: '' },
+    { id: 2, nome: 'Maria Souza', bairro: 'Granja Marileusa', distancia: '5.3km', media: 5.0, trampos: 45, como_chega: 'Carro 🚗', foto: '' },
+  ]);
 
-export const PainelGerenciarCandidatos: React.FC<{ vagaId: number; onVoltar: () => void }> = ({ vagaId, onVoltar }) => {
-    const { theme, styles } = useTheme();
-    const [candidatos, setCandidatos] = useState<Candidato[]>([]);
-    const [carregando, setCarregando] = useState(true);
-    const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+  const aceitar = async (id: number) => {
+    alert('Aceitar cria trampo ativo com código início/fim. Pagamento EFI escrow.');
+  };
 
-    useEffect(() => {
-        fetch(`${API_BASE}/vagas/${vagaId}/candidatos`)
-            .then(res => res.json())
-            .then(dados => { if (Array.isArray(dados)) setCandidatos(dados); })
-            .catch(err => console.error(err))
-            .finally(() => setCarregando(false));
-    }, [vagaId, API_BASE]);
-
-    const aprovarFreela = (id: number) => {
-        alert(`🏃 Profissional aprovado!`);
-    };
-
-    return (
-        <div className={`w-full p-6 border-2 rounded-3xl ${styles.bgQuadros}`} style={styles.grid}>
-            <div className="flex justify-between items-center border-b border-gray-800 pb-3 mb-6">
-                <div>
-                    <h3 className="text-lg font-black uppercase text-[#0066FF]">👥 Candidatos ao Turno</h3>
-                    <p className="text-[10px] text-gray-500 font-mono">VAGA ID: #{vagaId}</p>
-                </div>
-                <button onClick={onVoltar} className="text-[10px] font-black uppercase px-3 py-1.5 border bg-neutral-800 text-white rounded-lg">✕ Fechar</button>
+  return (
+    <div className="max-w-6xl mx-auto px-4 py-8">
+      <h2 className="text-2xl font-black uppercase">Onde aceita - Lista vagas com badge vermelha pendentes → clica vaga → lista candidatos</h2>
+      <div className="mt-6 grid gap-4">
+        {candidatos.map(c => (
+          <div key={c.id} className={`p-5 ${styles.bgQuadros} flex justify-between`}>
+            <div>
+              <p className="font-black">{c.nome} - {c.media}★ - {c.trampos} trampos</p>
+              <p className="text-xs">📍 {c.bairro} - {c.distancia} - {c.como_chega}</p>
+              <p className="text-xs opacity-70">Foto, bairro distância, avaliação 4.9★, como chega</p>
             </div>
-            {carregando ? <div className="text-xs text-gray-500">Carregando...</div> :
-             candidatos.length === 0 ? <div className="text-xs text-gray-500 p-4 text-center border-2 border-dashed rounded-xl">Nenhum candidato.</div> :
-             <div className="flex flex-col gap-4">
-                {candidatos.map((c) => {
-                    const bloqueado = parseFloat(c.media) < 3.5;
-                    return (
-                        <div key={c.id} className={`p-4 rounded-2xl border-2 flex flex-col sm:flex-row justify-between gap-4 ${bloqueado ? 'bg-red-500/10 border-[#E53935]' : (theme === 'dark' ? 'bg-[#050505] border-gray-900' : 'bg-gray-50 border-gray-200')}`}>
-                            <div className="flex items-center gap-4">
-                                <img src={c.foto} alt="Avatar" className="w-12 h-12 bg-black rounded-xl border" />
-                                <div>
-                                    <div className="flex items-center gap-2"><h4 className="font-black text-sm uppercase">{c.nome}</h4><span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${bloqueado ? 'bg-[#E53935] text-white' : 'bg-[#FFC700] text-black'}`}>⭐ {c.media}</span></div>
-                                    <p className="text-[11px] text-gray-400">📍 {c.distancia}</p>
-                                </div>
-                            </div>
-                            <div className="flex gap-2">
-                                <a href={`https://wa.me/${c.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="px-3 py-2 bg-emerald-600 text-white text-[10px] rounded-xl font-black">WhatsApp</a>
-                                {!bloqueado && <button onClick={() => aprovarFreela(c.id)} className={`px-3 py-2 text-[10px] rounded-xl ${styles.btnPrimary}`}>Aprovar</button>}
-                            </div>
-                        </div>
-                    );
-                })}
-             </div>
-            }
-        </div>
-    );
-};
+            <div className="flex flex-col gap-2">
+              <button onClick={()=>aceitar(c.id)} className={`px-4 py-2 text-xs font-black uppercase ${styles.btnPrimary}`}>Aceitar (cria trampo ativo)</button>
+              <button className={`px-4 py-2 text-xs font-black uppercase ${styles.btnDanger}`}>Recusar</button>
+              <button className="px-4 py-2 text-xs font-black uppercase border-2 border-black">Ver perfil / WhatsApp</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}

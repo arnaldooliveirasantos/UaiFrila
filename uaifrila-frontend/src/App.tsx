@@ -1,88 +1,69 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ThemeProvider } from './context/ThemeContext';
-import { Navbar } from './components/Navbar';
-import { LandingPage } from './components/LandingPage';
-import { Login } from './components/Login';
-import { CadastroUnificado } from './components/CadastroUnificado';
-import { MuralVagas } from './components/MuralVagas';
-import { PainelPublicarVaga } from './components/PainelPublicarVaga';
-import { PainelMeusTrampos } from './components/PainelMeusTrampos';
-import { PainelTermos } from './components/PainelTermos';
-import { PainelAdminFinanceiro } from './components/PainelAdminFinanceiro';
-import { PainelEdicaoTermos } from './components/PainelEdicaoTermos';
-import { PainelConfiguracaoCidades } from './components/PainelConfiguracaoCidades';
+import Navbar from './components/Navbar';
+import LandingPage from './components/LandingPage';
+import Login from './components/Login';
+import CadastroUnificado from './components/CadastroUnificado';
+import MuralVagas from './components/MuralVagas';
+import PainelPublicarVaga from './components/PainelPublicarVaga';
+import PainelGerenciarCandidatos from './components/PainelGerenciarCandidatos';
+import PainelMeusTrampos from './components/PainelMeusTrampos';
+import PainelConfiguracaoCidades from './components/PainelConfiguracaoCidades';
+import PainelExpansaoCidades from './components/PainelExpansaoCidades';
+import PainelAdminFinanceiro from './components/PainelAdminFinanceiro';
+import PainelVariaveisAmbiente from './components/PainelVariaveisAmbiente';
+import CodigoFreela from './components/CodigoFreela';
 
-type TelaAtiva = 'HOME' | 'LOGIN' | 'CADASTRO_UNIFICADO' | 'MURAL' | 'PUBLICAR' | 'TRAMPOS' | 'TERMOS_COMPLETOS' | 'ADMIN' | 'CADASTRO' | 'TRAMPOS' | 'TERMOS';
+function AppContent() {
+  const [telaAtiva, setTelaAtiva] = useState('home');
+  const [usuario, setUsuario] = useState<any>(null);
 
-function ConteudoApp() {
-    const [telaAtiva, setTelaAtiva] = useState<string>('HOME');
-    const [usuario, setUsuario] = useState<any>(null);
+  useEffect(() => {
+    const token = localStorage.getItem('@UaiFrila:token');
+    if (token) {
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        setUsuario({ id: payload.id, nome: payload.email || 'Usuário', is_admin: payload.is_admin, is_contratante: payload.is_contratante || true, is_freela: payload.is_freela || true });
+      } catch {}
+    }
+  }, []);
 
-    const carregarUsuario = useCallback(() => {
-        try {
-            const u = localStorage.getItem('@UaiFrila:usuario');
-            if (u) setUsuario(JSON.parse(u));
-            else setUsuario(null);
-        } catch { setUsuario(null); }
-    }, []);
+  const handleLogin = (usr: any, token: string) => {
+    setUsuario(usr);
+    setTelaAtiva('mural');
+  };
 
-    useEffect(() => {
-        carregarUsuario();
-        const onAuth = () => carregarUsuario();
-        const onStorage = (e: StorageEvent) => { if (e.key?.includes('@UaiFrila')) carregarUsuario(); };
-        window.addEventListener('auth-success', onAuth);
-        window.addEventListener('storage', onStorage);
-        return () => {
-            window.removeEventListener('auth-success', onAuth);
-            window.removeEventListener('storage', onStorage);
-        };
-    }, [carregarUsuario]);
+  const handleLogout = () => {
+    localStorage.removeItem('@UaiFrila:token');
+    setUsuario(null);
+    setTelaAtiva('home');
+  };
 
-    const handleSucessoSSO = useCallback((dados: any) => {
-        localStorage.setItem('@UaiFrila:usuario', JSON.stringify(dados.usuario));
-        localStorage.setItem('@UaiFrila:token', dados.token);
-        setUsuario(dados.usuario);
-        setTelaAtiva('MURAL');
-    }, []);
-
-    const handleLogout = useCallback(() => {
-        localStorage.removeItem('@UaiFrila:usuario');
-        localStorage.removeItem('@UaiFrila:token');
-        setUsuario(null);
-        setTelaAtiva('HOME');
-    }, []);
-
-    const handleNavegar = useCallback((tela: string) => {
-        const mapa: Record<string, string> = {
-            'CADASTRO': 'CADASTRO_UNIFICADO',
-            'TERMOS': 'TERMOS_COMPLETOS'
-        };
-        setTelaAtiva(mapa[tela] || tela);
-    }, []);
-
-    return (
-        <div className="min-h-screen pt-24 pb-12 px-4 max-w-7xl mx-auto flex flex-col gap-6">
-            <Navbar telaAtiva={telaAtiva} onNavegar={handleNavegar} usuario={usuario} onLogout={handleLogout} />
-            
-            {telaAtiva === 'HOME' && <LandingPage onSelecionarAcao={handleNavegar} />}
-            {telaAtiva === 'LOGIN' && <Login onSucessoSSO={handleSucessoSSO} />}
-            {telaAtiva === 'CADASTRO_UNIFICADO' && <CadastroUnificado />}
-            {telaAtiva === 'MURAL' && <MuralVagas tipoUsuario={usuario?.is_contratante ? 'CONTRATANTE' : 'FREELA'} />}
-            {telaAtiva === 'PUBLICAR' && <PainelPublicarVaga />}
-            {telaAtiva === 'TRAMPOS' && <PainelMeusTrampos />}
-            {telaAtiva === 'TERMOS_COMPLETOS' && <PainelTermos />}
-            {telaAtiva === 'ADMIN' && usuario?.is_admin && (
-                <div className="space-y-6">
-                    <h2 className="text-2xl font-black">👑 Painel Admin</h2>
-                    <PainelAdminFinanceiro />
-                    <PainelConfiguracaoCidades />
-                    <PainelEdicaoTermos />
-                </div>
-            )}
-        </div>
-    );
+  return (
+    <div className="min-h-screen">
+      <Navbar telaAtiva={telaAtiva} setTelaAtiva={setTelaAtiva} usuario={usuario} onLogout={handleLogout} />
+      <main className="pt-[72px] lg:pt-[72px]">
+        {telaAtiva === 'home' && <LandingPage onEntrar={setTelaAtiva} />}
+        {telaAtiva === 'login' && <Login onLogin={handleLogin} />}
+        {telaAtiva === 'cadastro' && <CadastroUnificado onCadastro={() => setTelaAtiva('login')} />}
+        {telaAtiva === 'mural' && <MuralVagas tipoUsuario={usuario?.is_contratante ? 'CONTRATANTE' : 'FREELA'} />}
+        {telaAtiva === 'publicar' && <PainelPublicarVaga />}
+        {telaAtiva === 'candidatos' && <PainelGerenciarCandidatos />}
+        {telaAtiva === 'trampos' && <PainelMeusTrampos />}
+        {telaAtiva === 'cidades' && <PainelConfiguracaoCidades />}
+        {telaAtiva === 'expansao' && <PainelExpansaoCidades />}
+        {telaAtiva === 'transacoes' && <PainelAdminFinanceiro />}
+        {telaAtiva === 'variaveis' && <PainelVariaveisAmbiente />}
+        {telaAtiva === 'codigo' && <CodigoFreela />}
+      </main>
+    </div>
+  );
 }
 
 export default function App() {
-    return <ThemeProvider><ConteudoApp /></ThemeProvider>;
+  return (
+    <ThemeProvider>
+      <AppContent />
+    </ThemeProvider>
+  );
 }
