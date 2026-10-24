@@ -1,0 +1,8 @@
+{
+  "name": "uaifrila-email-worker",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "scripts": { "build": "tsc", "start": "tsc && node dist/index.js" },
+  "dependencies": { "dotenv": "^16.4.5", "nodemailer": "^6.9.13", "pg": "^8.11.5" },
+  "devDependencies": { "@types/node": "^20.11.30", "@types/nodemailer": "^6.4.14", "@types/pg": "^8.11.4", "typescript": "^5.4.3" }
+}
