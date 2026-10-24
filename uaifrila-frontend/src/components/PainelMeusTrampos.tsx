@@ -2,72 +2,146 @@ import React, { useState, useEffect } from 'react';
 import { useTheme } from '../context/ThemeContext';
 
 export default function PainelMeusTrampos() {
-  const { styles } = useTheme();
-  const [trampos, setTrampos] = useState<any[]>([]);
-  const [cronometros, setCronometros] = useState<Record<number, number>>({});
+  const { isDark } = useTheme();
+  const [vagas, setVagas] = useState<any[]>([]);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState('');
   const API = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
   useEffect(() => {
-    const token = localStorage.getItem('@UaiFrila:token');
-    fetch(`${API}/vagas/mural`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ tipo: 'FREELA' }) })
-      .then(r=>r.json()).then(d=>{ if (Array.isArray(d)) setTrampos(d.slice(0,3).map((v:any)=>({...v, status: 'ATIVA', codigo_inicio: 'A1B2C', codigo_fim: 'Z9Y8X', ponto_inicio: null}))); }).catch(()=>{});
-  }, []);
+    let isMounted = true;
+    
+    const carregarMural = async () => {
+      const token = localStorage.getItem('uaifrila_token');
+      const usuarioStr = localStorage.getItem('uaifrila_usuario');
+      
+      if (!token) {
+        if (isMounted) {
+          setErro('Você não está logado - faça login novamente');
+          setCarregando(false);
+        }
+        return;
+      }
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setCronometros(prev => {
-        const next = { ...prev };
-        Object.keys(next).forEach(k => { next[Number(k)] += 1; });
-        return next;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
+      // Verifica status_usuario_id
+      if (usuarioStr) {
+        try {
+          const usuario = JSON.parse(usuarioStr);
+          console.log('Usuario logado:', usuario, 'status_usuario_id:', usuario.status_usuario_id);
+          if (usuario.status_usuario_id === 1 || usuario.status_chave === 'AGUARDANDO_VALIDACAO') {
+            if (isMounted) {
+              setErro('AGUARDANDO_VALIDACAO - Valide seu e-mail com o código de 6 dígitos para acessar o mural');
+              setCarregando(false);
+            }
+            return;
+          }
+        } catch {}
+      }
 
-  const iniciarPonto = (id: number, codigo: string) => {
-    if (codigo !== 'A1B2C') { alert('Código início incorreto!'); return; }
-    setCronometros(prev => ({ ...prev, [id]: 0 }));
-    setTrampos(prev => prev.map(t => t.id === id ? { ...t, ponto_inicio: new Date().toISOString() } : t));
-  };
+      try {
+        // Usa GET e envia token
+        const res = await fetch(`${API}/vagas/mural`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          }
+        });
 
-  const finalizarPonto = (id: number, codigo: string) => {
-    if (codigo !== 'Z9Y8X') { alert('Código fim incorreto!'); return; }
-    alert('Trampo finalizado! Avaliação liberada. Freela recebe Pix ao finalizar, contratante fez Pix 1h antes.');
-    setTrampos(prev => prev.map(t => t.id === id ? { ...t, status: 'CONCLUIDO' } : t));
-  };
+        if (!isMounted) return;
 
-  const formatTime = (sec: number) => {
-    const h = Math.floor(sec / 3600).toString().padStart(2,'0');
-    const m = Math.floor((sec % 3600)/60).toString().padStart(2,'0');
-    const s = (sec % 60).toString().padStart(2,'0');
-    return `${h}:${m}:${s}`;
-  };
+        if (res.status === 401) {
+          const text = await res.text();
+          console.error('401 no mural:', text);
+          setErro('Sessão expirada - faça login novamente. Token não autorizado.');
+          // Limpa token inválido
+          // localStorage.removeItem('uaifrila_token');
+          setCarregando(false);
+          return;
+        }
+
+        if (!res.ok) throw new Error(`Erro ${res.status}`);
+
+        const data = await res.json();
+        console.log('Mural carregado:', data);
+        if (isMounted) {
+          setVagas(data.vagas || data || []);
+        }
+      } catch (e:any) {
+        console.error('Erro mural:', e);
+        if (isMounted) setErro(e.message);
+      } finally {
+        if (isMounted) setCarregando(false);
+      }
+    };
+
+    carregarMural();
+
+    return () => { isMounted = false; };
+  }, []); // Array vazio - só carrega uma vez, não em loop
+
+  if (carregando) {
+    return <div className="p-8 text-center">Carregando mural...</div>;
+  }
+
+  if (erro) {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-12">
+        <div className={`p-8 border-2 ${isDark ? 'bg-zinc-900 border-white text-white' : 'bg-white border-black text-black'}`}>
+          <h2 className="text-xl font-black uppercase mb-4">⚠️ {erro.includes('AGUARDANDO_VALIDACAO') ? 'Valide seu e-mail' : 'Erro ao carregar mural'}</h2>
+          <p className="text-sm mb-4">{erro}</p>
+          {erro.includes('AGUARDANDO_VALIDACAO') ? (
+            <div className="space-y-3">
+              <p className="text-xs">Você está com status_usuario_id = 1 (AGUARDANDO_VALIDACAO). Precisa validar o código de 6 dígitos enviado por e-mail.</p>
+              <button 
+                onClick={() => window.location.reload()} 
+                className="w-full py-3 bg-[#FFC700] text-black border-2 border-black font-black uppercase text-xs"
+              >
+                Já validei - Recarregar
+              </button>
+              <button 
+                onClick={() => {
+                  localStorage.removeItem('uaifrila_token');
+                  localStorage.removeItem('uaifrila_usuario');
+                  window.location.href = '/';
+                }} 
+                className="w-full py-3 bg-white text-black border-2 border-black font-black uppercase text-xs"
+              >
+                Fazer login novamente
+              </button>
+            </div>
+          ) : (
+            <button 
+              onClick={() => window.location.reload()} 
+              className="px-4 py-2 bg-black text-white border-2 border-black font-black uppercase text-xs"
+            >
+              Tentar novamente
+            </button>
+          )}
+          <div className="mt-4 p-3 bg-zinc-100 border-2 border-black/10 text-[10px] font-mono">
+            Token: {localStorage.getItem('uaifrila_token')?.substring(0,20)}...<br/>
+            Usuario: {localStorage.getItem('uaifrila_usuario')?.substring(0,100)}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
-      <h2 className="text-2xl font-black uppercase">Trampos com Ponto REAL cronômetro 00:00:00</h2>
-      <div className="mt-6 grid gap-4">
-        {trampos.map(trampo => (
-          <div key={trampo.id} className={`p-6 ${styles.bgQuadros}`}>
-            <div className="flex justify-between">
-              <h3 className="font-black uppercase">{trampo.funcao}</h3>
-              <span className="text-xs font-bold">{trampo.status}</span>
+      <h2 className={`text-2xl font-black uppercase mb-6 ${isDark ? 'text-white' : 'text-black'}`}>Mural de Vagas</h2>
+      {vagas.length === 0 ? (
+        <p className={isDark ? 'text-zinc-400' : 'text-zinc-600'}>Nenhuma vaga no momento</p>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {vagas.map((v:any) => (
+            <div key={v.id} className={`p-4 border-2 ${isDark ? 'bg-zinc-900 border-white text-white' : 'bg-white border-black text-black'}`}>
+              <h3 className="font-black uppercase text-sm">{v.titulo || v.funcao || 'Vaga'}</h3>
+              <p className="text-xs mt-2">{v.descricao || v.bairro || ''}</p>
             </div>
-            <a href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(trampo.endereco_completo + ' Uberlândia MG Brasil')}`} target="_blank" className="text-[#0066FF] text-xs font-bold underline">📍 {trampo.endereco_completo} - Rota</a>
-            {trampo.ponto_inicio && cronometros[trampo.id] !== undefined && (
-              <div className="mt-4 text-3xl font-black tracking-widest">{formatTime(cronometros[trampo.id])}</div>
-            )}
-            <div className="mt-4 flex gap-2">
-              {!trampo.ponto_inicio ? (
-                <><input id={`codigo-inicio-${trampo.id}`} placeholder="Código início (A1B2C)" className={`px-3 py-2 text-xs ${styles.input}`} /><button onClick={()=>{ const el=document.getElementById(`codigo-inicio-${trampo.id}`) as HTMLInputElement; iniciarPonto(trampo.id, el.value); }} className={`px-4 py-2 text-xs font-black uppercase ${styles.btnPrimary}`}>Iniciar Ponto</button></>
-              ) : (
-                <><input id={`codigo-fim-${trampo.id}`} placeholder="Código fim (Z9Y8X)" className={`px-3 py-2 text-xs ${styles.input}`} /><button onClick={()=>{ const el=document.getElementById(`codigo-fim-${trampo.id}`) as HTMLInputElement; finalizarPonto(trampo.id, el.value); }} className={`px-4 py-2 text-xs font-black uppercase ${styles.btnDanger}`}>Finalizar</button></>
-              )}
-            </div>
-            <p className="mt-3 text-[10px] opacity-70">Contratante fez Pix 1h antes (variável TEMPO_PAGAMENTO_ANTECEDENCIA_MINUTOS). Freela recebe ao finalizar. Código confirmação início/fim entre contratante e freela. EFI escrow.</p>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

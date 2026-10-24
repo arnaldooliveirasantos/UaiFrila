@@ -7,6 +7,7 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
   const [menuAberto, setMenuAberto] = useState(false);
   
   const menu = [    { id: 'mural', label: 'Mural', auth: true },
+    { id: 'perfil', label: 'Meu Perfil', auth: true },
     { id: 'publicar', label: 'Publicar', role: 'contratante' },
     { id: 'candidatos', label: 'Candidatos', role: 'contratante' },
     { id: 'trampos', label: 'Meus Trampos', auth: true },
@@ -29,7 +30,7 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
   return (
     <nav className={`fixed top-0 left-0 right-0 z-50 backdrop-blur-md border-b-2 ${isDark ? 'border-[#0066FF]/50 bg-black/95' : 'border-black bg-white/95 shadow-sm'}`}>
       <div className="max-w-7xl mx-auto px-4 h-[72px] flex items-center justify-between">
-        <div className="flex items-center gap-3 cursor-pointer" onClick={() => handleNav('home')}>
+        <div className="flex items-center gap-3 cursor-pointer" onClick={() => handleNav(usuario ? 'mural' : 'home')}>
           <LogoIcone size={44} />
           <span className={`font-black text-xl tracking-tighter hidden sm:block ${isDark ? 'text-white' : 'text-black'}`}>UAI FRILA</span>
         </div>
