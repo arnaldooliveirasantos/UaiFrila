@@ -1,1 +1,20 @@
-export default function LogoIcone({ size=24 }: { size?: number }) { return <div style={{ width: size, height: size }} className="bg-black dark:bg-[#0066FF] text-white dark:text-white font-black flex items-center justify-center border-2 border-black dark:border-[#0066FF]">UF</div>; }
+import React from "react";
+export default function LogoIcone({ size = 44 }: { size?: number }) {
+  return (
+    <img
+      src="/icone_uaifrila.png"
+      alt="Uai Frila"
+      width={size}
+      height={size}
+      className="object-contain rounded-xl"
+      style={{ width: size, height: size }}
+      onError={(e) => {
+        const target = e.target as HTMLImageElement;
+        target.src = new URL(
+          "../assets/icone_uaifrila.png",
+          import.meta.url,
+        ).href;
+      }}
+    />
+  );
+}

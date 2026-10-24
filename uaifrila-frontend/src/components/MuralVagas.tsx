@@ -8,7 +8,7 @@ export default function MuralVagas({ tipoUsuario }: { tipoUsuario?: any }) {
   const [vagas, setVagas] = useState<Vaga[]>([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState('');
-  const API = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+  const API = import.meta.env.VITE_API_URL ;
 
   useEffect(() => {
     const buscar = async () => {
