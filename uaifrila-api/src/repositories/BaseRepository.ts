@@ -27,4 +27,9 @@ export abstract class BaseRepository {
       client.release();
     }
   }
+
+  protected async queryOne(text: string, params?: any[]) {
+    const rows = await this.query(text, params);
+    return rows[0] || null;
+  }
 }
