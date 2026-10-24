@@ -14,12 +14,20 @@ export class AuthRepository extends BaseRepository {
   async garantirStatusUsuario() {
     try {
       await this.query(`SELECT id FROM status_usuario LIMIT 1`);
-    } catch {
+    } catch (e:any) {
+      if (e.code === '42501') {
+        console.warn('⚠️ Sem permissão para garantir status_usuario - tabela deve ser criada via script SQL como superuser');
+        return;
+      }
       try {
         await this.query(`CREATE TABLE IF NOT EXISTS status_usuario (id SERIAL PRIMARY KEY, chave VARCHAR(50) UNIQUE NOT NULL, nome_exibicao VARCHAR(100) NOT NULL, descricao TEXT, cor_hex VARCHAR(20), ordem INT DEFAULT 0, criado_em TIMESTAMP DEFAULT NOW())`);
         await this.query(`INSERT INTO status_usuario (chave, nome_exibicao, descricao, cor_hex, ordem) VALUES ('AGUARDANDO_VALIDACAO', 'Aguardando Validação', 'Usuário cadastrado mas ainda não validou e-mail', '#FFC700', 1), ('ATIVO', 'Ativo', 'Usuário validado e ativo', '#00C851', 2), ('INATIVO', 'Inativo', 'Desativado', '#9E9E9E', 3), ('BLOQUEADO', 'Bloqueado', 'Bloqueado por violação', '#E53935', 4), ('SUSPENSO', 'Suspenso', 'Suspenso temporariamente', '#FF6D00', 5) ON CONFLICT (chave) DO NOTHING`);
-      } catch {}
-      try { await this.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS status_usuario_id INT`); } catch {}
+      } catch (e2:any) {
+        if (e2.code !== '42501') console.warn('Erro criar status_usuario', e2.message);
+      }
+      try { await this.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS status_usuario_id INT`); } catch (e3:any) {
+        if (e3.code !== '42501') console.warn('Erro add column', e3.message);
+      }
     }
   }
 
@@ -33,10 +41,14 @@ export class AuthRepository extends BaseRepository {
     return map[chave.toUpperCase()] || 1;
   }
 
-  // Busca completa com todos campos incluindo CPF
+  // Busca completa com todos campos incluindo CPF - SAFE sem DDL em caso de permissão negada
   async buscarUsuarioPorEmail(email: string) {
     const emailLimpo = email.trim().toLowerCase();
-    await this.garantirStatusUsuario();
+    try {
+      await this.garantirStatusUsuario();
+    } catch (e:any) {
+      if (e.code !== '42501') console.warn('garantirStatusUsuario falhou:', e.message);
+    }
     try {
       return await this.query(`
         SELECT u.id, u.email, u.nome_completo, u.cpf, u.cnpj, u.nome_fantasia, u.bairro, u.endereco_completo, u.endereco_lat, u.endereco_lng, u.cidade_id, u.cidade_nome, u.funcao_principal, u.valor_hora_base, u.bio,
@@ -47,10 +59,17 @@ export class AuthRepository extends BaseRepository {
         WHERE LOWER(TRIM(u.email)) = $1
       `, [emailLimpo]);
     } catch (e:any) {
+      if (e.code === '42501') {
+        // Permissão negada - não tenta CREATE TABLE, só lança erro claro
+        console.error('❌ 42501 - permissão negada para esquema public. Rode FIX_42501_permissao_public.sql como postgres');
+        throw new Error('Erro de permissão no banco (42501). Rode como superuser: GRANT ALL ON SCHEMA public TO PUBLIC;');
+      }
       try {
         return await this.query(`SELECT id, email, nome_completo, cpf, cnpj, nome_fantasia, bairro, endereco_completo, cidade_nome, funcao_principal, valor_hora_base, is_freela, is_contratante, is_admin, status_usuario_id FROM usuarios WHERE LOWER(TRIM(email)) = $1`, [emailLimpo]);
-      } catch {
-        await this.query(`CREATE TABLE IF NOT EXISTS usuarios (id SERIAL PRIMARY KEY, nome_completo VARCHAR(150), cpf VARCHAR(14), email VARCHAR(150) UNIQUE, senha_hash VARCHAR(255), cnpj VARCHAR(18), nome_fantasia VARCHAR(150), is_freela BOOLEAN DEFAULT FALSE, is_contratante BOOLEAN DEFAULT FALSE, is_admin BOOLEAN DEFAULT FALSE, status_usuario_id INT, status VARCHAR(20), bairro VARCHAR(100), funcao_principal VARCHAR(50), valor_hora_base NUMERIC(10,2), bio TEXT, criado_em TIMESTAMP DEFAULT NOW())`);
+      } catch (e2:any) {
+        if (e2.code === '42501') throw new Error('Erro de permissão no banco (42501). Rode FIX como postgres');
+        // Último fallback sem criar tabela se não tem permissão
+        console.warn('Fallback simples buscarUsuarioPorEmail');
         return await this.query(`SELECT id, email, nome_completo, cpf FROM usuarios WHERE LOWER(TRIM(email)) = $1`, [emailLimpo]);
       }
     }
@@ -167,29 +186,71 @@ export class AuthRepository extends BaseRepository {
   }
 
 
-  async garantirColunasEndereco() {
+async garantirColunasEndereco() {
     try { await this.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS endereco_completo TEXT`); } catch {}
     try { await this.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS endereco_lat DOUBLE PRECISION`); } catch {}
     try { await this.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS endereco_lng DOUBLE PRECISION`); } catch {}
     try { await this.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS cidade_id INT`); } catch {}
     try { await this.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS cidade_nome VARCHAR(100)`); } catch {}
-    try { await this.query(`CREATE TABLE IF NOT EXISTS cidades_ativas (id SERIAL PRIMARY KEY, nome VARCHAR(100) NOT NULL, estado VARCHAR(2) DEFAULT 'MG', ativa BOOLEAN DEFAULT true, lat DOUBLE PRECISION, lng DOUBLE PRECISION, raio_km INT DEFAULT 20, criado_em TIMESTAMP DEFAULT NOW())`); } catch {}
+
+    // TABELA CIDADES JÁ EXISTENTE - inclui campos de cidade ativa aqui, não cria cidades_ativas separada
     try {
-      const count = await this.queryOne(`SELECT COUNT(*) as total FROM cidades_ativas`);
+      await this.query(`
+        CREATE TABLE IF NOT EXISTS cidades (
+          id SERIAL PRIMARY KEY,
+          nome VARCHAR(100) NOT NULL,
+          estado VARCHAR(2) DEFAULT 'MG',
+          codigo_ibge VARCHAR(10),
+          ativa BOOLEAN DEFAULT true,
+          lat DOUBLE PRECISION,
+          lng DOUBLE PRECISION,
+          raio_km INT DEFAULT 20,
+          populacao INT,
+          regiao VARCHAR(50),
+          criado_em TIMESTAMP DEFAULT NOW(),
+          atualizado_em TIMESTAMP DEFAULT NOW()
+        )
+      `);
+    } catch {}
+    // Adiciona colunas se tabela já existia antiga sem esses campos
+    try { await this.query(`ALTER TABLE cidades ADD COLUMN IF NOT EXISTS ativa BOOLEAN DEFAULT true`); } catch {}
+    try { await this.query(`ALTER TABLE cidades ADD COLUMN IF NOT EXISTS lat DOUBLE PRECISION`); } catch {}
+    try { await this.query(`ALTER TABLE cidades ADD COLUMN IF NOT EXISTS lng DOUBLE PRECISION`); } catch {}
+    try { await this.query(`ALTER TABLE cidades ADD COLUMN IF NOT EXISTS raio_km INT DEFAULT 20`); } catch {}
+    try { await this.query(`ALTER TABLE cidades ADD COLUMN IF NOT EXISTS codigo_ibge VARCHAR(10)`); } catch {}
+    try { await this.query(`ALTER TABLE cidades ADD COLUMN IF NOT EXISTS populacao INT`); } catch {}
+    try { await this.query(`ALTER TABLE cidades ADD COLUMN IF NOT EXISTS regiao VARCHAR(50)`); } catch {}
+    try { await this.query(`ALTER TABLE cidades ADD COLUMN IF NOT EXISTS atualizado_em TIMESTAMP DEFAULT NOW()`); } catch {}
+
+    // Migra dados de cidades_ativas antiga para cidades se existir
+    try {
+      const antigaExiste = await this.query(`SELECT to_regclass('cidades_ativas') as tabela`);
+      if (antigaExiste[0]?.tabela) {
+        const dadosAntigos = await this.query(`SELECT nome, estado, ativa, lat, lng, raio_km FROM cidades_ativas`);
+        for (const c of dadosAntigos) {
+          await this.query(`INSERT INTO cidades (nome, estado, ativa, lat, lng, raio_km) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`, [c.nome, c.estado, c.ativa, c.lat, c.lng, c.raio_km || 20]);
+        }
+      }
+    } catch {}
+
+    // Seed inicial se vazia
+    try {
+      const count = await this.queryOne(`SELECT COUNT(*) as total FROM cidades`);
       if (!count || Number(count.total) === 0) {
-        await this.query(`INSERT INTO cidades_ativas (nome, estado, ativa, lat, lng) VALUES 
-          ('Uberlândia', 'MG', true, -18.9186, -48.2772),
-          ('Uberaba', 'MG', true, -19.7476, -47.9381),
-          ('Araguari', 'MG', true, -18.6455, -48.1873)
+        await this.query(`INSERT INTO cidades (nome, estado, ativa, lat, lng, raio_km, regiao) VALUES 
+          ('Uberlândia', 'MG', true, -18.9186, -48.2772, 25, 'Triângulo Mineiro'),
+          ('Uberaba', 'MG', true, -19.7476, -47.9381, 20, 'Triângulo Mineiro'),
+          ('Araguari', 'MG', true, -18.6455, -48.1873, 15, 'Triângulo Mineiro')
           ON CONFLICT DO NOTHING`);
       }
     } catch {}
   }
 
+
   async buscarCidadesAtivas() {
     await this.garantirColunasEndereco();
     try {
-      return await this.query(`SELECT id, nome, estado, lat, lng, raio_km FROM cidades_ativas WHERE ativa = true ORDER BY nome`);
+      return await this.query(`SELECT id, nome, estado, lat, lng, raio_km, codigo_ibge, populacao, regiao FROM cidades WHERE ativa = true ORDER BY nome`);
     } catch {
       return [{ id: 1, nome: 'Uberlândia', estado: 'MG', lat: -18.9186, lng: -48.2772, raio_km: 20 }];
     }
@@ -249,7 +310,7 @@ export class AuthRepository extends BaseRepository {
       return await this.query(`
         SELECT eu.*, ca.nome as cidade_nome_real, ca.estado, ca.lat as cidade_lat, ca.lng as cidade_lng
         FROM enderecos_usuario eu
-        LEFT JOIN cidades_ativas ca ON ca.id = eu.cidade_id
+        LEFT JOIN cidades ca ON ca.id = eu.cidade_id
         WHERE eu.usuario_id = $1
         ORDER BY eu.is_ativo DESC, eu.atualizado_em DESC
       `, [usuarioId]);
@@ -428,7 +489,31 @@ export class AuthRepository extends BaseRepository {
     try { const rows = await this.query(`SELECT id FROM email_templates WHERE chave_uso = $1 LIMIT 1`, [chaveUso]); return rows.length > 0; } catch { return false; }
   }
   async buscarTemplatePorUso(chaveUso: string) {
-    return await this.query(`SELECT id, titulo_assunto, conteudo_corpo FROM email_templates WHERE chave_uso = $1 LIMIT 1`, [chaveUso]);
+    try {
+      return await this.query(`SELECT id, chave_uso, titulo_assunto, conteudo_corpo, email_remetente, nome_remetente FROM email_templates WHERE chave_uso = $1 LIMIT 1`, [chaveUso]);
+    } catch (e:any) {
+      // Fallback se coluna email_remetente ainda não existe (rode o FIX SQL)
+      console.warn('⚠️ email_remetente não existe, usando fallback. Rode FIX_email_templates_remetente.sql');
+      return await this.query(`SELECT id, titulo_assunto, conteudo_corpo, 'noreply@uaifrila.com.br' as email_remetente, 'UAI FRILA' as nome_remetente FROM email_templates WHERE chave_uso = $1 LIMIT 1`, [chaveUso]);
+    }
+  }
+
+  async buscarTemplateCompletoPorUso(chaveUso: string) {
+    // Versão completa com JOIN para worker - usa t.email_remetente
+    return await this.query(`
+      SELECT 
+        t.id,
+        t.chave_uso,
+        t.titulo_assunto,
+        t.conteudo_corpo,
+        t.email_remetente as t_email_remetente,
+        t.email_remetente,
+        t.nome_remetente,
+        COALESCE(t.email_remetente, 'noreply@uaifrila.com.br') as remetente_final
+      FROM email_templates t 
+      WHERE t.chave_uso = $1 
+      LIMIT 1
+    `, [chaveUso]);
   }
   async garantirColunaDadosCadastro() {
     try { await this.query(`ALTER TABLE email_historico_disparos ADD COLUMN IF NOT EXISTS dados_cadastro JSONB`); } catch {}
@@ -437,18 +522,31 @@ export class AuthRepository extends BaseRepository {
   async inserirDisparoCadastro(templateId: number, email: string, titulo: string, corpo: string, codigo: string, minutos: number, dadosCadastro: any) {
     const emailLimpo = email.trim().toLowerCase();
     await this.garantirColunaDadosCadastro();
+    // Garante coluna email_remetente
+    try { await this.query(`ALTER TABLE email_historico_disparos ADD COLUMN IF NOT EXISTS email_remetente VARCHAR(150)`); } catch {}
+    try { await this.query(`ALTER TABLE email_historico_disparos ADD COLUMN IF NOT EXISTS tentativas INT DEFAULT 0`); } catch {}
+    try { await this.query(`ALTER TABLE email_historico_disparos ADD COLUMN IF NOT EXISTS ultimo_erro TEXT`); } catch {}
+    
     const usuarioRows = await this.buscarUsuarioPorEmail(emailLimpo);
     const usuarioId = usuarioRows[0]?.id || null;
+    
+    // Busca email_remetente do template (t.email_remetente)
+    let emailRemetente = 'noreply@uaifrila.com.br';
+    try {
+      const tmpl = await this.queryOne(`SELECT email_remetente FROM email_templates WHERE id = $1`, [templateId]);
+      if (tmpl?.email_remetente) emailRemetente = tmpl.email_remetente;
+    } catch {}
+    
     try {
       let statusId = null;
       try { const s = await this.queryOne(`SELECT id FROM email_status WHERE chave='EM_ESPERA'`); statusId = s?.id; } catch {}
       if (statusId) {
-        return await this.query(`INSERT INTO email_historico_disparos (template_id, usuario_id, email_destinatario, titulo_final, conteudo_final, codigo_verificacao, status_id, expira_em, criado_em, dados_cadastro) VALUES ($1,$2,$3,$4,$5,$6,$7, NOW() + ($8 || ' minutes')::interval, NOW(), $9) RETURNING id`, [templateId, usuarioId, emailLimpo, titulo, corpo, codigo, statusId, minutos, JSON.stringify(dadosCadastro)]);
+        return await this.query(`INSERT INTO email_historico_disparos (template_id, usuario_id, email_destinatario, titulo_final, conteudo_final, codigo_verificacao, status_id, expira_em, criado_em, dados_cadastro, email_remetente, tentativas) VALUES ($1,$2,$3,$4,$5,$6,$7, NOW() + ($8 || ' minutes')::interval, NOW(), $9, $10, 0) RETURNING id`, [templateId, usuarioId, emailLimpo, titulo, corpo, codigo, statusId, minutos, JSON.stringify(dadosCadastro), emailRemetente]);
       } else {
-        return await this.query(`INSERT INTO email_historico_disparos (template_id, usuario_id, email_destinatario, titulo_final, conteudo_final, codigo_verificacao, expira_em, criado_em, dados_cadastro) VALUES ($1,$2,$3,$4,$5,$6, NOW() + ($7 || ' minutes')::interval, NOW(), $8) RETURNING id`, [templateId, usuarioId, emailLimpo, titulo, corpo, codigo, minutos, JSON.stringify(dadosCadastro)]);
+        return await this.query(`INSERT INTO email_historico_disparos (template_id, usuario_id, email_destinatario, titulo_final, conteudo_final, codigo_verificacao, expira_em, criado_em, dados_cadastro, email_remetente, tentativas) VALUES ($1,$2,$3,$4,$5,$6, NOW() + ($7 || ' minutes')::interval, NOW(), $8, $9, 0) RETURNING id`, [templateId, usuarioId, emailLimpo, titulo, corpo, codigo, minutos, JSON.stringify(dadosCadastro), emailRemetente]);
       }
     } catch (e:any) {
-      return await this.query(`INSERT INTO email_historico_disparos (template_id, email_destinatario, titulo_final, conteudo_final, codigo_verificacao) VALUES ($1,$2,$3,$4,$5) RETURNING id`, [templateId, emailLimpo, titulo, corpo, codigo]);
+      return await this.query(`INSERT INTO email_historico_disparos (template_id, email_destinatario, titulo_final, conteudo_final, codigo_verificacao, email_remetente, tentativas) VALUES ($1,$2,$3,$4,$5,$6,0) RETURNING id`, [templateId, emailLimpo, titulo, corpo, codigo, emailRemetente]);
     }
   }
   async inserirDisparoLogin(templateId: number, usuarioId: number, email: string, titulo: string, corpo: string, codigo: string, minutos: number) {
