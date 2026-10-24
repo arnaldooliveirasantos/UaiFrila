@@ -3,6 +3,7 @@ import cors from 'cors';
 import { VagaController } from './controllers/VagaController';
 import { MuralVagasController } from './controllers/MuralVagasController';
 import { CidadeController } from './controllers/CidadeController';
+import { EnderecoController } from './controllers/EnderecoController';
 import { AdminFinanceiroController } from './controllers/AdminFinanceiroController';
 import { AuthController } from './controllers/AuthController';
 import { OperacaoController } from './controllers/OperacaoController';
@@ -33,6 +34,7 @@ export class App {
     const vagaCtrl = new VagaController();
     const muralCtrl = new MuralVagasController();
     const cidadeCtrl = new CidadeController();
+    const enderecoCtrl = new EnderecoController();
     const finCtrl = new AdminFinanceiroController();
     const authCtrl = new AuthController();
     const operacaoCtrl = new OperacaoController();
@@ -54,6 +56,16 @@ export class App {
     this.expressApp.get('/api/chat/historico/:vagaId', authMiddleware, (req,res)=>operacaoCtrl.historicoChat(req,res));
     this.expressApp.post('/api/admin/geografia', authMiddleware, (req,res)=>cidadeCtrl.listarGeografia(req,res));
     this.expressApp.put('/api/admin/cidade/:id', authMiddleware, (req,res)=>cidadeCtrl.atualizarStatus(req,res));
+    this.expressApp.get('/api/cidades/ativas', (req,res)=>cidadeCtrl.listarAtivas(req,res));
+    this.expressApp.get('/api/cidades/geografia', authMiddleware, (req,res)=>cidadeCtrl.listarGeografia(req,res));
+    this.expressApp.post('/api/cidades/validar-endereco', (req,res)=>cidadeCtrl.validarEndereco(req,res));
+    // Endereços usuário - nova tabela enderecos_usuario, só um ativo, bloqueia se trampo em andamento
+    this.expressApp.get('/api/enderecos', authMiddleware, (req,res)=>enderecoCtrl.listar(req,res));
+    this.expressApp.post('/api/enderecos', authMiddleware, (req,res)=>enderecoCtrl.criar(req,res));
+    this.expressApp.put('/api/enderecos/:id', authMiddleware, (req,res)=>enderecoCtrl.atualizar(req,res));
+    this.expressApp.put('/api/enderecos/:id/ativar', authMiddleware, (req,res)=>enderecoCtrl.ativar(req,res));
+    this.expressApp.delete('/api/enderecos/:id', authMiddleware, (req,res)=>enderecoCtrl.deletar(req,res));
+    this.expressApp.get('/api/enderecos/verificar-trampo', authMiddleware, (req,res)=>enderecoCtrl.verificarTrampo(req,res));
     this.expressApp.post('/api/admin/variaveis', authMiddleware, (req,res)=>finCtrl.obterVariaveis(req,res));
     this.expressApp.put('/api/admin/variaveis', authMiddleware, (req,res)=>finCtrl.salvarVariavel(req,res));
     this.expressApp.get('/api/admin/transacoes', authMiddleware, (req,res)=>finCtrl.relatorioTransacoes(req,res));

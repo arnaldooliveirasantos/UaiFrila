@@ -5,7 +5,20 @@ export class AuthService {
   private authRepo = new AuthRepository();
 
   async registrar(dados: any) {
-    const { nome, cpf, email, senha } = dados;
+    // Validar cidade ativa se informou endereço
+    if (dados.cidade || dados.cidade_nome) {
+      const cidadeNome = dados.cidade_nome || dados.cidade;
+      const cidades = await this.authRepo.buscarCidadesAtivas();
+      const existe = cidades.some((c:any) => c.nome.toLowerCase() === cidadeNome.toLowerCase());
+      if (!existe) {
+        throw new Error(`Cidade ${cidadeNome} não está ativa. Cidades ativas: ${cidades.map((c:any)=>c.nome).join(', ')}`);
+      }
+      if (dados.lat && dados.lng) {
+        const valido = await this.authRepo.validarEnderecoNaCidadeAtiva(cidadeNome, Number(dados.lat), Number(dados.lng));
+        if (!valido) throw new Error(`Endereço fora do raio da cidade ${cidadeNome}`);
+      }
+    }
+    const { nome, cpf, email, senha = 'validacao_sistema_senha_interna' } = dados; // senha removida do frontend - login por validação
     const emailLimpo = email?.trim().toLowerCase();
     if (!emailLimpo || !emailLimpo.includes('@')) throw new Error('E-mail inválido');
     if (!nome) throw new Error('Nome obrigatório');
@@ -75,6 +88,25 @@ export class AuthService {
   }
 
   async atualizarUsuario(id: number, dados: any, usuarioLogado: any) {
+    // Verifica se está tentando alterar endereço e tem trampo em andamento - bloqueia
+    const tentaAlterarEndereco = !!(dados.endereco || dados.endereco_completo || dados.cidade || dados.cidade_nome || dados.lat || dados.lng || dados.endereco_lat);
+    if (tentaAlterarEndereco) {
+      const trampo = await this.authRepo.verificarTrampoEmAndamento(id);
+      if (trampo.em_andamento) {
+        throw new Error('Não é possível alterar endereço enquanto houver trampo em andamento. Finalize seus trampos ativos.');
+      }
+    }
+    // Validar endereço na cidade ativa se estiver atualizando
+    if (dados.cidade || dados.cidade_nome || dados.cidade_id) {
+      const cidadeNome = dados.cidade_nome || dados.cidade;
+      if (cidadeNome) {
+        const cidades = await this.authRepo.buscarCidadesAtivas();
+        const existe = cidades.some((c:any) => c.nome.toLowerCase() === cidadeNome.toLowerCase() || c.id === dados.cidade_id);
+        if (!existe) {
+          throw new Error(`Cidade ${cidadeNome} não está ativa`);
+        }
+      }
+    }
     // Bloqueia atualização de CPF e EMAIL na API
     if (dados.cpf !== undefined || dados.email !== undefined || dados.cpfOriginal !== undefined) {
       console.log('🚫 Tentativa de atualizar CPF ou EMAIL bloqueada pela API');
