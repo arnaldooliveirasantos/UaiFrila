@@ -6,20 +6,18 @@ interface Transacao { id: number; funcao: string; local: string; total: number; 
 export const PainelAdminFinanceiro: React.FC = () => {
     const [taxas, setTaxas] = useState<Taxa[]>([]);
     const [transacoes, setTransacoes] = useState<Transacao[]>([]);
+    const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
     useEffect(() => {
         const token = localStorage.getItem('@UaiFrila:token');
-        
-        // Dispara requisições injetando o cabeçalho Authorization exigido pela API
         const carregarFinanceiro = async () => {
             try {
-                const resTaxas = await fetch('http://localhost:3000/api/admin/variaveis', {
+                const resTaxas = await fetch(`${API_BASE}/admin/variaveis`, {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
                 });
                 if (resTaxas.ok) setTaxas(await resTaxas.json());
-
-                const resTrans = await fetch('http://localhost:3000/api/admin/transacoes?inicio=2026-01-01&fim=2026-12-31', {
+                const resTrans = await fetch(`${API_BASE}/admin/transacoes?inicio=2026-01-01&fim=2026-12-31`, {
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
                 if (resTrans.ok) setTransacoes(await resTrans.json());
@@ -28,7 +26,7 @@ export const PainelAdminFinanceiro: React.FC = () => {
             }
         };
         carregarFinanceiro();
-    }, []);
+    }, [API_BASE]);
 
     return (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 my-4 text-white font-sans">
@@ -44,18 +42,15 @@ export const PainelAdminFinanceiro: React.FC = () => {
                      ))}
                 </div>
             </div>
-
             <div className="w-full bg-black border border-gray-800 p-6 rounded-2xl">
-                <h2 className="text-sm font-black uppercase text-[#0066FF] mb-4">💰 Auditoria Financeira de Custódia</h2>
+                <h2 className="text-sm font-black uppercase text-[#0066FF] mb-4">💰 Auditoria Financeira</h2>
                 <div className="overflow-x-auto text-xs">
                     <table className="w-full text-left border-collapse">
-                        <thead>
-                            <tr className="border-b border-gray-800 text-gray-500 font-bold uppercase text-[10px]"><th className="pb-2">Serviço</th><th className="pb-2 text-right">Faturamento</th><th className="pb-2 text-right">Escrow Retido</th></tr>
-                        </thead>
+                        <thead><tr className="border-b border-gray-800 text-gray-500 font-bold uppercase text-[10px]"><th className="pb-2">Serviço</th><th className="pb-2 text-right">Faturamento</th><th className="pb-2 text-right">Escrow</th></tr></thead>
                         <tbody>
-                            {transacoes.length === 0 ? <tr><td colSpan={3} className="pt-4 text-gray-500 text-center">Nenhuma movimentação no período lida da API.</td></tr> :
+                            {transacoes.length === 0 ? <tr><td colSpan={3} className="pt-4 text-gray-500 text-center">Nenhuma movimentação.</td></tr> :
                              transacoes.map(t => (
-                                <tr key={t.id} className="border-b border-gray-900"><td className="py-2"><strong>{t.funcao}</strong><br/><span className="text-[10px] text-gray-500">{t.local}</span></td><td className="py-2 text-right font-bold">R\$ {t.total.toFixed(2)}</td><td className="py-2 text-right font-bold text-blue-400">R\$ {t.tax.toFixed(2)}</td></tr>
+                                <tr key={t.id} className="border-b border-gray-900"><td className="py-2"><strong>{t.funcao}</strong><br/><span className="text-[10px] text-gray-500">{t.local}</span></td><td className="py-2 text-right font-bold">R$ {t.total.toFixed(2)}</td><td className="py-2 text-right font-bold text-blue-400">R$ {t.tax.toFixed(2)}</td></tr>
                              ))}
                         </tbody>
                     </table>

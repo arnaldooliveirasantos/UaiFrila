@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS email_templates (
 );
 
 INSERT INTO email_templates (chave_uso, email_remetente, nome_exibicao, titulo_assunto, conteudo_corpo) VALUES
-('CONFIRMACAO_CADASTRO', 'nao-responda@uaifrila.com.br', 'UAI FRILA - Cadastro', 'Ative sua conta UAI FRILA', 'Olá {' || '{NOME}}, seu código de ativação de cadastro é: {' || '{CODIGO}}'),
+('CONFIRMACAO_CADASTRO', 'nao-responda@uaifrila.com.br', 'UAI FRILA - Cadastro', 'Ative sua conta UAI FRILA', 'Olá {{NOME}}', seu código de ativação de cadastro é: {' || '{CODIGO}}'),
 ('2FA_LOGIN', 'seguranca@uaifrila.com.br', 'UAI FRILA - Segurança', 'Código de Acesso 2FA', 'Seu token de autenticação de dois fatores é: {' || '{CODIGO}}')
 ON CONFLICT (chave_uso) DO UPDATE SET conteudo_corpo = EXCLUDED.conteudo_corpo;
 

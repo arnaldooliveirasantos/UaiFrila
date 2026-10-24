@@ -1,68 +1,66 @@
 import express from 'express';
 import cors from 'cors';
-import { MuralVagasController } from './controllers/MuralVagasController';
+import { VagaController } from './controllers/VagaController';
 import { CidadeController } from './controllers/CidadeController';
+import { AdminFinanceiroController } from './controllers/AdminFinanceiroController';
 import { AuthController } from './controllers/AuthController';
 import { OperacaoController } from './controllers/OperacaoController';
 import { TermoController } from './controllers/TermoController';
+import { authMiddleware } from './middlewares/AuthMiddleware';
 
 export class App {
     public expressApp: express.Application = express();
 
     constructor() {
         this.expressApp.use(express.json());
-        this.configurarCors();
+        this.configurarCorsEstrito();
         this.configurarRotas();
     }
 
-    private configurarCors() {
-        const origens = (process.env.CORS_ALLOWED_ORIGINS || '').split(',');
+    private configurarCorsEstrito() {
+        const origensConfiguradas = process.env.CORS_ALLOWED_ORIGINS;
+        const listaOrigens = origensConfiguradas.split(',');
+
         this.expressApp.use(cors({
-            origin: (o, cb) => (!o || origens.indexOf(o) !== -1) ? cb(null, true) : cb(null, true), // Aberto para desenvolvimento local
+            origin: (origin, callback) => {
+                if (!origin) return callback(null, true);
+                if (listaOrigens.indexOf(origin) !== -1) {
+                    callback(null, true);
+                } else {
+                    callback(new Error('Bloqueado por restrição estrita de ambiente CORS'));
+                }
+            },
             methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-            allowedHeaders: ['Content-Type', 'Authorization']
+            allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
         }));
     }
 
     private configurarRotas() {
-        const muralCtrl = new MuralVagasController();
+        const vagaCtrl = new VagaController();
         const cidadeCtrl = new CidadeController();
+        const finCtrl = new AdminFinanceiroController();
         const authCtrl = new AuthController();
         const operacaoCtrl = new OperacaoController();
         const termoCtrl = new TermoController();
 
-        // 🔐 Rotas Públicas (Encapsuladas com verificação para evitar falhas se o método não existir)
-        this.expressApp.post('/api/usuarios/registrar', (req, res, next) => {
-            if (typeof authCtrl.registrar === 'function') return authCtrl.registrar(req, res);
-            res.status(501).json({ erro: "Método 'registrar' ainda não implementado na Controller." });
-        });
+        // 🔐 Rotas Públicas (Livres de token para registro e validação de credenciais)
+        this.expressApp.post('/api/usuarios/registrar', (req, res) => authCtrl.registrar(req, res));
+        this.expressApp.post('/api/auth/login', (req, res) => authCtrl.login(req, res));
+        this.expressApp.post('/api/auth/verificar-2fa', (req, res) => authCtrl.verificarToken2FA(req, res));
+        this.expressApp.get('/api/termos/vigente/:tipoId', (req, res) => termoCtrl.obterTermoVigente(req, res));
 
-        this.expressApp.post('/api/auth/login', (req, res, next) => {
-            if (typeof authCtrl.login === 'function') return authCtrl.login(req, res);
-            res.status(501).json({ erro: "Método 'login' ainda não implementado na Controller." });
-        });
+        // 🏃 Rotas do Mural e Candidaturas Protegidas
+        this.expressApp.post('/api/vagas/mural', authMiddleware, (req, res) => vagaCtrl.listarMural(req, res));
+        this.expressApp.post('/api/vagas/candidatar', authMiddleware, (req, res) => operacaoCtrl.candidatar(req, res));
+        this.expressApp.post('/api/vagas/aceitar', authMiddleware, (req, res) => operacaoCtrl.aceitar(req, res));
+        this.expressApp.get('/api/chat/historico/:vagaId', authMiddleware, (req, res) => operacaoCtrl.historicoChat(req, res));
 
-        this.expressApp.post('/api/auth/verificar-2fa', (req, res, next) => {
-            // Mapeia de forma flexível aceitando tanto verificarTokenEmail quanto verificarToken2FA
-            const métodoToken = authCtrl.verificarTokenEmail || (authCtrl as any).verificarToken2FA;
-            if (typeof métodoToken === 'function') return métodoToken(req, res);
-            res.status(501).json({ erro: "Método de verificação 2FA não localizado na Controller." });
-        });
-
-        // 🏃 Rotas Operacionais do Mural e Matches
-        this.expressApp.post('/api/vagas/mural', (req, res, next) => {
-            if (typeof muralCtrl.obterMural === 'function') return muralCtrl.obterMural(req, res);
-            res.status(501).json({ erro: "Método 'obterMural' não localizado." });
-        });
-
-        this.expressApp.post('/api/vagas/candidatar', (req, res, next) => {
-            if (typeof operacaoCtrl.candidatar === 'function') return operacaoCtrl.candidatar(req, res);
-            res.status(501).json({ erro: "Método 'candidatar' não localizado." });
-        });
-
-        this.expressApp.post('/api/vagas/aceitar', (req, res, next) => {
-            if (typeof operacaoCtrl.aceitar === 'function') return operacaoCtrl.aceitar(req, res);
-            res.status(501).json({ erro: "Método 'aceitar' não localizado." });
-        });
+        // ⚙️ Rotas Administrativas de Controle
+        this.expressApp.post('/api/admin/geografia', authMiddleware, (req, res) => cidadeCtrl.listarGeografia(req, res));
+        this.expressApp.put('/api/admin/cidade/:id', authMiddleware, (req, res) => cidadeCtrl.atualizarStatus(req, res));
+        this.expressApp.post('/api/admin/variaveis', authMiddleware, (req, res) => finCtrl.obterVariaveis(req, res));
+        this.expressApp.put('/api/admin/variaveis', authMiddleware, (req, res) => finCtrl.salvarVariavel(req, res));
+        this.expressApp.get('/api/admin/transacoes', authMiddleware, (req, res) => finCtrl.relatorioTransacoes(req, res));
+        this.expressApp.post('/api/admin/termos/salvar', authMiddleware, (req, res) => termoCtrl.salvarNovaVersaoTermo(req, res));
     }
 }

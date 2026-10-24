@@ -5,7 +5,8 @@ export default {
     extend: { 
       colors: { 
         claro: { vermelho: '#E53935', amarelo: '#FFC700' }, 
-        escuro: { azul: '#0066FF' } 
+        escuro: { azul: '#0066FF' },
+        brand: { red: '#E53935', yellow: '#FFC700', blue: '#0066FF' }
       } 
     } 
   },

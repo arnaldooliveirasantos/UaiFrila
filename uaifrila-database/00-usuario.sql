@@ -1,4 +1,5 @@
--- 1. Criação do Usuário/Role de Aplicação (Executar como superusuário 'postgres')
+-- 00 - Criação do usuário de aplicação
+-- Executar como superusuário postgres
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'uai_frila_app') THEN
@@ -8,9 +9,7 @@ BEGIN
     END IF;
 END
 $$;
-
--- 2. Concede privilégio de criação de tabelas e modificação do banco para o usuário
 ALTER ROLE uai_frila_app CREATEDB;
-
--- 3. Concede todas as permissões administrativas dentro do escopo do banco uai_frila
+-- Cria banco se não existir
+SELECT 'CREATE DATABASE uai_frila OWNER uai_frila_app' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'uai_frila')\gexec
 GRANT ALL PRIVILEGES ON DATABASE uai_frila TO uai_frila_app;
