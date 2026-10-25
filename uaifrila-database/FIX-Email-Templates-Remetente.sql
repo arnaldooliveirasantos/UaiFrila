@@ -19,7 +19,6 @@ ALTER TABLE email_historico_disparos ADD COLUMN IF NOT EXISTS tentativas INT DEF
 ALTER TABLE email_historico_disparos ADD COLUMN IF NOT EXISTS ultimo_erro TEXT;
 ALTER TABLE email_historico_disparos ADD COLUMN IF NOT EXISTS ultima_tentativa TIMESTAMP;
 ALTER TABLE email_historico_disparos ADD COLUMN IF NOT EXISTS enviado_em TIMESTAMP;
-ALTER TABLE email_historico_disparos ADD COLUMN IF NOT EXISTS status_envio VARCHAR(20) DEFAULT 'PENDENTE';
 ALTER TABLE email_historico_disparos ADD COLUMN IF NOT EXISTS email_remetente VARCHAR(150);
 ALTER TABLE email_historico_disparos ADD COLUMN IF NOT EXISTS dados_cadastro JSONB;
 ALTER TABLE email_historico_disparos ADD COLUMN IF NOT EXISTS usuario_id INT;
@@ -49,7 +48,7 @@ GRANT ALL PRIVILEGES ON TABLE email_historico_disparos TO email_worker_user;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO uaifrila_user;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO uai_frila_app;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO email_worker_user;
-
+/*
 -- 5. VERIFICAÇÃO
 SELECT '=== email_templates com remetente ===' as info;
 SELECT id, chave_uso, email_remetente, nome_remetente, titulo_assunto FROM email_templates ORDER BY id;
@@ -78,4 +77,4 @@ WHERE h.tentativas < 3
 ORDER BY h.criado_em DESC
 LIMIT 5;
 
-\echo '✅ FIX APLICADO - t.email_remetente agora vem de email_templates'
+\echo '✅ FIX APLICADO - t.email_remetente agora vem de email_templates'*/

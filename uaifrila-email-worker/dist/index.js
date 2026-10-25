@@ -12,30 +12,28 @@ const transportador = nodemailer_1.default.createTransport({
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT),
     secure: false,
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+    auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS
+    }
 });
 
+// FIX NaN - garante número válido mesmo se .env incompleto
 const MAX_TENTATIVAS = Number(process.env.MAX_TENTATIVAS) || 3;
+const BATCH = Number(process.env.WORKER_BATCH_SIZE) || 5;
+
+console.log(`🔧 Config: BATCH=${BATCH} MAX_TENTATIVAS=${MAX_TENTATIVAS} SMTP_USER=${process.env.SMTP_USER}`);
 
 async function processarFilaEmails() {
-    const client = new pg_1.Client({ 
-        user: process.env.DB_USER, 
-        password: process.env.DB_PASSWORD, 
-        host: process.env.DB_HOST, 
-        port: Number(process.env.DB_PORT), 
-        database: process.env.DB_NAME 
+    const client = new pg_1.Client({
+        user: process.env.DB_USER,
+        password: process.env.DB_PASSWORD,
+        host: process.env.DB_HOST,
+        port: Number(process.env.DB_PORT),
+        database: process.env.DB_NAME
     });
     try {
         await client.connect();
-        
-        // QUERY CORRIGIDA - FIX para h.tentativas e t.email_remetente
-        // Antes dava erro: coluna h.tentativas não existe, t.email_remetente não existe
-        // Agora:
-        // - h.tentativas existe (criada pelo FIX SQL)
-        // - t.email_remetente busca de email_templates (com COALESCE fallback)
-        // - t.nome_exibicao com fallback para nome_remetente
-        // - Adiciona filtro tentativas < MAX e expira_em
-        // - Adiciona FOR UPDATE SKIP LOCKED para evitar concorrência
         const queryFila = `
             SELECT 
                 h.id, 
@@ -43,88 +41,67 @@ async function processarFilaEmails() {
                 h.titulo_final, 
                 h.conteudo_final, 
                 h.tentativas,
-                h.email_remetente as h_email_remetente,
-                COALESCE(t.email_remetente, h.email_remetente, 'noreply@uaifrila.com.br') as email_remetente_final,
-                COALESCE(t.nome_remetente, t.nome_exibicao, 'UAI FRILA') as nome_exibicao_final,
-                t.email_remetente as t_email_remetente,
-                t.nome_exibicao,
+                $3::text as email_remetente,
                 t.nome_remetente,
                 t.chave_uso
             FROM email_historico_disparos h 
             JOIN email_templates t ON h.template_id = t.id
             WHERE 
                 h.status_id = (SELECT id FROM email_status WHERE chave = 'EM_ESPERA')
-                AND h.tentativas < $1
-                AND (h.expira_em IS NULL OR h.expira_em > NOW())
+                AND h.tentativas < $2::int
                 AND h.enviado_em IS NULL
+                AND (h.expira_em IS NULL OR h.expira_em > NOW())
             ORDER BY h.criado_em ASC 
-            LIMIT 5
+            LIMIT $1::int
             FOR UPDATE SKIP LOCKED
         `;
-        
-        const resultado = await client.query(queryFila, [MAX_TENTATIVAS]);
-        
-        console.log(`📬 ${resultado.rows.length} email(s) pendente(s)`);
-        
+        const resultado = await client.query(queryFila, [BATCH, MAX_TENTATIVAS, process.env.SMTP_USER]);
+        if (resultado.rows.length === 0)
+            return;
+        console.log(`📬 ${resultado.rows.length} email(s) - remetente ${process.env.SMTP_USER}`);
         for (const linha of resultado.rows) {
             try {
-                // Usa t.email_remetente vindo de email_templates (FIX PRINCIPAL)
-                const from = `"${linha.nome_exibicao_final}" <${linha.email_remetente_final}>`;
-                console.log(`📧 Enviando [${linha.id}] ${linha.chave_uso} para ${linha.email_destinatario} de ${from}`);
-                
-                await transportador.sendMail({ 
-                    from, 
-                    to: linha.email_destinatario, 
-                    subject: linha.titulo_final, 
-                    html: linha.conteudo_final 
+                console.log(`📧 [${linha.id}] ${linha.chave_uso} -> ${linha.email_destinatario} de ${linha.nome_remetente} <${linha.email_remetente}>`);
+                await transportador.sendMail({
+                    from: `"${linha.nome_remetente}" <${linha.email_remetente}>`,
+                    to: linha.email_destinatario,
+                    subject: linha.titulo_final,
+                    html: linha.conteudo_final
                 });
-                
                 await client.query(`
                     UPDATE email_historico_disparos 
-                    SET 
-                        status_id = (SELECT id FROM email_status WHERE chave = 'ENVIADO'), 
-                        enviado_em = NOW(),
-                        atualizado_em = NOW(),
-                        ultima_tentativa = NOW(),
+                    SET status_id = (SELECT id FROM email_status WHERE chave = 'ENVIADO'), 
+                        enviado_em = NOW(), 
+                        atualizado_em = NOW(), 
+                        ultima_tentativa = NOW(), 
                         tentativas = tentativas + 1,
-                        ultimo_erro = NULL,
-                        erro_mensagem = NULL
-                    WHERE id = $1
-                `, [linha.id]);
-                
-                console.log(`✅ [${linha.id}] Enviado para ${linha.email_destinatario}`);
-                
-            } catch (err) {
+                        email_remetente=$2::text
+                    WHERE id = $1::int
+                `, [linha.id, linha.email_remetente]);
+                console.log(`✅ [${linha.id}] Enviado de ${linha.email_remetente}`);
+            }
+            catch (err) {
                 console.error(`❌ [${linha.id}] Erro:`, err.message);
-                // Atualiza ambos erro_mensagem e ultimo_erro para compatibilidade
                 await client.query(`
                     UPDATE email_historico_disparos 
-                    SET 
-                        tentativas = $1, 
-                        ultimo_erro = $2,
-                        erro_mensagem = $2, 
-                        atualizado_em = NOW(),
+                    SET tentativas = $1::int, 
+                        ultimo_erro = $2::text, 
+                        atualizado_em = NOW(), 
                         ultima_tentativa = NOW(),
-                        status_id = CASE 
-                            WHEN $1 >= $4 THEN (SELECT id FROM email_status WHERE chave = 'EXPIRADO')
-                            ELSE status_id
-                        END
-                    WHERE id = $3
-                `, [linha.tentativas + 1, err.message.substring(0,500), linha.id, MAX_TENTATIVAS]);
+                        status_id = CASE WHEN $1::int >= $3::int THEN (SELECT id FROM email_status WHERE chave='EXPIRADO') ELSE status_id END
+                    WHERE id = $4::int
+                `, [linha.tentativas + 1, err.message.substring(0, 500), MAX_TENTATIVAS, linha.id]);
             }
         }
     }
     catch (error) {
-        console.error('🔥 Erro processar fila:', error.message);
-        if (error.message.includes('tentativas') || error.message.includes('email_remetente')) {
-            console.error('💡 Rode: psql -U postgres -d uai_frila -f FIX_FINAL_EMAIL_WORKER.sql');
-        }
+        console.error('🔥 Erro:', error.message);
+        throw error;
     }
     finally {
         await client.end();
     }
 }
-
-console.log('🚀 [Worker] Monitoramento Iniciado! v14.0 FIX - t.email_remetente de email_templates + h.tentativas');
+console.log(`🚀 Email Worker - email_remetente = SMTP_USER (${process.env.SMTP_USER}) - SEM FALLBACK`);
 processarFilaEmails();
 setInterval(async () => { await processarFilaEmails(); }, 10000);
