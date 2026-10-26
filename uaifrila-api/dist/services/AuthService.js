@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.AuthService = void 0;
 const AuthRepository_1 = require("../repositories/AuthRepository");
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
+const env_1 = require("../config/env");
 class AuthService {
     authRepo = new AuthRepository_1.AuthRepository();
     async registrar(dados) {
@@ -104,7 +105,7 @@ class AuthService {
             return { status: 'AGUARDANDO_VALIDACAO_EMAIL', email: emailLimpo };
         }
         catch (e) {
-            const token = jsonwebtoken_1.default.sign({ id: usuario.id, email: usuario.email, tipo_chave: usuario.tipo_chave, tipo_usuario_id: usuario.tipo_usuario_id, nivel_permissao: usuario.nivel_permissao, status_usuario_id: usuario.status_usuario_id }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
+            const token = jsonwebtoken_1.default.sign({ id: usuario.id, email: usuario.email, tipo_chave: usuario.tipo_chave, tipo_usuario_id: usuario.tipo_usuario_id, nivel_permissao: usuario.nivel_permissao, status_usuario_id: usuario.status_usuario_id }, env_1.config.JWT_SECRET, { expiresIn: '7d' });
             return { sucesso: true, token, usuario: { ...usuario, nome: usuario.nome_completo }, modo: 'login_direto_sem_2fa' };
         }
     }
@@ -175,7 +176,7 @@ class AuthService {
         await this.authRepo.marcarDisparoValidado(disparo.id);
         const usuarioAtivadoRows = await this.authRepo.ativarUsuarioPorEmail(emailLimpo);
         const usuario = usuarioAtivadoRows[0] || (await this.authRepo.buscarUsuarioPorEmail(emailLimpo))[0];
-        const token = jsonwebtoken_1.default.sign({ id: usuario.id, email: usuario.email, tipo_chave: usuario.tipo_chave, tipo_usuario_id: usuario.tipo_usuario_id, nivel_permissao: usuario.nivel_permissao, status_usuario_id: usuario.status_usuario_id }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
+        const token = jsonwebtoken_1.default.sign({ id: usuario.id, email: usuario.email, tipo_chave: usuario.tipo_chave, tipo_usuario_id: usuario.tipo_usuario_id, nivel_permissao: usuario.nivel_permissao, status_usuario_id: usuario.status_usuario_id }, env_1.config.JWT_SECRET, { expiresIn: '7d' });
         return { sucesso: true, token, usuario: { ...usuario, nome: usuario.nome_completo }, mensagem: 'Usuario ativado' };
     }
     async reenviarCodigo(email, tipo = 'cadastro') {

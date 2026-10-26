@@ -27,7 +27,8 @@ export default function GoogleEnderecoInput({ endereco, cidade, cidadeId, lat, l
   const [carregando, setCarregando] = useState(false);
   const [cidadeSelecionada, setCidadeSelecionada] = useState(cidade || '');
   const inputRef = useRef<HTMLInputElement>(null);
-  const API = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+  const API = import.meta.env.VITE_API_URL;
+  if (!API) throw new Error('VITE_API_URL não definida no .env - configure no arquivo .env');
   const GOOGLE_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY || '';
 
   useEffect(() => {

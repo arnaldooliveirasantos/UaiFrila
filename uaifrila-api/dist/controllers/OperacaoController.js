@@ -3,35 +3,32 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.OperacaoController = void 0;
 const OperacaoService_1 = require("../services/OperacaoService");
 class OperacaoController {
-    operacaoService = new OperacaoService_1.OperacaoService();
+    service = new OperacaoService_1.OperacaoService();
     candidatar = async (req, res) => {
         try {
-            const { vagaId, usuarioId } = req.body;
-            await this.operacaoService.candidatarVaga(Number(vagaId), Number(usuarioId));
-            res.status(200).json({ sucesso: true, mensagem: 'Candidatura registrada!' });
+            const result = await this.service.candidatar(req.body.vagaId, req.user.id);
+            res.json(result);
         }
-        catch (error) {
-            res.status(400).json({ erro: error.message });
+        catch (e) {
+            res.status(500).json({ erro: e.message });
         }
     };
     aceitar = async (req, res) => {
         try {
-            const { vagaId, freelaId } = req.body;
-            const trampo = await this.operacaoService.aceitarCandidato(Number(vagaId), Number(freelaId));
-            res.status(201).json({ sucesso: true, trampo });
+            const result = await this.service.aceitarCandidatura(req.body.candidaturaId, req.user.id);
+            res.json(result);
         }
-        catch (error) {
-            res.status(400).json({ erro: error.message });
+        catch (e) {
+            res.status(500).json({ erro: e.message });
         }
     };
     historicoChat = async (req, res) => {
         try {
-            const { vagaId } = req.params;
-            const historico = await this.operacaoService.buscarHistoricoChat(Number(vagaId));
-            res.status(200).json(historico);
+            const historico = await this.service.historicoChat(Number(req.params.vagaId));
+            res.json({ mensagens: historico });
         }
-        catch (error) {
-            res.status(500).json({ erro: error.message });
+        catch (e) {
+            res.status(500).json({ erro: e.message });
         }
     };
 }

@@ -7,15 +7,30 @@ class AdminFinanceiroRepository extends BaseRepository_1.BaseRepository {
         return await this.query('SELECT * FROM variaveis_sistema ORDER BY categoria, chave');
     }
     async listarVariaveisAmbiente() {
-        // DEPRECATED - agora usa variaveis_sistema
+        return await this.listarVariaveisSistema();
+    }
+    // REUTILIZAÇÃO - alias para compatibilidade com service antigo
+    async listarVariaveis() {
         return await this.listarVariaveisSistema();
     }
     async atualizarVariavelSistema(chave, valor, valorNumerico) {
         return await this.query('UPDATE variaveis_sistema SET valor = $1, valor_numerico = $3, atualizado_em = NOW() WHERE chave = $2 RETURNING *', [valor, chave, valorNumerico || null]);
     }
     async atualizarVariavelAmbiente(chave, valor) {
-        // DEPRECATED - agora usa variaveis_sistema
         return await this.atualizarVariavelSistema(chave, valor);
+    }
+    // REUTILIZAÇÃO - alias para salvarVariavel
+    async salvarVariavel(dados) {
+        const { chave, valor, valor_numerico, descricao } = dados;
+        const existing = await this.queryOne(`SELECT id FROM variaveis_sistema WHERE chave = $1`, [chave]);
+        if (existing) {
+            const rows = await this.atualizarVariavelSistema(chave, valor, valor_numerico);
+            return rows[0] || null;
+        }
+        else {
+            const rows = await this.query(`INSERT INTO variaveis_sistema (chave, valor, valor_numerico, descricao) VALUES ($1,$2,$3,$4) RETURNING *`, [chave, valor, valor_numerico || null, descricao || null]);
+            return rows[0] || null;
+        }
     }
     async buscarVariavel(chave) {
         const rows = await this.query('SELECT * FROM variaveis_sistema WHERE chave = $1', [chave]);
@@ -36,6 +51,20 @@ class AdminFinanceiroRepository extends BaseRepository_1.BaseRepository {
             ORDER BY v.data_hora DESC
         `;
         return await this.query(sql, [dataInicio, dataFim]);
+    }
+    // REUTILIZAÇÃO - alias para relatorioTransacoes
+    async relatorioTransacoes(filtros = {}) {
+        const { dataInicio, dataFim } = filtros;
+        if (dataInicio && dataFim) {
+            return await this.buscarTransacoesPorPeriodo(dataInicio, dataFim);
+        }
+        try {
+            return await this.query(`SELECT * FROM transacoes ORDER BY criado_em DESC LIMIT 100`);
+        }
+        catch {
+            // Fallback para trampos se transacoes não existir
+            return await this.query(`SELECT t.*, v.titulo, u.nome_completo as freela_nome FROM trampos t LEFT JOIN vagas v ON t.vaga_id = v.id LEFT JOIN usuarios u ON t.freela_id = u.id ORDER BY t.criado_em DESC LIMIT 100`);
+        }
     }
 }
 exports.AdminFinanceiroRepository = AdminFinanceiroRepository;

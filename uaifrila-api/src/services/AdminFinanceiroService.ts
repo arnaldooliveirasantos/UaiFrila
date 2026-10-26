@@ -1,13 +1,23 @@
+import { BaseService } from './BaseService';
 import { AdminFinanceiroRepository } from '../repositories/AdminFinanceiroRepository';
 
-export class AdminFinanceiroService {
+export class AdminFinanceiroService extends BaseService {
   private repo = new AdminFinanceiroRepository();
-  async obterParametrosGlobais() { return await this.repo.listarVariaveisSistema(); }
-  async salvarParametroGlobal(chave: string, valor: string) { 
-    const num = parseFloat(valor);
-    return await this.repo.atualizarVariavelSistema(chave, valor, isNaN(num) ? undefined : num); 
+
+  async listarVariaveis() {
+    try {
+      return await this.repo.listarVariaveis();
+    } catch (e: any) {
+      this.handleError(e, 'AdminFinanceiroService.listarVariaveis');
+    }
   }
-  async obterRelatorioAuditoria(inicio: string, fim: string) { return []; }
-  async listarVariaveis() { return await this.repo.listarVariaveisSistema(); }
-  async atualizarVariavel(chave: string, valor: string) { return await this.repo.atualizarVariavelSistema(chave, valor); }
+
+  async salvarVariavel(dados: any) {
+    this.validateRequired(dados, ['chave']);
+    return await this.repo.salvarVariavel(dados);
+  }
+
+  async relatorioTransacoes(filtros: any) {
+    return await this.repo.relatorioTransacoes(filtros);
+  }
 }

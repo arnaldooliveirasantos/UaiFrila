@@ -1,58 +1,37 @@
 import { Request, Response } from 'express';
-import { VagaRepository } from '../repositories/VagaRepository';
+import { VagaService } from '../services/VagaService';
 
 export class VagaController {
-    private vagaRepo = new VagaRepository();
+  private vagaService = new VagaService();
 
-    public listarMural = async (req: Request, res: Response): Promise<void> => {
-        try {
-            const { usuarioId, tipo } = req.body;
-            const list = await this.vagaRepo.buscarMuralSemBloqueiosDeAvaliacao(Number(usuarioId));
-            
-            const mapped = list.map(v => {
-                const sub = (Number(v.horas_estimadas) * Number(v.valor_hora_limpo)) + Number(v.ajuda_custo_transporte);
-                if (tipo === 'FREELA') {
-                    return { ...v, valor_visivel: sub };
-                }
-                return { 
-                    ...v, 
-                    total_cartao: sub * 1.14, 
-                    total_pix_desconto: sub * 1.10 
-                };
-            });
-            res.json(mapped);
-        } catch (error: any) {
-            res.status(500).json({ erro: error.message });
-        }
-    };
+  public criar = async (req: any, res: Response): Promise<void> => {
+    try {
+      const contratanteId = req.user?.id || req.body.contratante_id;
+      if (!contratanteId) {
+        res.status(401).json({ erro: 'Não autenticado' });
+        return;
+      }
+      const vaga = await this.vagaService.criar({
+        contratante_id: contratanteId,
+        ...req.body
+      });
+      res.status(201).json({ sucesso: true, vaga });
+    } catch (e: any) {
+      console.error('Erro criar vaga:', e);
+      res.status(500).json({ erro: e.message });
+    }
+  };
 
-    public criarVaga = async (req: Request, res: Response): Promise<void> => {
-        try {
-            const { usuarioId, funcao, dataHora, horasEstimadas, valorHoraLimpo, ajudaCustoTransporte, enderecoCompleto, bairroId } = req.body;
+  public criarVaga = async (req: any, res: Response): Promise<void> => {
+    return this.criar(req, res);
+  };
 
-            // Validação de segurança temporal estrita: Dias permitidos de Quinta a Domingo
-            const dataVaga = new Date(dataHora);
-            const diaSemana = dataVaga.getDay(); // 0 = Domingo, 4 = Quinta, 5 = Sexta, 6 = Sábado
-            
-            if (diaSemana !== 0 && diaSemana < 4) {
-                res.status(400).json({ erro: 'Regra Temporal v12: Publicação permitida apenas para turnos de Quinta-feira a Domingo.' });
-                return;
-            }
-
-            const novaVaga = await this.vagaRepo.salvar({
-                contratanteId: Number(usuarioId),
-                funcao,
-                dataHora,
-                horasEstimadas: Number(horasEstimadas),
-                valorHoraLimpo: Number(valorHoraLimpo),
-                ajudaCustoTransporte: Number(ajudaCustoTransporte),
-                enderecoCompleto,
-                bairroId: Number(bairroId || 1)
-            });
-
-            res.status(201).json({ sucesso: true, vaga: novaVaga[0] });
-        } catch (error: any) {
-            res.status(500).json({ erro: error.message });
-        }
-    };
+  public listar = async (req: any, res: Response): Promise<void> => {
+    try {
+      const vagas = await this.vagaService.listar(req.query);
+      res.json({ vagas });
+    } catch (e: any) {
+      res.status(500).json({ erro: e.message });
+    }
+  };
 }

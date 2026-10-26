@@ -1,16 +1,24 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AdminFinanceiroService = void 0;
+const BaseService_1 = require("./BaseService");
 const AdminFinanceiroRepository_1 = require("../repositories/AdminFinanceiroRepository");
-class AdminFinanceiroService {
+class AdminFinanceiroService extends BaseService_1.BaseService {
     repo = new AdminFinanceiroRepository_1.AdminFinanceiroRepository();
-    async obterParametrosGlobais() { return await this.repo.listarVariaveisSistema(); }
-    async salvarParametroGlobal(chave, valor) {
-        const num = parseFloat(valor);
-        return await this.repo.atualizarVariavelSistema(chave, valor, isNaN(num) ? undefined : num);
+    async listarVariaveis() {
+        try {
+            return await this.repo.listarVariaveis();
+        }
+        catch (e) {
+            this.handleError(e, 'AdminFinanceiroService.listarVariaveis');
+        }
     }
-    async obterRelatorioAuditoria(inicio, fim) { return []; }
-    async listarVariaveis() { return await this.repo.listarVariaveisSistema(); }
-    async atualizarVariavel(chave, valor) { return await this.repo.atualizarVariavelSistema(chave, valor); }
+    async salvarVariavel(dados) {
+        this.validateRequired(dados, ['chave']);
+        return await this.repo.salvarVariavel(dados);
+    }
+    async relatorioTransacoes(filtros) {
+        return await this.repo.relatorioTransacoes(filtros);
+    }
 }
 exports.AdminFinanceiroService = AdminFinanceiroService;

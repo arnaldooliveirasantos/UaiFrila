@@ -13,7 +13,8 @@ export default function ValidacaoCodigo({ email, tipo, onValidado, onVoltar }: P
   const [codigo, setCodigo] = useState('');
   const [erro, setErro] = useState('');
   const [carregando, setCarregando] = useState(false);
-  const API = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+  const API = import.meta.env.VITE_API_URL;
+  if (!API) throw new Error('VITE_API_URL não definida no .env - configure no arquivo .env');
 
   const validar = async () => {
     setCarregando(true); 

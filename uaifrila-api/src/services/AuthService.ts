@@ -1,5 +1,6 @@
 import { AuthRepository } from '../repositories/AuthRepository';
 import jwt from 'jsonwebtoken';
+import { config } from '../config/env';
 
 export class AuthService {
   private authRepo = new AuthRepository();
@@ -90,7 +91,7 @@ export class AuthService {
       await this.authRepo.inserirDisparoLogin(template.id, usuario.id, emailLimpo, template.titulo_assunto, corpo, codigo, minutos);
       return { status: 'AGUARDANDO_VALIDACAO_EMAIL', email: emailLimpo };
     } catch (e:any) {
-      const token = jwt.sign({ id: usuario.id, email: usuario.email, tipo_chave: usuario.tipo_chave, tipo_usuario_id: usuario.tipo_usuario_id, nivel_permissao: usuario.nivel_permissao, status_usuario_id: usuario.status_usuario_id }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
+      const token = jwt.sign({ id: usuario.id, email: usuario.email, tipo_chave: usuario.tipo_chave, tipo_usuario_id: usuario.tipo_usuario_id, nivel_permissao: usuario.nivel_permissao, status_usuario_id: usuario.status_usuario_id }, config.JWT_SECRET, { expiresIn: '7d' });
       return { sucesso: true, token, usuario: { ...usuario, nome: usuario.nome_completo }, modo: 'login_direto_sem_2fa' };
     }
   }
@@ -161,7 +162,7 @@ export class AuthService {
     await this.authRepo.marcarDisparoValidado(disparo.id);
     const usuarioAtivadoRows = await this.authRepo.ativarUsuarioPorEmail(emailLimpo);
     const usuario = usuarioAtivadoRows[0] || (await this.authRepo.buscarUsuarioPorEmail(emailLimpo))[0];
-    const token = jwt.sign({ id: usuario.id, email: usuario.email, tipo_chave: usuario.tipo_chave, tipo_usuario_id: usuario.tipo_usuario_id, nivel_permissao: usuario.nivel_permissao, status_usuario_id: usuario.status_usuario_id }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
+    const token = jwt.sign({ id: usuario.id, email: usuario.email, tipo_chave: usuario.tipo_chave, tipo_usuario_id: usuario.tipo_usuario_id, nivel_permissao: usuario.nivel_permissao, status_usuario_id: usuario.status_usuario_id }, config.JWT_SECRET, { expiresIn: '7d' });
     return { sucesso: true, token, usuario: { ...usuario, nome: usuario.nome_completo }, mensagem: 'Usuario ativado' };
   }
 

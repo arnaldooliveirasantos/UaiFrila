@@ -59,7 +59,8 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState('');
   const [mensagem, setMensagem] = useState('');
-  const API = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+  const API = import.meta.env.VITE_API_URL;
+  if (!API) throw new Error('VITE_API_URL não definida no .env - configure no arquivo .env');
 
   // Calcula tipo_chave baseado nos dois botões
   const getTipoChave = () => {

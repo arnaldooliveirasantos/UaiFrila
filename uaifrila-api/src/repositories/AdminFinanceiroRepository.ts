@@ -7,7 +7,11 @@ export class AdminFinanceiroRepository extends BaseRepository {
     }
 
     public async listarVariaveisAmbiente(): Promise<any[]> {
-        // DEPRECATED - agora usa variaveis_sistema
+        return await this.listarVariaveisSistema();
+    }
+
+    // REUTILIZAÇÃO - alias para compatibilidade com service antigo
+    public async listarVariaveis(): Promise<any[]> {
         return await this.listarVariaveisSistema();
     }
 
@@ -16,8 +20,20 @@ export class AdminFinanceiroRepository extends BaseRepository {
     }
 
     public async atualizarVariavelAmbiente(chave: string, valor: string): Promise<any[]> {
-        // DEPRECATED - agora usa variaveis_sistema
         return await this.atualizarVariavelSistema(chave, valor);
+    }
+
+    // REUTILIZAÇÃO - alias para salvarVariavel
+    public async salvarVariavel(dados: any): Promise<any> {
+        const { chave, valor, valor_numerico, descricao } = dados;
+        const existing = await this.queryOne(`SELECT id FROM variaveis_sistema WHERE chave = $1`, [chave]);
+        if (existing) {
+            const rows = await this.atualizarVariavelSistema(chave, valor, valor_numerico);
+            return rows[0] || null;
+        } else {
+            const rows = await this.query(`INSERT INTO variaveis_sistema (chave, valor, valor_numerico, descricao) VALUES ($1,$2,$3,$4) RETURNING *`, [chave, valor, valor_numerico || null, descricao || null]);
+            return rows[0] || null;
+        }
     }
 
     public async buscarVariavel(chave: string): Promise<any> {
@@ -40,5 +56,19 @@ export class AdminFinanceiroRepository extends BaseRepository {
             ORDER BY v.data_hora DESC
         `;
         return await this.query(sql, [dataInicio, dataFim]);
+    }
+
+    // REUTILIZAÇÃO - alias para relatorioTransacoes
+    public async relatorioTransacoes(filtros: any = {}): Promise<any[]> {
+        const { dataInicio, dataFim } = filtros;
+        if (dataInicio && dataFim) {
+            return await this.buscarTransacoesPorPeriodo(dataInicio, dataFim);
+        }
+        try {
+            return await this.query(`SELECT * FROM transacoes ORDER BY criado_em DESC LIMIT 100`);
+        } catch {
+            // Fallback para trampos se transacoes não existir
+            return await this.query(`SELECT t.*, v.titulo, u.nome_completo as freela_nome FROM trampos t LEFT JOIN vagas v ON t.vaga_id = v.id LEFT JOIN usuarios u ON t.freela_id = u.id ORDER BY t.criado_em DESC LIMIT 100`);
+        }
     }
 }

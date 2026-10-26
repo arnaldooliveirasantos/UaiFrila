@@ -545,6 +545,23 @@ class AuthRepository extends BaseRepository_1.BaseRepository {
         }
         catch { }
     }
+    async buscarTipoPorChave(chave) {
+        try {
+            const row = await this.queryOne(`SELECT id, chave, nome_exibicao, nivel_permissao FROM tipos_usuario WHERE chave = $1`, [chave.toUpperCase()]);
+            return row || null;
+        }
+        catch {
+            return null;
+        }
+    }
+    async buscarTiposUsuario() {
+        try {
+            return await this.query(`SELECT id, chave, nome_exibicao, descricao, nivel_permissao FROM tipos_usuario ORDER BY nivel_permissao ASC, id ASC`);
+        }
+        catch {
+            return [];
+        }
+    }
     async buscarTempoExpiracao() {
         try {
             const rows = await this.query(`SELECT valor FROM variaveis_sistema WHERE chave = 'EMAIL_EXPIRACAO_MINUTOS'`);
