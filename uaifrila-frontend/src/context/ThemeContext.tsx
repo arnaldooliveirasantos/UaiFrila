@@ -1,71 +1,63 @@
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 
 type Theme = 'light' | 'dark';
-
-interface ThemeStyles {
-  bgGeral: string;
-  bgQuadros: string;
-  input: string;
-  btnPrimary: string;
-  boxInfo: string;
-  boxWarn: string;
-  cardHero: string;
-  grid: React.CSSProperties;
-}
 
 interface ThemeContextType {
   theme: Theme;
   toggleTheme: () => void;
-  styles: ThemeStyles;
+  isDark: boolean;
+  styles: any;
 }
 
-const lightStyles: ThemeStyles = {
-  bgGeral: 'bg-[#F3F4F6]',
-  bgQuadros: 'bg-[#FFFFFF] text-[#000000] border-2 border-[#000000]',
-  input: 'bg-[#FFFFFF] text-[#000000] border-2 border-[#000000] placeholder-[#000000]/50 font-bold',
-  btnPrimary: 'bg-[#FFC700] text-[#000000] border-2 border-[#000000] hover:bg-[#E6B400] font-black',
-  boxInfo: 'bg-[#000000] text-[#FFFFFF] border-2 border-[#E53935]',
-  boxWarn: 'bg-[#FFC700]/10 border-2 border-[#E53935] text-[#000000]',
-  cardHero: 'bg-white border-2 border-black text-black',
-  grid: { background: '#FFFFFF', backgroundImage: 'radial-gradient(rgba(204, 153, 0, 0.22) 1.2px, transparent 1.2px)', backgroundSize: '36px 36px' }
-};
+const ThemeContext = createContext<ThemeContextType>({ 
+  theme: 'dark' as Theme, 
+  toggleTheme: () => {}, 
+  isDark: true,
+  styles: {} as any 
+});
 
-const darkStyles: ThemeStyles = {
-  bgGeral: 'bg-[#0b0f19]',
-  bgQuadros: 'bg-[#000000] text-[#FFFFFF] border-2 border-[#0066FF]',
-  input: 'bg-[#000000] text-[#FFFFFF] border-2 border-[#0066FF] placeholder-[#FFFFFF]/40 font-bold',
-  btnPrimary: 'bg-[#0066FF] text-[#FFFFFF] border-2 border-[#0066FF] hover:bg-[#0055DD] font-black',
-  boxInfo: 'bg-[#000000] border-2 border-[#FF00FF] text-[#FFFFFF]',
-  boxWarn: 'bg-[#000000] border-2 border-[#0066FF] text-[#FF00FF]',
-  cardHero: 'bg-[#0A0A0A] border border-gray-800 text-white',
-  grid: { background: '#000000', backgroundImage: 'radial-gradient(rgba(0, 102, 255, 0.22) 1.2px, transparent 1.2px)', backgroundSize: '40px 40px' }
-};
-
-const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
+const STORAGE_KEY = 'uaifrila:theme';
 
 export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
   const [theme, setTheme] = useState<Theme>(() => {
-    const saved = localStorage.getItem('@UaiFrila:theme') as Theme | null;
-    if (saved) return saved;
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    if (typeof window === 'undefined') return 'dark';
+    const saved = localStorage.getItem(STORAGE_KEY) as Theme | null;
+    if (saved === 'light' || saved === 'dark') return saved;
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    return prefersDark ? 'dark' : 'light';
   });
 
   useEffect(() => {
-    localStorage.setItem('@UaiFrila:theme', theme);
-    document.documentElement.classList.toggle('dark', theme === 'dark');
+    localStorage.setItem(STORAGE_KEY, theme);
+    document.documentElement.setAttribute('data-theme', theme);
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
   }, [theme]);
 
   const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
 
-  const value = useMemo(() => ({
-    theme,
-    toggleTheme,
-    styles: theme === 'light' ? lightStyles : darkStyles
-  }), [theme]);
+  const styles = {
+    bgGeral: theme === 'dark' ? 'bg-[#0b0f19]' : 'bg-[#F3F4F6]',
+    bgQuadros: theme === 'dark' 
+      ? 'bg-black text-white border-[#0066FF]' 
+      : 'bg-white text-black border-black',
+    input: theme === 'dark'
+      ? 'bg-black text-white border-white placeholder:text-zinc-500 focus:border-[#0066FF] focus:ring-1 focus:ring-[#0066FF]'
+      : 'bg-white text-black border-black placeholder:text-zinc-400 focus:border-black focus:ring-1 focus:ring-black',
+    btnPrimary: theme === 'dark'
+      ? 'bg-[#0066FF] text-white border-[#0066FF] hover:bg-[#0055DD]'
+      : 'bg-black text-white border-black hover:bg-zinc-800',
+    card: theme === 'dark'
+      ? 'bg-zinc-900 border-white text-white'
+      : 'bg-white border-black text-black',
+  };
 
   return (
-    <ThemeContext.Provider value={value}>
-      <div className={`min-h-screen transition-colors duration-300 ${value.styles.bgGeral}`}>
+    <ThemeContext.Provider value={{ theme, toggleTheme, isDark: theme === 'dark', styles }}>
+      <div className={`min-h-screen transition-colors duration-300 ${styles.bgGeral}`}>
         {children}
       </div>
     </ThemeContext.Provider>
@@ -74,6 +66,27 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
 
 export const useTheme = () => {
   const ctx = useContext(ThemeContext);
-  if (!ctx) throw new Error('useTheme must be used within ThemeProvider');
+  if (!ctx) throw new Error('useTheme deve ser usado dentro de ThemeProvider');
   return ctx;
+};
+
+// Helper para inputs padronizados - USAR EM TODOS OS FORMULARIOS
+export const getInputClass = (isDark: boolean, extra = '') => {
+  return `w-full h-[48px] px-4 text-sm border-2 outline-none font-medium transition-all rounded-none
+    ${isDark 
+      ? 'bg-zinc-900 text-white border-zinc-700 placeholder:text-zinc-500 focus:border-[#0066FF] focus:bg-black' 
+      : 'bg-white text-black border-black placeholder:text-zinc-400 focus:border-black focus:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
+    } ${extra}`;
+};
+
+export const getLabelClass = (isDark: boolean) => {
+  return `text-[10px] font-black uppercase tracking-wider ${isDark ? 'text-zinc-300' : 'text-black'}`;
+};
+
+export const getCardClass = (isDark: boolean) => {
+  return `p-6 border-2 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] ${isDark ? 'bg-zinc-900 border-white text-white shadow-[6px_6px_0px_0px_rgba(255,255,255,0.1)]' : 'bg-white border-black text-black'}`;
+};
+
+export const getSelectClass = (isDark: boolean) => {
+  return getInputClass(isDark);
 };

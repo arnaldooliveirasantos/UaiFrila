@@ -1,14 +1,28 @@
 {
   "compilerOptions": {
-    "target": "es2022",
-    "module": "commonjs",
-    "lib": ["es2022"],
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "outDir": "./dist",
+    "rootDir": "./src",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "outDir": "./dist",
-    "rootDir": "./src"
+    "forceConsistentCasingInFileNames": false
   },
-  "include": ["src/**/*"]
+  "include": [
+    "src/**/*"
+  ],
+  "exclude": [
+    "src/App.tsx",
+    "src/App.tsx.FRONTEND_ARTIFACT_BACKUP",
+    "**/*.tsx",
+    "node_modules",
+    "src/App.tsx.FRONTEND*",
+    "src/App.ts",
+    "dist",
+    "src/App.ts.FRONTEND_MOCK_BACKUP",
+    "src/*.tsx.FRONTEND*",
+    "src/App.tsx.FRONTEND_MOCK_BACKUP"
+  ]
 }

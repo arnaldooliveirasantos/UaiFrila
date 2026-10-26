@@ -1,22 +1,24 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { config } from '../config/env';
 
-export const authMiddleware = (req: Request, res: Response, next: NextFunction): void => {
+export const authMiddleware = (req: any, res: Response, next: NextFunction) => {
+  try {
     const authHeader = req.headers.authorization;
     if (!authHeader) {
-        res.status(401).json({ erro: 'Token de acesso não fornecido.' });
-        return;
+      res.status(401).json({ erro: 'Token não fornecido - Authorization header obrigatório' });
+      return;
     }
-
-    const [, token] = authHeader.split(' ');
-
-    try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'UaiFrila_SecretDefault_2026') as any;
-        req.body.usuarioId = decoded.id;
-        req.body.usuario_is_admin = decoded.is_admin;
-        req.body.usuario_perfis = decoded.perfis; // Injeta o array relacional limpo no body da requisição
-        next();
-    } catch (err) {
-        res.status(401).json({ erro: 'Token inválido ou expirado.' });
+    const token = authHeader.replace('Bearer ', '');
+    if (!token) {
+      res.status(401).json({ erro: 'Token não fornecido - Bearer token vazio' });
+      return;
     }
+    const decoded = jwt.verify(token, config.JWT_SECRET) as any;
+    req.user = decoded;
+    req.usuarioId = decoded.id;
+    next();
+  } catch (e: any) {
+    res.status(401).json({ erro: `Token inválido: ${e.message} - verifique JWT_SECRET no .env` });
+  }
 };

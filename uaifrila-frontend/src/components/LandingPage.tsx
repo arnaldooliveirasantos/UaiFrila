@@ -1,73 +1,78 @@
 import React from 'react';
 import { useTheme } from '../context/ThemeContext';
+import LogoIcone from './LogoIcone';
 
-interface LandingPageProps {
-    onSelecionarAcao: (acao: 'LOGIN' | 'CADASTRO_UNIFICADO') => void;
-}
+export default function LandingPage({ setTelaAtiva }: { setTelaAtiva: (t: string, params?: any) => void }) {
+  const { isDark } = useTheme();
 
-export const LandingPage: React.FC<LandingPageProps> = ({ onSelecionarAcao }) => {
-    const { styles } = useTheme();
+  const irParaCadastro = (tipo: 'freela' | 'contratante') => {
+    localStorage.setItem('uaifrila_tipo_cadastro', tipo);
+    setTelaAtiva('cadastro', { tipo });
+  };
 
-    return (
-        <div className="w-full flex flex-col gap-6 p-2">
-            {/* HERO PRINCIPAL ADAPTADO DINAMICAMENTE PARA AMBOS OS MODOS */}
-            <div className={`rounded-3xl p-6 md:p-8 shadow-2xl relative ${styles.cardHero}`}>
-                <div className="bg-[#0066FF]/10 border border-[#0066FF]/40 text-[#0066FF] text-[9px] font-black uppercase px-2 py-0.5 rounded-full tracking-wider w-max mb-4">
-                    ⚡ CRONÔMETRO • Freela de bar em 2min
-                </div>
+  return (
+    <div className="min-h-[calc(100vh-72px)]">
+      <div className={`max-w-7xl mx-auto px-4 py-16 md:py-24 grid md:grid-cols-2 gap-12 items-center`}>
+        <div>
+          <h1 className={`mt-6 text-5xl md:text-7xl font-black uppercase leading-[0.9] tracking-tighter ${isDark ? 'text-white' : 'text-black'}`}>
+            UAI<br/>FRILA
+          </h1>
+          <p className={`mt-6 text-lg font-bold uppercase ${isDark ? 'text-zinc-300' : 'text-zinc-700'}`}>
+            Conectando freelas e contratantes de bares, restaurantes e eventos
+          </p>
+          <p className="mt-4 text-sm opacity-70">Cadastro em 2 minutos. Vagas diárias. Pagamento garantido. Sem burocracia CLT Art 442-B.</p>
+          
+          {/* Botões principais - Agora com Quero Contratar */}
+          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <button onClick={() => irParaCadastro('freela')} className="px-6 py-4 bg-[#E53935] text-white border-2 border-black font-black uppercase text-sm shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-y-[-2px] transition-transform">
+              <div className="text-[10px] opacity-80">PARA QUEM QUER TRAMPAR</div>
+              <div>Quero Trampar →</div>
+            </button>
+            <button onClick={() => irParaCadastro('contratante')} className={`px-6 py-4 border-2 font-black uppercase text-sm shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-y-[-2px] transition-transform ${isDark ? 'bg-[#0066FF] text-white border-[#0066FF]' : 'bg-black text-white border-black'}`}>
+              <div className="text-[10px] opacity-80">PARA BARES E RESTAURANTES</div>
+              <div>Quero Contratar →</div>
+            </button>
+          </div>
 
-                <h1 className="text-3xl md:text-5xl font-black uppercase tracking-tight mb-4 leading-none">
-                    Contrate<br/>freela de bar<br/>em 2 minutos.
-                </h1>
-                
-                <p className="text-gray-400 text-xs md:text-sm max-w-xl mb-6 leading-relaxed">
-                    O Uber dos bares. Garçom, barman, cumim em até 30 segundos de match. Pagamento escrow EFI seguro, GPS real e foto final do serviço prestado.
-                </p>
+          <div className="mt-3">
+            <button onClick={() => setTelaAtiva('codigo')} className={`w-full px-6 py-3 border-2 font-black uppercase text-xs ${isDark ? 'bg-white text-black border-white' : 'bg-[#FFC700] text-black border-black'}`}>
+              Ver Código Freela
+            </button>
+          </div>
 
-                {/* Tabela de Preços Limpos */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
-                    <div className="bg-[#0A0A0A] border border-gray-800 rounded-xl p-3">
-                        <span className="text-[10px] text-gray-500 font-bold block">GARÇOM</span>
-                        <span className="text-lg font-black text-white">R\$ 20,00 / h</span>
-                    </div>
-                    <div className="bg-[#0A0A0A] border border-gray-800 rounded-xl p-3">
-                        <span className="text-[10px] text-gray-500 font-bold block">BARMAN</span>
-                        <span className="text-lg font-black text-white">R\$ 25,00 / h</span>
-                    </div>
-                    <div className="bg-[#0A0A0A] border border-gray-800 rounded-xl p-3">
-                        <span className="text-[10px] text-gray-500 font-bold block">CUMIM / BANDEJA</span>
-                        <span className="text-lg font-black text-white">R\$ 15,00 / h</span>
-                    </div>
-                </div>
+          <div className="mt-8 grid grid-cols-3 gap-4 text-center">
+            <div className="p-3 border-2 border-black"><div className="text-xl font-black">500+</div><div className="text-[10px] uppercase font-bold">Freelas</div></div>
+            <div className="p-3 border-2 border-black"><div className="text-xl font-black">1200+</div><div className="text-[10px] uppercase font-bold">Trampos</div></div>
+            <div className="p-3 border-2 border-black"><div className="text-xl font-black">4.9★</div><div className="text-[10px] uppercase font-bold">Avaliação</div></div>
+          </div>
 
-                {/* Caixa de Fórmula de Custos do Escrow */}
-                <div className={`p-4 rounded-xl text-[11px] flex flex-col gap-1.5 font-sans mb-6 ${styles.boxInfo}`}>
-                    <p className="font-black uppercase tracking-wider text-xs mb-1">📊 FINANCEIRO • Cálculo Dinâmico de Custos</p>
-                    <p>• Base R\$ 130 + Taxa Cartão (14%) + Taxa Pix (10%) = Contratante <strong>R\$ 168,20 (Cartão) | Pix R\$ 147,00</strong></p>
-                </div>
-
-                {/* Bloco de Avisos de Cancelamento e Prazos */}
-                <div className={`p-4 rounded-xl text-[11px] flex flex-col gap-1.5 ${styles.boxWarn}`}>
-                    <p className="font-black uppercase tracking-wider text-xs">⚠️ REGRA DE PAGAMENTO & CANCELAMENTO</p>
-                    <p>Contratante deve efetuar a quitação via Pix até <strong>60 minutos (1h) antes do início</strong> do turno combinado.</p>
-                </div>
-
-                {/* Botões de Chamada para Ação */}
-                <div className="flex flex-wrap gap-3 items-center mt-6">
-                    <button 
-                        onClick={() => onSelecionarAcao('CADASTRO_UNIFICADO')} 
-                        className={`font-black uppercase text-xs px-6 py-3 rounded-xl transition cursor-pointer ${styles.btnPrimary}`}
-                    >
-                        Criar Conta Duplex v12
-                    </button>
-                    <button 
-                        onClick={() => onSelecionarAcao('LOGIN')} 
-                        className="text-xs text-gray-400 font-bold hover:text-white underline cursor-pointer"
-                    >
-                        Fazer login na plataforma
-                    </button>
-                </div>
-            </div>
+          {/* Seção contratante destacada */}
+          <div className={`mt-8 p-4 border-2 border-dashed ${isDark ? 'border-white/30 bg-white/5' : 'border-black/20 bg-yellow-50'}`}>
+            <h4 className="font-black uppercase text-xs">Você é bar, restaurante ou evento?</h4>
+            <p className="text-[11px] mt-1 opacity-70">Publique vagas em 1 minuto. Receba candidatos filtrados por bairro, função e valor/hora. Sem CLT, sem dor de cabeça.</p>
+            <button onClick={() => irParaCadastro('contratante')} className="mt-3 px-4 py-2 bg-black text-white border-2 border-black text-[10px] font-black uppercase">Cadastrar como Contratante</button>
+          </div>
         </div>
-    );
-};
+        <div className={`p-8 border-2 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] ${isDark ? 'bg-zinc-900 border-white' : 'bg-white border-black'}`}>
+          <h3 className="font-black uppercase">Como funciona?</h3>
+          <div className="mt-4 space-y-4">
+            {[
+              { n: '01', t: 'Cadastre-se', d: 'Escolha Freela ou Contratante. CPF, bairro, função e valor/hora. 5 termos.' },
+              { n: '02', t: 'Valide e-mail', d: 'Código de 6 dígitos. Vira ATIVO na hora.' },
+              { n: '03', t: 'Veja o Mural', d: 'Freela vê vagas, Contratante publica. Candidate-se ou escolha candidatos.' },
+              { n: '04', t: 'Trampe e receba', d: 'Check-in, trabalho, avaliação e pagamento via plataforma.' },
+            ].map(item => (
+              <div key={item.n} className="flex gap-3">
+                <div className="w-10 h-10 bg-black text-white flex items-center justify-center font-black text-sm">{item.n}</div>
+                <div><div className="font-black uppercase text-sm">{item.t}</div><div className="text-xs opacity-70">{item.d}</div></div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-6 p-3 bg-[#FFC700] text-black border-2 border-black text-[10px] font-bold">
+            💡 Dica: Você pode ser os dois! Cadastre como DUAL (Freela + Contratante) e depois não volta mais para simples por segurança.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

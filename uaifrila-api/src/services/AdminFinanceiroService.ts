@@ -1,17 +1,23 @@
+import { BaseService } from './BaseService';
 import { AdminFinanceiroRepository } from '../repositories/AdminFinanceiroRepository';
 
-export class AdminFinanceiroService {
-    private repo = new AdminFinanceiroRepository();
+export class AdminFinanceiroService extends BaseService {
+  private repo = new AdminFinanceiroRepository();
 
-    public async obterParametrosGlobais(): Promise<any[]> {
-        return await this.repo.listarVariaveisAmbiente();
+  async listarVariaveis() {
+    try {
+      return await this.repo.listarVariaveis();
+    } catch (e: any) {
+      this.handleError(e, 'AdminFinanceiroService.listarVariaveis');
     }
+  }
 
-    public async salvarParametroGlobal(chave: string, valor: string): Promise<any[]> {
-        return await this.repo.atualizarVariavelAmbiente(chave, valor);
-    }
+  async salvarVariavel(dados: any) {
+    this.validateRequired(dados, ['chave']);
+    return await this.repo.salvarVariavel(dados);
+  }
 
-    public async obterRelatorioAuditoria(inicio: string, fim: string): Promise<any[]> {
-        return await this.repo.buscarTransacoesPorPeriodo(inicio, fim);
-    }
+  async relatorioTransacoes(filtros: any) {
+    return await this.repo.relatorioTransacoes(filtros);
+  }
 }

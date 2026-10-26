@@ -1,16 +1,16 @@
-// 🌟 FORÇA O CARREGAMENTO IMEDIATO DAS VARIÁVEIS ANTES DOS IMPORTS ESTÁTICOS
+// FORÇA O CARREGAMENTO IMEDIATO DAS VARIÁVEIS ANTES DOS IMPORTS ESTÁTICOS
 require('dotenv').config();
 
 import http from 'http';
 import { Server } from 'socket.io';
 import { App } from './app';
 import { OperacaoService } from './services/OperacaoService';
+import { config } from './config/env';
 
-const PORT = 3000;
+const PORT = config.PORT;
 const expressApp = new App().expressApp;
 const httpServer = http.createServer(expressApp);
 
-// 🔒 Liberação de CORS ampla para aceitar requisições tanto de localhost quanto do IP de rede local
 const io = new Server(httpServer, {
     cors: { 
         origin: "*", 
@@ -35,7 +35,6 @@ io.on('connection', (socket) => {
     });
 });
 
-// Força o HTTP Server a escutar na interface global '0.0.0.0' para permitir conexões de smartphones
 httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Servidor HTTP e WebSockets UAI FRILA rodando de forma ampla na porta ${PORT}`);
+    console.log(`🚀 Servidor HTTP e WebSockets UAI FRILA rodando na porta ${PORT} - SEM FALLBACK, .env obrigatório`);
 });

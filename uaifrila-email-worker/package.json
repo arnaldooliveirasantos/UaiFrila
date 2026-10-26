@@ -1,10 +1,10 @@
 {
   "name": "uaifrila-email-worker",
-  "version": "12.2.0",
+  "version": "13.2.0",
   "main": "dist/index.js",
   "type": "commonjs",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js"
   },
@@ -17,7 +17,7 @@
     "@types/node": "^20.11.30",
     "@types/nodemailer": "^6.4.14",
     "@types/pg": "^8.11.4",
-    "typescript": "^5.4.3",
-    "tsx": "^4.6.0"
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.4.3"
   }
 }

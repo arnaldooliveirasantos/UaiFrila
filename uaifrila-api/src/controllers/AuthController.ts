@@ -1,151 +1,99 @@
 import { Request, Response } from 'express';
-import { Client } from 'pg';
-import jwt from 'jsonwebtoken';
+import { AuthService } from '../services/AuthService';
 
 export class AuthController {
-    public registrar = async (req: Request, res: Response): Promise<void> => {
-        const client = new Client({
-            user: process.env.DB_USER,
-            password: process.env.DB_PASSWORD,
-            host: process.env.DB_HOST,
-            port: Number(process.env.DB_PORT),
-            database: process.env.DB_NAME
-        });
+  private authService = new AuthService();
 
-        try {
-            const { nome, email, senha, cpf, whatsapp, cnpj, nomeFantasia, isContratante } = req.body;
-            await client.connect();
+  public registrar = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const result = await this.authService.registrar(req.body);
+      if ((result as any).sucesso) res.status(201).json(result);
+      else res.status(200).json(result);
+    } catch (e: any) {
+      console.error('🔥 ERRO REGISTRAR:', e);
+      const status = e.message.includes('já cadastrado') ? 400 : 500;
+      res.status(status).json({ erro: e.message });
+    }
+  };
 
-            const resTempo = await client.query("SELECT valor FROM variaveis_ambiente WHERE chave = 'EMAIL_EXPIRACAO_MINUTOS'");
-            const minutosExpiracao = Number(resTempo.rows.valor);
+  public login = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { email } = req.body;
+      const result = await this.authService.login(email);
+      res.status(200).json(result);
+    } catch (e: any) {
+      console.error('🔥 ERRO LOGIN:', e);
+      const status = e.message.includes('não encontrado') ? 401 : 500;
+      res.status(status).json({ erro: e.message });
+    }
+  };
 
-            const resTemplate = await client.query("SELECT id, email_remetente, titulo_assunto, conteudo_corpo FROM email_templates WHERE chave_uso = 'CONFIRMACAO_CADASTRO'");
-            const template = resTemplate.rows[0];
+  public buscarMe = async (req: any, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) { res.status(401).json({ erro: 'Não autenticado' }); return; }
+      const usuario = await this.authService.buscarMe(userId);
+      res.status(200).json({ usuario });
+    } catch (e: any) {
+      res.status(404).json({ erro: e.message });
+    }
+  };
 
-            const codigoToken = Math.floor(100000 + Math.random() * 900000).toString();
-            let corpoFinal = template.conteudo_corpo.replace('{{NOME}}', nome).replace('{{CODIGO}}', codigoToken);
+  public atualizarUsuario = async (req: any, res: Response): Promise<void> => {
+    try {
+      const userIdParam = Number(req.params.id);
+      const userIdToken = req.user?.id;
+      const nivel = req.user?.nivel_permissao || 0;
+      if (userIdParam !== userIdToken && nivel < 80) {
+        res.status(403).json({ erro: 'Sem permissão para editar outro usuário' }); return;
+      }
+      // Bloqueia CPF e EMAIL explicitamente
+      if (req.body.cpf || req.body.email) {
+        console.log('🚫 API bloqueou tentativa de atualizar CPF/EMAIL');
+        delete req.body.cpf;
+        delete req.body.email;
+      }
+      const usuario = await this.authService.atualizarUsuario(userIdParam, req.body, req.user);
+      res.status(200).json({ sucesso: true, usuario });
+    } catch (e: any) {
+      console.error('Erro atualizar usuario:', e);
+      res.status(400).json({ erro: e.message });
+    }
+  };
 
-            const queryDisparo = `
-                INSERT INTO email_historico_disparos (template_id, email_destinatario, titulo_final, conteudo_final, codigo_verificacao, status_id, expira_em, criado_em)
-                VALUES ($1, $2, $3, $4, $5, (SELECT id FROM email_status WHERE chave = 'EM_ESPERA'), NOW() + cast($6 || ' minutes' as interval), NOW())
-            `;
-            await client.query(queryDisparo, [template.id, email, template.titulo_assunto, corpoFinal, codigoToken, minutosExpiracao]);
+  public verificarToken2FA = async (req: Request, res: Response): Promise<void> => {
+    return this.verificarTokenEmail(req, res);
+  };
 
-            res.status(200).json({ status: 'AGUARDANDO_VALIDACAO_EMAIL', email });
-        } catch (error: any) {
-            console.error('🚨 [Erro no Registrar Backend]:', error.message);
-            res.status(500).json({ erro: error.message });
-        } finally {
-            await client.end();
-        }
-    };
+  public listarTiposUsuario = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const tipos = await this.authService.listarTiposUsuario();
+      res.status(200).json({ tipos });
+    } catch (e: any) {
+      res.status(500).json({ erro: e.message });
+    }
+  };
 
-    public login = async (req: Request, res: Response): Promise<void> => {
-        const client = new Client({
-            user: process.env.DB_USER,
-            password: process.env.DB_PASSWORD,
-            host: process.env.DB_HOST,
-            port: Number(process.env.DB_PORT),
-            database: process.env.DB_NAME
-        });
 
-        try {
-            const { email, senha } = req.body;
-            await client.connect();
+  public reenviarCodigo = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { email, tipo } = req.body;
+      const result = await this.authService.reenviarCodigo(email, tipo || 'cadastro');
+      res.status(200).json(result);
+    } catch (e: any) {
+      console.error('🔥 ERRO REENVIAR CODIGO:', e);
+      res.status(400).json({ erro: e.message });
+    }
+  };
 
-            // 🟢 CORREÇÃO: Removido o campo "nome" que causava o erro SQL 42703
-            const queryText = 'SELECT id, email FROM usuarios WHERE email = $1 AND senha = $2';
-            const resultado = await client.query(queryText, [email, senha]);
-
-            if (resultado.rows.length === 0) {
-                res.status(401).json({ erro: 'Credenciais inválidas de e-mail e senha.' });
-                return;
-            }
-
-            const usuario = resultado.rows[0];
-
-            const resTempo = await client.query("SELECT valor FROM variaveis_ambiente WHERE chave = 'EMAIL_EXPIRACAO_MINUTOS'");
-            const minutosExpiracao = Number(resTempo.rows.valor);
-
-            const resTemplate = await client.query("SELECT id, email_remetente, titulo_assunto, conteudo_corpo FROM email_templates WHERE chave_uso = '2FA_LOGIN'");
-            const template = resTemplate.rows[0];
-
-            const codigoToken = Math.floor(100000 + Math.random() * 900000).toString();
-            let corpoFinal = template.conteudo_corpo.replace('{{CODIGO}}', codigoToken);
-
-            const queryDisparo = `
-                INSERT INTO email_historico_disparos (template_id, usuario_id, email_destinatario, titulo_final, conteudo_final, codigo_verificacao, status_id, expira_em, criado_em)
-                VALUES ($1, $2, $3, $4, $5, $6, (SELECT id FROM email_status WHERE chave = 'EM_ESPERA'), NOW() + cast($7 || ' minutes' as interval), NOW())
-            `;
-            await client.query(queryDisparo, [template.id, usuario.id, email, template.titulo_assunto, corpoFinal, codigoToken, minutosExpiracao]);
-
-            res.status(200).json({ status: 'AGUARDANDO_VALIDACAO_EMAIL', email });
-        } catch (error: any) {
-            console.error('🚨 [Erro no Login 500 Crítico]:', error.message);
-            res.status(500).json({ erro: error.message });
-        } finally {
-            await client.end();
-        }
-    };
-
-    public verificarTokenEmail = async (req: Request, res: Response): Promise<void> => {
-        const client = new Client({
-            user: process.env.DB_USER,
-            password: process.env.DB_PASSWORD,
-            host: process.env.DB_HOST,
-            port: Number(process.env.DB_PORT),
-            database: process.env.DB_NAME
-        });
-
-        try {
-            const { email, codigo } = req.body;
-            await client.connect();
-
-            const queryBusca = `
-                SELECT id, codigo_verificacao, expira_em, status_id 
-                FROM email_historico_disparos 
-                WHERE email_destinatario = $1 
-                ORDER BY criado_em DESC LIMIT 1
-            `;
-            const resDisparo = await client.query(queryBusca, [email]);
-
-            if (resDisparo.rows.length === 0) {
-                res.status(400).json({ erro: 'Nenhum token solicitado para este e-mail.' });
-                return;
-            }
-
-            const disparo = resDisparo.rows[0];
-
-            if (new Date() > new Date(disparo.expira_em)) {
-                await client.query(
-                    "UPDATE email_historico_disparos SET status_id = (SELECT id FROM email_status WHERE chave = 'EXPIRADO'), atualizado_em = NOW() WHERE id = $1",
-                    [disparo.id]
-                );
-                res.status(400).json({ erro: 'Tempo esgotado! O token expirou. Solicite um novo envio.' });
-                return;
-            }
-
-            if (disparo.codigo_verificacao !== codigo) {
-                res.status(400).json({ erro: 'Código incorreto para a sessão informada.' });
-                return;
-            }
-
-            await client.query(
-                "UPDATE email_historico_disparos SET status_id = (SELECT id FROM email_status WHERE chave = 'VALIDADO'), atualizado_em = NOW() WHERE id = $1",
-                [disparo.id]
-            );
-
-            // Retorna os dados universais do usuário autenticado
-            const resUser = await client.query("SELECT id, email FROM usuarios WHERE email = $1", [email]);
-            const usuario = resUser.rows[0];
-
-            const tokenInterno = jwt.sign({ id: usuario.id, email: usuario.email }, process.env.JWT_SECRET, { expiresIn: '1d' });
-
-            res.status(200).json({ sucesso: true, token: tokenInterno, usuario });
-        } catch (error: any) {
-            res.status(500).json({ erro: error.message });
-        } finally {
-            await client.end();
-        }
-    };
+  public verificarTokenEmail = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { email, codigo } = req.body;
+      const result = await this.authService.verificarCodigo(email, codigo);
+      res.status(200).json(result);
+    } catch (e: any) {
+      const status = e.message.includes('Código') || e.message.includes('Nenhum código') ? 400 : 500;
+      res.status(status).json({ erro: e.message });
+    }
+  };
 }

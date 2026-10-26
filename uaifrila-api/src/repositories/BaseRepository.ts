@@ -1,36 +1,40 @@
-import { Client } from 'pg';
+import { Pool } from 'pg';
+import { config } from '../config/env';
 
 export abstract class BaseRepository {
-    protected dbClient: Client;
+  protected static pool: Pool | null = null;
+  protected pool: Pool;
 
-    constructor() {
-        // Purgamento preventivo de streams de URL automáticas da biblioteca 'pg'
-        delete process.env.DATABASE_URL;
-        delete process.env.PGPASSWORD;
-        delete process.env.PGUSER;
-
-        // Consome estritamente as propriedades isoladas injetadas pelo dotenv no .env da API
-        const user = process.env.DB_USER;
-        const password = process.env.DB_PASSWORD;
-        const host = process.env.DB_HOST;
-        const port = Number(process.env.DB_PORT);
-        const database = process.env.DB_NAME;
-
-        this.dbClient = new Client({
-            user,
-            password,
-            host,
-            port,
-            database
-        });
-        
-        this.dbClient.connect().catch(err => {
-            console.error(`❌ Falha de conexão no [\${this.constructor.name}]:`, err.message);
-        });
+  constructor() {
+    if (!BaseRepository.pool) {
+      BaseRepository.pool = new Pool({
+        user: config.DB_USER,
+        password: config.DB_PASSWORD,
+        host: config.DB_HOST,
+        port: config.DB_PORT,
+        database: config.DB_NAME,
+        max: 10
+      });
     }
+    this.pool = BaseRepository.pool;
+  }
 
-    protected async query(text: string, params?: any[]): Promise<any[]> {
-        const res = await this.dbClient.query(text, params);
-        return res.rows;
+  protected async query(text: string, params?: any[]) {
+    const client = await this.pool.connect();
+    try {
+      const result = await client.query(text, params);
+      return result.rows;
+    } finally {
+      client.release();
     }
+  }
+
+  protected async queryOne(text: string, params?: any[]) {
+    const rows = await this.query(text, params);
+    return rows[0] || null;
+  }
+
+  protected async execute(text: string, params?: any[]) {
+    return this.query(text, params);
+  }
 }

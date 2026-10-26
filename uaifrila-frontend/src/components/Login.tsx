@@ -1,97 +1,92 @@
 import React, { useState } from 'react';
 import { useTheme } from '../context/ThemeContext';
+import ValidacaoCodigo from './ValidacaoCodigo';
+import LogoIcone from './LogoIcone';
 
-interface LoginProps {
-  onSucessoSSO?: (dados: any) => void;
-}
+export default function Login({ onLogin }: { onLogin?: (usuario: any) => void }) {
+  const { styles, isDark } = useTheme();
+  const [email, setEmail] = useState('');
+  const [etapa, setEtapa] = useState<'email' | 'codigo'>('email');
+  const [carregando, setCarregando] = useState(false);
+  const [erro, setErro] = useState('');
+  const API = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
-export const Login: React.FC<LoginProps> = ({ onSucessoSSO }) => {
-    const { styles } = useTheme();
-    const [email, setEmail] = useState('');
-    const [senha, setSenha] = useState('');
-    const [codigo, setCodigo] = useState('');
-    const [passo, setPasso] = useState<'CREDENCIAIS' | 'TOKEN'>('CREDENCIAIS');
-    const [erro, setErro] = useState('');
-    const [carregando, setCarregando] = useState(false);
+  const solicitarCodigo = async () => {
+    if (!email.includes('@')) { setErro('E-mail inválido'); return; }
+    setCarregando(true);
+    setErro('');
+    try {
+      const res = await fetch(`${API}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.erro);
+      
+      if (data.sucesso && data.token) {
+        // Login direto sem código (modo dev)
+        localStorage.setItem('uaifrila_token', data.token);
+        localStorage.setItem('uaifrila_usuario', JSON.stringify(data.usuario));
+        onLogin?.(data.usuario);
+      } else {
+        // Precisa validar código
+        setEtapa('codigo');
+      }
+    } catch (e:any) {
+      setErro(e.message);
+    } finally {
+      setCarregando(false);
+    }
+  };
 
-    const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
-
-    const handleLoginNativo = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setErro('');
-        setCarregando(true);
-        try {
-            const res = await fetch(`${API_BASE}/auth/login`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, senha })
-            });
-            const dados = await res.json();
-            if (!res.ok) throw new Error(dados.erro || 'Erro no login');
-            if (dados.status === 'AGUARDANDO_VALIDACAO_EMAIL') {
-                setPasso('TOKEN');
-            } else {
-                // Login direto
-                if (onSucessoSSO) onSucessoSSO(dados);
-            }
-        } catch (err: any) {
-            setErro(err.message);
-        } finally {
-            setCarregando(false);
-        }
-    };
-
-    const handleVerificarToken = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setErro('');
-        setCarregando(true);
-        try {
-            const res = await fetch(`${API_BASE}/auth/verificar-2fa`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, codigo })
-            });
-            const dados = await res.json();
-            if (!res.ok) throw new Error(dados.erro || 'Código inválido');
-            localStorage.setItem('@UaiFrila:token', dados.token);
-            localStorage.setItem('@UaiFrila:usuario', JSON.stringify(dados.usuario));
-            if (onSucessoSSO) {
-                onSucessoSSO(dados);
-            } else {
-                window.dispatchEvent(new Event('auth-success'));
-            }
-        } catch (err: any) {
-            setErro(err.message);
-        } finally {
-            setCarregando(false);
-        }
-    };
-
+  if (etapa === 'codigo') {
     return (
-        <div className={`w-full max-w-md mx-auto p-6 border-2 rounded-3xl ${styles.bgQuadros}`} style={styles.grid}>
-            <div className="text-center mb-5">
-                <span className="text-[9px] font-mono bg-blue-600 text-white px-2 py-0.5 rounded font-black uppercase">📧 CONFIRMAÇÃO VIA E-MAIL</span>
-                <h3 className="text-xl font-black uppercase tracking-tight mt-1">Acessar Plataforma</h3>
-            </div>
-            {erro && <div className="bg-red-500/10 text-red-500 border border-red-500/20 p-2.5 rounded-lg text-xs mb-3 font-bold">{erro}</div>}
-            {passo === 'CREDENCIAIS' ? (
-                <form onSubmit={handleLoginNativo} className="flex flex-col gap-3.5">
-                    <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Seu e-mail cadastrado" className={`w-full rounded-lg p-2.5 text-xs outline-none ${styles.input}`} required />
-                    <input type="password" value={senha} onChange={(e) => setSenha(e.target.value)} placeholder="Sua senha secreta" className={`w-full rounded-lg p-2.5 text-xs outline-none ${styles.input}`} required />
-                    <button type="submit" disabled={carregando} className={`w-full py-3 rounded-xl font-black uppercase text-xs tracking-wider transition ${styles.btnPrimary}`}>
-                        {carregando ? 'Buscando...' : 'Solicitar Token por E-mail'}
-                    </button>
-                </form>
-            ) : (
-                <form onSubmit={handleVerificarToken} className="flex flex-col gap-3.5">
-                    <p className="text-xs text-center text-gray-400 font-bold mb-2">Digite o código de 6 dígitos enviado para {email}</p>
-                    <input type="text" value={codigo} onChange={(e) => setCodigo(e.target.value)} placeholder="000000" maxLength={6} className="w-full text-center tracking-widest text-lg font-black rounded-lg p-2.5 bg-black border border-gray-800 text-white outline-none" required />
-                    <button type="submit" disabled={carregando} className="w-full py-3 rounded-xl font-black uppercase text-xs tracking-wider bg-green-600 text-white hover:bg-green-700 transition">
-                        {carregando ? 'Autenticando...' : 'Confirmar e Entrar'}
-                    </button>
-                    <button type="button" onClick={() => setPasso('CREDENCIAIS')} className="text-xs text-gray-400 underline">Voltar</button>
-                </form>
-            )}
-        </div>
+      <ValidacaoCodigo
+        email={email}
+        tipo="login"
+        onValidado={({ usuario }) => onLogin?.(usuario)}
+        onVoltar={() => setEtapa('email')}
+      />
     );
-};
+  }
+
+  return (
+    <div className="min-h-[80vh] flex items-center justify-center px-4 py-12">
+      <div className={`w-full max-w-md p-8 border-2 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] ${isDark ? 'bg-zinc-900 border-white text-white' : 'bg-white border-black text-black'}`}>
+        <div className="flex flex-col items-center mb-6">
+          <LogoIcone size={56} />
+          <h2 className="mt-4 text-2xl font-black uppercase">Login - Apenas E-mail</h2>
+          <p className={`mt-2 text-xs text-center ${isDark ? 'text-zinc-300' : 'text-zinc-600'}`}>Sem senha, sem WhatsApp. Código enviado por e-mail.</p>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="text-xs font-black uppercase">E-mail cadastrado</label>
+            <input
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="seu@email.com"
+              className={`mt-1 w-full px-4 py-3 text-sm border-2 focus:outline-none ${isDark ? 'bg-black text-white border-white focus:border-[#0066FF]' : 'bg-white text-black border-black focus:border-[#E53935]'}`}
+              onKeyDown={e => e.key === 'Enter' && solicitarCodigo()}
+            />
+          </div>
+
+          {erro && <div className="p-3 bg-[#E53935] text-white border-2 border-black text-xs font-bold">❌ {erro}</div>}
+
+          <button
+            onClick={solicitarCodigo}
+            disabled={carregando || !email}
+            className={`w-full py-4 font-black uppercase text-sm border-2 border-black ${isDark ? 'bg-[#0066FF] text-white hover:bg-blue-600' : 'bg-black text-white hover:bg-zinc-800'} ${carregando ? 'opacity-50' : ''}`}
+          >
+            {carregando ? 'Enviando código...' : 'Enviar Código por E-mail 📧'}
+          </button>
+
+          <p className={`text-[10px] text-center ${isDark ? 'text-zinc-400' : 'text-zinc-500'}`}>
+            Você receberá um código de 6 dígitos por e-mail válido por 5 minutos.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
