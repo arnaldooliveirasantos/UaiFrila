@@ -5,7 +5,6 @@ export class AuthService {
   private authRepo = new AuthRepository();
 
   async registrar(dados: any) {
-    // Validar cidade ativa se informou endereço
     if (dados.cidade || dados.cidade_nome) {
       const cidadeNome = dados.cidade_nome || dados.cidade;
       const cidades = await this.authRepo.buscarCidadesAtivas();
@@ -18,7 +17,7 @@ export class AuthService {
         if (!valido) throw new Error(`Endereço fora do raio da cidade ${cidadeNome}`);
       }
     }
-    const { nome, cpf, email, senha = 'validacao_sistema_senha_interna' } = dados; // senha removida do frontend - login por validação
+    const { nome, cpf, email, senha = 'validacao_sistema_senha_interna' } = dados;
     const emailLimpo = email?.trim().toLowerCase();
     if (!emailLimpo || !emailLimpo.includes('@')) throw new Error('E-mail inválido');
     if (!nome) throw new Error('Nome obrigatório');
@@ -27,7 +26,22 @@ export class AuthService {
     if (existe) throw new Error('E-mail já cadastrado: ' + emailLimpo);
     const senhaHash = this.authRepo.hashSenha(senha);
     const statusAguardandoId = await this.authRepo.buscarIdStatusPorChave('AGUARDANDO_VALIDACAO');
-    const usuarioRows = await this.authRepo.criarUsuarioCompleto({...dados, email: emailLimpo, status_usuario_id: statusAguardandoId, status_chave: 'AGUARDANDO_VALIDACAO'}, senhaHash);
+    
+    // Definir tipo_usuario_id baseado no tipo enviado
+    let tipoChave = 'FREELA';
+    if (dados.tipo_chave) tipoChave = dados.tipo_chave;
+    else if (dados.tipo) tipoChave = dados.tipo;
+    else if (dados.is_contratante && dados.is_freela) tipoChave = 'DUAL';
+    else if (dados.is_contratante || dados.isContratante) tipoChave = 'CONTRATANTE';
+    else tipoChave = 'FREELA';
+    
+    let tipoId = dados.tipo_usuario_id;
+    if (!tipoId) {
+      const tipoRow = await this.authRepo.buscarTipoPorChave(tipoChave);
+      tipoId = tipoRow?.id || 1;
+    }
+
+    const usuarioRows = await this.authRepo.criarUsuarioCompleto({...dados, email: emailLimpo, status_usuario_id: statusAguardandoId, tipo_usuario_id: tipoId, tipo_chave: tipoChave, status_chave: 'AGUARDANDO_VALIDACAO'}, senhaHash);
     const usuarioCriado = usuarioRows[0];
     const temTemplate = await this.authRepo.existeTemplate('CONFIRMACAO_CADASTRO');
     if (!temTemplate) {
@@ -76,7 +90,7 @@ export class AuthService {
       await this.authRepo.inserirDisparoLogin(template.id, usuario.id, emailLimpo, template.titulo_assunto, corpo, codigo, minutos);
       return { status: 'AGUARDANDO_VALIDACAO_EMAIL', email: emailLimpo };
     } catch (e:any) {
-      const token = jwt.sign({ id: usuario.id, email: usuario.email, is_admin: usuario.is_admin || true, status_usuario_id: usuario.status_usuario_id }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
+      const token = jwt.sign({ id: usuario.id, email: usuario.email, tipo_chave: usuario.tipo_chave, tipo_usuario_id: usuario.tipo_usuario_id, nivel_permissao: usuario.nivel_permissao, status_usuario_id: usuario.status_usuario_id }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
       return { sucesso: true, token, usuario: { ...usuario, nome: usuario.nome_completo }, modo: 'login_direto_sem_2fa' };
     }
   }
@@ -88,7 +102,6 @@ export class AuthService {
   }
 
   async atualizarUsuario(id: number, dados: any, usuarioLogado: any) {
-    // Verifica se está tentando alterar endereço e tem trampo em andamento - bloqueia
     const tentaAlterarEndereco = !!(dados.endereco || dados.endereco_completo || dados.cidade || dados.cidade_nome || dados.lat || dados.lng || dados.endereco_lat);
     if (tentaAlterarEndereco) {
       const trampo = await this.authRepo.verificarTrampoEmAndamento(id);
@@ -96,7 +109,6 @@ export class AuthService {
         throw new Error('Não é possível alterar endereço enquanto houver trampo em andamento. Finalize seus trampos ativos.');
       }
     }
-    // Validar endereço na cidade ativa se estiver atualizando
     if (dados.cidade || dados.cidade_nome || dados.cidade_id) {
       const cidadeNome = dados.cidade_nome || dados.cidade;
       if (cidadeNome) {
@@ -107,7 +119,6 @@ export class AuthService {
         }
       }
     }
-    // Bloqueia atualização de CPF e EMAIL na API
     if (dados.cpf !== undefined || dados.email !== undefined || dados.cpfOriginal !== undefined) {
       console.log('🚫 Tentativa de atualizar CPF ou EMAIL bloqueada pela API');
       delete dados.cpf;
@@ -119,22 +130,16 @@ export class AuthService {
     if (usuarioAtualRows.length === 0) throw new Error('Usuário não encontrado');
     const usuarioAtual = usuarioAtualRows[0];
 
-    // Regra: Se já é DUAL (is_freela && is_contratante), não pode voltar para simples
-    const eraDual = !!(usuarioAtual.is_freela && usuarioAtual.is_contratante);
+    // Regra: Se já é DUAL, não pode voltar para simples (usando tipos_usuario)
+    const eraDual = usuarioAtual.tipo_chave === 'DUAL';
     if (eraDual) {
       // Se era dual, força manter dual
-      dados.is_freela = true;
-      dados.is_contratante = true;
+      const dualTipo = await this.authRepo.buscarTipoPorChave('DUAL');
+      dados.tipo_usuario_id = dualTipo?.id || usuarioAtual.tipo_usuario_id;
     } else {
-      // Se não era dual, verifica se está tentando virar dual - pode, mas depois não volta
-      const querFreela = dados.is_freela ?? usuarioAtual.is_freela;
-      const querContratante = dados.is_contratante ?? usuarioAtual.is_contratante;
-      if (querFreela && querContratante) {
-        console.log('✅ Usuário virando DUAL - após isso não poderá voltar para simples');
-      }
-      // Garante pelo menos um
-      if (!querFreela && !querContratante) {
-        throw new Error('Selecione pelo menos Freela ou Contratante');
+      // Garante pelo menos um tipo válido
+      if (!dados.tipo_usuario_id && !dados.tipo_chave) {
+        // Mantém o atual se não informou novo
       }
     }
 
@@ -156,7 +161,37 @@ export class AuthService {
     await this.authRepo.marcarDisparoValidado(disparo.id);
     const usuarioAtivadoRows = await this.authRepo.ativarUsuarioPorEmail(emailLimpo);
     const usuario = usuarioAtivadoRows[0] || (await this.authRepo.buscarUsuarioPorEmail(emailLimpo))[0];
-    const token = jwt.sign({ id: usuario.id, email: usuario.email, is_admin: usuario.is_admin || true, status_usuario_id: usuario.status_usuario_id }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
+    const token = jwt.sign({ id: usuario.id, email: usuario.email, tipo_chave: usuario.tipo_chave, tipo_usuario_id: usuario.tipo_usuario_id, nivel_permissao: usuario.nivel_permissao, status_usuario_id: usuario.status_usuario_id }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
     return { sucesso: true, token, usuario: { ...usuario, nome: usuario.nome_completo }, mensagem: 'Usuario ativado' };
+  }
+
+
+  async reenviarCodigo(email: string, tipo: string = 'cadastro') {
+    const emailLimpo = email?.trim().toLowerCase();
+    if (!emailLimpo) throw new Error('E-mail obrigatório');
+    const usuarioRows = await this.authRepo.buscarUsuarioPorEmail(emailLimpo);
+    if (usuarioRows.length === 0) throw new Error('Usuário não encontrado: ' + emailLimpo);
+    const usuario = usuarioRows[0];
+    const minutos = await this.authRepo.buscarTempoExpiracao();
+    const chaveTemplate = tipo === 'login' ? '2FA_LOGIN' : 'CONFIRMACAO_CADASTRO';
+    const templateRows = await this.authRepo.buscarTemplatePorUso(chaveTemplate);
+    if (templateRows.length === 0) throw new Error('Template de e-mail não encontrado');
+    const template = templateRows[0];
+    const codigo = this.authRepo.gerarCodigo();
+    let corpo = template.conteudo_corpo
+      .replace('{{NOME}}', usuario.nome_completo || 'Usuário')
+      .replace('{{CODIGO}}', codigo)
+      .replace('{{EMAIL}}', emailLimpo);
+    if (tipo === 'login') {
+      await this.authRepo.inserirDisparoLogin(template.id, usuario.id, emailLimpo, template.titulo_assunto, corpo, codigo, minutos);
+    } else {
+      await this.authRepo.inserirDisparoCadastro(template.id, emailLimpo, template.titulo_assunto, corpo, codigo, minutos, { email: emailLimpo, nome: usuario.nome_completo });
+    }
+    return { sucesso: true, mensagem: 'Código reenviado', email: emailLimpo };
+  }
+
+
+  async listarTiposUsuario() {
+    return await this.authRepo.buscarTiposUsuario();
   }
 }

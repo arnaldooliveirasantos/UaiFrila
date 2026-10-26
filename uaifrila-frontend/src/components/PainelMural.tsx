@@ -31,7 +31,7 @@ export default function PainelMural({ usuario: usuarioProp }: Props) {
         const ls = localStorage.getItem('uaifrila_usuario');
         if (ls) { try { usuarioAtual = JSON.parse(ls); } catch {} }
       }
-      if (usuarioAtual?.status_usuario_id === 1) { setErro('AGUARDANDO_VALIDACAO'); setCarregando(false); return; }
+      // Verifica se precisa validar e-mail (sem expor status interno)
 
       try {
         let res = await fetch(`${API}/vagas/mural`, {

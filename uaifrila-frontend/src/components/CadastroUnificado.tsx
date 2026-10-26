@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useTheme } from '../context/ThemeContext';
+import { useTheme, getInputClass, getLabelClass, getCardClass } from '../context/ThemeContext';
 import ValidacaoCodigo from './ValidacaoCodigo';
 import GoogleEnderecoInput from './GoogleEnderecoInput';
 
@@ -10,18 +10,11 @@ interface Props {
   onAtualizado?: (usuario: any) => void;
 }
 
-function apenasNumeros(str: string) {
-  return (str || '').replace(/\D/g, '');
-}
+function apenasNumeros(str: string) { return (str || '').replace(/\D/g, ''); }
 function mascararCPF(cpf: string) {
   const nums = apenasNumeros(cpf);
   if (nums.length < 11) return '***.***.***-**';
   return `${nums.slice(0,3)}.***.***-${nums.slice(9,11)}`;
-}
-function mascararCNPJ(cnpj: string) {
-  const nums = apenasNumeros(cnpj);
-  if (nums.length < 14) return '**.***.***/****-**';
-  return `${nums.slice(0,2)}.***.***/****-${nums.slice(12,14)}`;
 }
 function formatarCPF(valor: string) {
   const nums = apenasNumeros(valor).slice(0, 11);
@@ -49,6 +42,8 @@ const TERMOS = [
 
 export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, modoEdicao = false, onAtualizado }: Props) {
   const { isDark } = useTheme();
+  const [queroTrampar, setQueroTrampar] = useState(true);
+  const [queroContratar, setQueroContratar] = useState(false);
   const [form, setForm] = useState({
     nome: '', cpf: '', cpfOriginal: '', email: '',
     cnpj: '', nomeFantasia: '',
@@ -57,232 +52,181 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
     lat: undefined as number | undefined, lng: undefined as number | undefined,
     endereco_lat: undefined as number | undefined, endereco_lng: undefined as number | undefined,
     comoChega: 'Moto', ajudaUber: 10,
-    is_freela: true, is_contratante: false,
     termos: [false, false, false, false, false],
     temMei: false
   });
   const [etapa, setEtapa] = useState<'form' | 'codigo'>('form');
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState('');
-  const [statusInfo, setStatusInfo] = useState<any>(null);
   const [mensagem, setMensagem] = useState('');
-  const [isDualOriginal, setIsDualOriginal] = useState(false);
-  const [virouDual, setVirouDual] = useState(false);
   const API = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
+  // Calcula tipo_chave baseado nos dois botões
+  const getTipoChave = () => {
+    if (queroTrampar && queroContratar) return 'DUAL';
+    if (queroContratar) return 'CONTRATANTE';
+    return 'FREELA';
+  };
+
+  const isFreela = queroTrampar;
+  const isContratante = queroContratar;
+
   useEffect(() => {
-    const carregar = (u: any) => {
-      if (!u) return;
-      const dual = !!(u.is_freela && u.is_contratante);
-      setIsDualOriginal(dual);
-      setVirouDual(false);
-      setForm({
-        nome: u.nome_completo || u.nome || '',
-        cpf: apenasNumeros(u.cpf || ''),
-        cpfOriginal: u.cpf || '',
-        email: u.email || '',
-        cnpj: apenasNumeros(u.cnpj || ''),
-        nomeFantasia: u.nome_fantasia || u.nomeFantasia || '',
-        funcao: u.funcao_principal || u.funcao || 'Garçom',
-        valorHora: u.valor_hora_base || u.valorHora || 20,
-        bio: u.bio || '',
-        bairro: u.bairro || u.cidade_nome || 'Centro',
-        endereco: u.endereco_completo || u.endereco || '',
-        endereco_completo: u.endereco_completo || u.endereco || '',
-        cidade: u.cidade_nome || u.cidade || 'Uberlândia',
-        cidade_id: u.cidade_id || 1,
-        cidade_nome: u.cidade_nome || u.cidade || 'Uberlândia',
-        lat: u.endereco_lat || u.lat,
-        lng: u.endereco_lng || u.lng,
-        endereco_lat: u.endereco_lat || u.lat,
-        endereco_lng: u.endereco_lng || u.lng,
-        comoChega: u.como_chega || u.comoChega || 'Moto',
-        ajudaUber: u.ajuda_uber || u.ajudaUber || 10,
-        is_freela: u.is_freela ?? true,
-        is_contratante: u.is_contratante ?? false,
-        termos: [true, true, true, true, true],
-        temMei: u.tem_mei || u.temMei || false
-      });
-    };
-    const buscarCompleto = async () => {
-      if (modoEdicao) {
-        const token = localStorage.getItem('uaifrila_token');
-        if (!token) { if (usuarioProp) carregar(usuarioProp); return; }
-        try {
-          const res = await fetch(`${API}/usuarios/me`, { headers: { 'Authorization': `Bearer ${token}` } });
-          if (res.ok) {
-            const data = await res.json();
-            carregar(data.usuario || data);
-            return;
-          }
-        } catch {}
-        if (usuarioProp) carregar(usuarioProp);
-        else {
-          const ls = localStorage.getItem('uaifrila_usuario');
-          if (ls) { try { carregar(JSON.parse(ls)); } catch {} }
-        }
-      }
-    };
-    if (!modoEdicao) {
-      const tipo = localStorage.getItem('uaifrila_tipo_cadastro');
-      if (tipo === 'contratante') setForm(prev => ({ ...prev, is_freela: false, is_contratante: true }));
-      else if (tipo === 'freela') setForm(prev => ({ ...prev, is_freela: true, is_contratante: false }));
+    const tipo = localStorage.getItem('uaifrila_tipo_cadastro');
+    if (tipo === 'CONTRATANTE') {
+      setQueroTrampar(false);
+      setQueroContratar(true);
     }
-    buscarCompleto();
+  }, []);
+
+  useEffect(() => {
+    if (modoEdicao && usuarioProp) {
+      const t = usuarioProp.tipo_chave || 'FREELA';
+      if (t === 'DUAL') { setQueroTrampar(true); setQueroContratar(true); }
+      else if (t === 'CONTRATANTE') { setQueroTrampar(false); setQueroContratar(true); }
+      else { setQueroTrampar(true); setQueroContratar(false); }
+      setForm({
+        nome: usuarioProp.nome_completo || '',
+        cpf: apenasNumeros(usuarioProp.cpf || ''),
+        cpfOriginal: usuarioProp.cpf || '',
+        email: usuarioProp.email || '',
+        cnpj: apenasNumeros(usuarioProp.cnpj || ''),
+        nomeFantasia: usuarioProp.nome_fantasia || '',
+        funcao: usuarioProp.funcao_principal || 'Garçom',
+        valorHora: usuarioProp.valor_hora_base || 20,
+        bio: usuarioProp.bio || '',
+        bairro: usuarioProp.bairro || 'Centro',
+        endereco: usuarioProp.endereco_completo || '',
+        endereco_completo: usuarioProp.endereco_completo || '',
+        cidade: usuarioProp.cidade_nome || 'Uberlândia',
+        cidade_id: usuarioProp.cidade_id || 1,
+        cidade_nome: usuarioProp.cidade_nome || 'Uberlândia',
+        lat: usuarioProp.endereco_lat,
+        lng: usuarioProp.endereco_lng,
+        endereco_lat: usuarioProp.endereco_lat,
+        endereco_lng: usuarioProp.endereco_lng,
+        comoChega: usuarioProp.como_chega || 'Moto',
+        ajudaUber: usuarioProp.ajuda_uber || 10,
+        termos: [true, true, true, true, true],
+        temMei: usuarioProp.tem_mei || false
+      });
+    }
   }, [modoEdicao, usuarioProp]);
 
-  const handleFreelaChange = (checked: boolean) => {
-    if (modoEdicao && (isDualOriginal || virouDual)) return;
-    if (!checked && !form.is_contratante) return;
-    const nf = { ...form, is_freela: checked };
-    if (nf.is_freela && nf.is_contratante && !isDualOriginal) setVirouDual(true);
-    setForm(nf);
-  };
-  const handleContratanteChange = (checked: boolean) => {
-    if (modoEdicao && (isDualOriginal || virouDual)) return;
-    if (!checked && !form.is_freela) return;
-    const nf = { ...form, is_contratante: checked };
-    if (nf.is_freela && nf.is_contratante && !isDualOriginal) setVirouDual(true);
-    setForm(nf);
-  };
-
   const handleSubmit = async () => {
-    if (!modoEdicao && !form.termos.every(t=>t)) { setErro('Aceite todos os 5 termos'); return; }
-    if (!form.email.includes('@')) { setErro('E-mail inválido'); return; }
-    if (form.cpf && form.cpf.length !== 11) { setErro('CPF deve ter 11 dígitos'); return; }
-    if (!form.is_freela && !form.is_contratante) { setErro('Selecione pelo menos Freela ou Contratante'); return; }
-    if (!form.cidade_nome && !form.cidade) { setErro('Selecione uma cidade ativa'); return; }
-    if (!form.endereco_completo && !form.endereco) { setErro('Informe seu endereço completo com busca no mapa'); return; }
-    setCarregando(true); setErro(''); setMensagem('');
+    setErro(''); setMensagem('');
+    if (!form.nome || !form.cpf || !form.email) { setErro('Preencha nome, CPF e e-mail'); return; }
+    if (!queroTrampar && !queroContratar) { setErro('Escolha pelo menos uma opção: Quero Trampar ou Quero Contratar'); return; }
+    if (!form.termos.every(Boolean)) { setErro('Aceite todos os termos'); return; }
+    setCarregando(true);
     try {
-      if (modoEdicao) {
-        const token = localStorage.getItem('uaifrila_token');
-        const usuarioLS = JSON.parse(localStorage.getItem('uaifrila_usuario') || '{}');
-        const id = usuarioProp?.id || usuarioLS.id;
-        const res = await fetch(`${API}/usuarios/${id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-          body: JSON.stringify({
-            nome: form.nome,
-            bairro: form.bairro,
-            endereco: form.endereco_completo || form.endereco,
-            endereco_completo: form.endereco_completo || form.endereco,
-            cidade: form.cidade_nome,
-            cidade_nome: form.cidade_nome,
-            cidade_id: form.cidade_id,
-            lat: form.lat,
-            lng: form.lng,
-            endereco_lat: form.endereco_lat,
-            endereco_lng: form.endereco_lng,
-            funcao: form.funcao,
-            valorHora: form.valorHora,
-            cnpj: form.cnpj,
-            nomeFantasia: form.nomeFantasia,
-            bio: form.bio,
-            is_freela: form.is_freela,
-            is_contratante: form.is_contratante,
-            comoChega: form.comoChega,
-            ajudaUber: form.ajudaUber,
-            temMei: form.temMei
-          })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.erro || 'Erro ao atualizar');
-        setMensagem('Atualizado com sucesso!');
-        if (onAtualizado) onAtualizado(data.usuario);
-        localStorage.setItem('uaifrila_usuario', JSON.stringify(data.usuario));
-      } else {
-        const res = await fetch(`${API}/usuarios/registrar`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            nome: form.nome,
-            cpf: form.cpf,
-            email: form.email,
-            bairro: form.bairro,
-            endereco: form.endereco_completo || form.endereco,
-            endereco_completo: form.endereco_completo || form.endereco,
-            cidade: form.cidade_nome,
-            cidade_nome: form.cidade_nome,
-            cidade_id: form.cidade_id,
-            lat: form.lat,
-            lng: form.lng,
-            endereco_lat: form.endereco_lat,
-            endereco_lng: form.endereco_lng,
-            funcao: form.funcao,
-            valorHora: form.valorHora,
-            cnpj: form.cnpj,
-            nomeFantasia: form.nomeFantasia,
-            bio: form.bio,
-            isFreela: form.is_freela,
-            isContratante: form.is_contratante,
-            comoChega: form.comoChega,
-            ajudaUber: form.ajudaUber,
-            temMei: form.temMei
-          })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.erro || 'Erro ao cadastrar');
-        if (data.status === 'AGUARDANDO_VALIDACAO_EMAIL') {
-          setStatusInfo(data);
-          setEtapa('codigo');
-        } else if (data.sucesso) {
-          if (onCadastro) onCadastro();
-        }
+      const res = await fetch(`${API}/auth/cadastro`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nome: form.nome, cpf: form.cpf, email: form.email,
+          cnpj: form.cnpj, nomeFantasia: form.nomeFantasia,
+          funcao: form.funcao, valorHora: form.valorHora, bio: form.bio,
+          bairro: form.bairro, endereco: form.endereco_completo || form.endereco,
+          endereco_completo: form.endereco_completo || form.endereco,
+          cidade: form.cidade_nome, cidade_nome: form.cidade_nome, cidade_id: form.cidade_id,
+          lat: form.endereco_lat || form.lat, lng: form.endereco_lng || form.lng,
+          endereco_lat: form.endereco_lat || form.lat, endereco_lng: form.endereco_lng || form.lng,
+          tipo_chave: getTipoChave(),
+          temMei: form.temMei
+        })
+      });
+
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const text = await res.text();
+        throw new Error(`Backend retornou ${res.status} não-JSON. Verifique API em ${API}.`);
       }
-    } catch (e:any) { setErro(e.message); }
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.erro || 'Erro no cadastro');
+      setEtapa('codigo');
+    } catch (e: any) { setErro(e.message); }
     finally { setCarregando(false); }
   };
 
-  if (etapa === 'codigo' && statusInfo) {
-    return <ValidacaoCodigo email={statusInfo.email || form.email} tipo="cadastro" onValidado={(dados:any) => { localStorage.setItem('uaifrila_token', dados.token); localStorage.setItem('uaifrila_usuario', JSON.stringify(dados.usuario)); if (onCadastro) onCadastro(); }} onVoltar={() => setEtapa('form')} />;
+  if (etapa === 'codigo') {
+    return <ValidacaoCodigo email={form.email} tipo="cadastro" onValidado={() => { onCadastro?.(); }} onVoltar={() => setEtapa('form')} />;
   }
 
-  const freelaDesabilitado = modoEdicao && (isDualOriginal || virouDual);
-  const contratanteDesabilitado = modoEdicao && (isDualOriginal || virouDual);
+  const inputClass = getInputClass(isDark);
+  const labelClass = getLabelClass(isDark);
+  const cardClass = getCardClass(isDark);
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-8">
-      <div className={`p-6 md:p-8 border-2 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] ${isDark ? 'bg-zinc-900 border-white' : 'bg-white border-black'}`}>
-        <h2 className={`text-2xl font-black uppercase ${isDark ? 'text-white' : 'text-black'}`}>{modoEdicao ? 'Editar Perfil' : 'Cadastro'}</h2>
-        <p className="text-xs mt-1 opacity-70">{modoEdicao ? 'Atualize seus dados - CPF e E-mail bloqueados' : 'Preencha seus dados - CPF e E-mail liberados'}</p>
+    <div className="max-w-4xl mx-auto px-4 py-8">
+      <div className={cardClass}>
+        <h2 className="text-3xl font-black uppercase tracking-tighter">Cadastro</h2>
 
-        <div className="mt-6 grid grid-cols-2 gap-3">
-          <label className={`p-4 border-2 flex items-center gap-3 ${freelaDesabilitado ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'} ${form.is_freela ? 'bg-[#E53935] text-white border-black' : 'border-black/20'}`}>
-            <input type="checkbox" checked={form.is_freela} disabled={freelaDesabilitado} onChange={e=>handleFreelaChange(e.target.checked)} />
-            <span className="font-black uppercase text-xs">Freela {freelaDesabilitado ? '🔒' : ''}</span>
-          </label>
-          <label className={`p-4 border-2 flex items-center gap-3 ${contratanteDesabilitado ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'} ${form.is_contratante ? 'bg-[#E53935] text-white border-black' : 'border-black/20'}`}>
-            <input type="checkbox" checked={form.is_contratante} disabled={contratanteDesabilitado} onChange={e=>handleContratanteChange(e.target.checked)} />
-            <span className="font-black uppercase text-xs">Contratante {contratanteDesabilitado ? '🔒' : ''}</span>
-          </label>
+        {/* BOTÕES QUERO TRAMPAR / QUERO CONTRATAR - PODE ESCOLHER OS 2 */}
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <button
+            type="button"
+            onClick={() => setQueroTrampar(!queroTrampar)}
+            className={`p-6 border-2 text-left transition-all flex items-center gap-4
+              ${queroTrampar 
+                ? 'bg-[#FFC700] border-black text-black shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]' 
+                : isDark ? 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-white' : 'bg-white border-black/20 text-black/50 hover:border-black'}`}
+          >
+            <span className="text-4xl">💪</span>
+            <div>
+              <div className="font-black uppercase text-sm">Quero Trampar</div>
+              <div className="text-[11px]">Trabalhar como freela</div>
+            </div>
+            <div className={`ml-auto w-6 h-6 border-2 flex items-center justify-center ${queroTrampar ? 'bg-black border-black text-[#FFC700]' : 'border-current'}`}>
+              {queroTrampar && '✓'}
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setQueroContratar(!queroContratar)}
+            className={`p-6 border-2 text-left transition-all flex items-center gap-4
+              ${queroContratar 
+                ? 'bg-[#E53935] border-black text-white shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]' 
+                : isDark ? 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-white' : 'bg-white border-black/20 text-black/50 hover:border-black'}`}
+          >
+            <span className="text-4xl">🏢</span>
+            <div>
+              <div className="font-black uppercase text-sm">Quero Contratar</div>
+              <div className="text-[11px]">Contratar freelas</div>
+            </div>
+            <div className={`ml-auto w-6 h-6 border-2 flex items-center justify-center ${queroContratar ? 'bg-black border-black text-white' : 'border-current'}`}>
+              {queroContratar && '✓'}
+            </div>
+          </button>
         </div>
 
-        <h3 className="mt-8 font-black uppercase text-sm">Dados</h3>
-        <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
-          <div className="md:col-span-2 flex flex-col gap-1">
-            <label className="text-[10px] font-black uppercase">Nome Completo</label>
-            <input value={form.nome} onChange={e=>setForm({...form, nome: e.target.value})} placeholder="Nome completo" className={`w-full h-[48px] px-4 text-sm border-2 ${isDark ? 'bg-black text-white border-white' : 'bg-white text-black border-black'}`} />
+        {queroTrampar && queroContratar && (
+          <div className={`mt-3 p-3 border-2 text-xs font-bold ${isDark ? 'bg-[#0066FF]/20 border-[#0066FF] text-white' : 'bg-black text-white border-black'}`}>
+            ✨ Você será cadastrado como DUAL - pode trampar e contratar!
+          </div>
+        )}
+
+        {/* FORMULÁRIO COM ESTILO UNIFICADO */}
+        <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="flex flex-col gap-1">
+            <label className={labelClass}>Nome completo</label>
+            <input value={form.nome} onChange={e=>setForm({...form, nome: e.target.value})} placeholder="Seu nome" className={inputClass} />
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-black uppercase flex items-center gap-2">CPF {modoEdicao && <span className="px-2 py-0.5 bg-zinc-300 text-black text-[8px] border border-black">BLOQUEADO 🔒</span>}</label>
+            <label className={labelClass}>CPF {modoEdicao && <span className="text-[8px]">🔒</span>}</label>
             {modoEdicao ? (
-              <div className="relative h-[48px]">
-                <input value={form.cpfOriginal ? mascararCPF(form.cpfOriginal) : (form.cpf ? mascararCPF(form.cpf) : '')} disabled={true} placeholder="CPF não informado" className="w-full h-[48px] px-4 text-sm border-2 bg-zinc-200 text-zinc-600 border-black/20 cursor-not-allowed font-mono" />
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px]">🔒</div>
-              </div>
+              <input value={mascararCPF(form.cpfOriginal)} disabled className={`${inputClass} bg-zinc-200 cursor-not-allowed`} />
             ) : (
-              <input value={formatarCPF(form.cpf)} onChange={e=>setForm({...form, cpf: apenasNumeros(e.target.value).slice(0,11)})} placeholder="123.456.789-10" maxLength={14} className={`w-full h-[48px] px-4 text-sm border-2 ${isDark ? 'bg-black text-white border-white' : 'bg-white text-black border-black'}`} />
+              <input value={formatarCPF(form.cpf)} onChange={e=>setForm({...form, cpf: apenasNumeros(e.target.value).slice(0,11)})} placeholder="000.000.000-00" className={inputClass} />
             )}
           </div>
+
           <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-black uppercase">E-mail {modoEdicao && <span className="px-2 py-0.5 bg-zinc-300 text-black text-[8px] border border-black">BLOQUEADO 🔒</span>}</label>
-            {modoEdicao ? (
-              <input value={form.email} disabled={true} placeholder="E-mail" className="w-full h-[48px] px-4 text-sm border-2 bg-zinc-200 text-zinc-500 border-black/20 cursor-not-allowed" />
-            ) : (
-              <input value={form.email} onChange={e=>setForm({...form, email: e.target.value})} placeholder="seu@email.com" className="w-full h-[48px] px-4 text-sm border-2 ${isDark ? 'bg-black text-white border-white' : 'bg-white text-black border-black'}" />
-            )}
+            <label className={labelClass}>E-mail {modoEdicao && <span className="text-[8px]">🔒</span>}</label>
+            <input type="email" value={form.email} disabled={modoEdicao} onChange={e=>setForm({...form, email: e.target.value.toLowerCase()})} placeholder="seu@email.com" className={`${inputClass} ${modoEdicao ? 'bg-zinc-200 cursor-not-allowed' : ''} lowercase`} />
           </div>
 
           <div className="md:col-span-2">
@@ -308,52 +252,49 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
             />
           </div>
 
-          {/* Função e Valor Hora - só para Freela ou Dual */}
-          {form.is_freela && (
+          {isFreela && (
             <>
               <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-black uppercase">Função</label>
-                <select value={form.funcao} onChange={e=>setForm({...form, funcao: e.target.value})} className={`w-full h-[48px] px-4 text-sm border-2 ${isDark ? 'bg-black text-white border-white' : 'bg-white text-black border-black'}`}>
+                <label className={labelClass}>Função</label>
+                <select value={form.funcao} onChange={e=>setForm({...form, funcao: e.target.value})} className={inputClass}>
                   {['Garçom','Bartender','Cozinheiro','Auxiliar de Cozinha','Recepcionista','Segurança','Limpeza','Outros'].map(f=><option key={f} value={f}>{f}</option>)}
                 </select>
               </div>
               <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-black uppercase">Valor Hora (R$)</label>
-                <input type="number" value={form.valorHora} onChange={e=>setForm({...form, valorHora: Number(e.target.value)})} className={`w-full h-[48px] px-4 text-sm border-2 ${isDark ? 'bg-black text-white border-white' : 'bg-white text-black border-black'}`} />
+                <label className={labelClass}>Valor Hora (R$)</label>
+                <input type="number" value={form.valorHora} onChange={e=>setForm({...form, valorHora: Number(e.target.value)})} className={inputClass} />
               </div>
             </>
           )}
 
-          {/* CNPJ e Nome Fantasia - só para Contratante ou Dual */}
-          {form.is_contratante && (
+          {isContratante && (
             <>
               <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-black uppercase">CNPJ (opcional)</label>
-                <input value={formatarCNPJ(form.cnpj)} onChange={e=>setForm({...form, cnpj: apenasNumeros(e.target.value).slice(0,14)})} placeholder="12.345.678/0001-99" maxLength={18} className={`w-full h-[48px] px-4 text-sm border-2 ${isDark ? 'bg-black text-white border-white' : 'bg-white text-black border-black'}`} />
+                <label className={labelClass}>CNPJ (opcional)</label>
+                <input value={formatarCNPJ(form.cnpj)} onChange={e=>setForm({...form, cnpj: apenasNumeros(e.target.value).slice(0,14)})} placeholder="00.000.000/0000-00" className={inputClass} />
               </div>
               <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-black uppercase">Nome Fantasia</label>
-                <input value={form.nomeFantasia} onChange={e=>setForm({...form, nomeFantasia: e.target.value})} placeholder="Nome Fantasia" className={`w-full h-[48px] px-4 text-sm border-2 ${isDark ? 'bg-black text-white border-white' : 'bg-white text-black border-black'}`} />
+                <label className={labelClass}>Nome Fantasia</label>
+                <input value={form.nomeFantasia} onChange={e=>setForm({...form, nomeFantasia: e.target.value})} placeholder="Nome Fantasia" className={inputClass} />
               </div>
             </>
           )}
         </div>
 
-        <h3 className="mt-8 font-black uppercase text-sm">Termos Aceitos {modoEdicao ? '(Somente visualização 🔒)' : ''}</h3>
+        <h3 className="mt-8 font-black uppercase text-sm">Termos</h3>
         <div className="mt-3 space-y-2">
           {TERMOS.map((t,i)=>(
-            <label key={t.id} className={`flex gap-3 p-3 border-2 text-xs ${modoEdicao ? 'bg-zinc-100 border-black/10 cursor-not-allowed opacity-80' : 'border-black/10 cursor-pointer'}`}>
-              <input type="checkbox" checked={form.termos[i]} disabled={modoEdicao} onChange={e=>{ if (!modoEdicao) { const nt=[...form.termos]; nt[i]=e.target.checked; setForm({...form, termos: nt}); }}} />
-              <div><span className="font-black">{t.titulo}</span> <span className="opacity-70">- {t.desc}</span>{modoEdicao && <span className="ml-2 text-[8px] px-1 bg-zinc-300 border">ACEITO 🔒</span>}</div>
+            <label key={t.id} className={`flex gap-3 p-3 border-2 text-xs cursor-pointer ${isDark ? 'border-zinc-700 hover:border-white bg-zinc-900' : 'border-black/10 hover:border-black bg-white'}`}>
+              <input type="checkbox" checked={form.termos[i]} onChange={e=>{ const nt=[...form.termos]; nt[i]=e.target.checked; setForm({...form, termos: nt}); }} />
+              <div><span className="font-black">{t.titulo}</span> <span className="opacity-70">- {t.desc}</span></div>
             </label>
           ))}
         </div>
 
         {erro && <div className="mt-4 p-3 bg-[#E53935] text-white border-2 border-black text-xs font-bold">❌ {erro}</div>}
-        {mensagem && <div className="mt-4 p-3 bg-[#00C851] text-white border-2 border-black text-xs font-bold">{mensagem}</div>}
 
-        <button onClick={handleSubmit} disabled={carregando} className={`mt-8 w-full py-4 font-black uppercase text-sm border-2 border-black ${isDark ? 'bg-[#0066FF] text-white' : 'bg-black text-white'} ${carregando ? 'opacity-50' : ''}`}>
-          {carregando ? 'Salvando...' : modoEdicao ? 'Salvar Alterações' : 'Cadastrar'}
+        <button onClick={handleSubmit} disabled={carregando} className={`mt-8 w-full py-4 font-black uppercase text-sm border-2 border-black transition-all ${isDark ? 'bg-[#0066FF] text-white hover:bg-[#0055DD]' : 'bg-black text-white hover:bg-zinc-800'} ${carregando ? 'opacity-50' : ''}`}>
+          {carregando ? 'Salvando...' : modoEdicao ? 'Salvar Alterações' : `Cadastrar como ${getTipoChave()}`}
         </button>
       </div>
     </div>

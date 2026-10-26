@@ -43,7 +43,8 @@ export class AuthController {
     try {
       const userIdParam = Number(req.params.id);
       const userIdToken = req.user?.id;
-      if (userIdParam !== userIdToken && !req.user?.is_admin) {
+      const nivel = req.user?.nivel_permissao || 0;
+      if (userIdParam !== userIdToken && nivel < 80) {
         res.status(403).json({ erro: 'Sem permissão para editar outro usuário' }); return;
       }
       // Bloqueia CPF e EMAIL explicitamente
@@ -62,6 +63,27 @@ export class AuthController {
 
   public verificarToken2FA = async (req: Request, res: Response): Promise<void> => {
     return this.verificarTokenEmail(req, res);
+  };
+
+  public listarTiposUsuario = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const tipos = await this.authService.listarTiposUsuario();
+      res.status(200).json({ tipos });
+    } catch (e: any) {
+      res.status(500).json({ erro: e.message });
+    }
+  };
+
+
+  public reenviarCodigo = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { email, tipo } = req.body;
+      const result = await this.authService.reenviarCodigo(email, tipo || 'cadastro');
+      res.status(200).json(result);
+    } catch (e: any) {
+      console.error('🔥 ERRO REENVIAR CODIGO:', e);
+      res.status(400).json({ erro: e.message });
+    }
   };
 
   public verificarTokenEmail = async (req: Request, res: Response): Promise<void> => {

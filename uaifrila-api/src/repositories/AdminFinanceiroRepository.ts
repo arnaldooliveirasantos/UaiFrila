@@ -2,12 +2,27 @@ import { BaseRepository } from './BaseRepository';
 
 export class AdminFinanceiroRepository extends BaseRepository {
     
+    public async listarVariaveisSistema(): Promise<any[]> {
+        return await this.query('SELECT * FROM variaveis_sistema ORDER BY categoria, chave');
+    }
+
     public async listarVariaveisAmbiente(): Promise<any[]> {
-        return await this.query('SELECT * FROM variaveis_ambiente ORDER BY chave');
+        // DEPRECATED - agora usa variaveis_sistema
+        return await this.listarVariaveisSistema();
+    }
+
+    public async atualizarVariavelSistema(chave: string, valor: string, valorNumerico?: number): Promise<any[]> {
+        return await this.query('UPDATE variaveis_sistema SET valor = $1, valor_numerico = $3, atualizado_em = NOW() WHERE chave = $2 RETURNING *', [valor, chave, valorNumerico || null]);
     }
 
     public async atualizarVariavelAmbiente(chave: string, valor: string): Promise<any[]> {
-        return await this.query('UPDATE variaveis_ambiente SET valor = \$1 WHERE chave = \$2 RETURNING *', [valor, chave]);
+        // DEPRECATED - agora usa variaveis_sistema
+        return await this.atualizarVariavelSistema(chave, valor);
+    }
+
+    public async buscarVariavel(chave: string): Promise<any> {
+        const rows = await this.query('SELECT * FROM variaveis_sistema WHERE chave = $1', [chave]);
+        return rows[0] || null;
     }
 
     public async buscarTransacoesPorPeriodo(dataInicio: string, dataFim: string): Promise<any[]> {

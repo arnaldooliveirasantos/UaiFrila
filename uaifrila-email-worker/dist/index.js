@@ -34,6 +34,11 @@ async function processarFilaEmails() {
     });
     try {
         await client.connect();
+        try {
+            await client.query(`ALTER TABLE email_historico_disparos ADD COLUMN IF NOT EXISTS enviado_em TIMESTAMP`);
+            await client.query(`ALTER TABLE email_historico_disparos ADD COLUMN IF NOT EXISTS ultima_tentativa TIMESTAMP`);
+            await client.query(`ALTER TABLE email_historico_disparos ADD COLUMN IF NOT EXISTS atualizado_em TIMESTAMP DEFAULT NOW()`);
+        } catch {}
         const queryFila = `
             SELECT 
                 h.id, 
@@ -49,7 +54,7 @@ async function processarFilaEmails() {
             WHERE 
                 h.status_id = (SELECT id FROM email_status WHERE chave = 'EM_ESPERA')
                 AND h.tentativas < $2::int
-                AND h.enviado_em IS NULL
+                AND (h.enviado_em IS NULL OR h.enviado_em IS NOT NULL AND h.status_id = (SELECT id FROM email_status WHERE chave='EM_ESPERA'))
                 AND (h.expira_em IS NULL OR h.expira_em > NOW())
             ORDER BY h.criado_em ASC 
             LIMIT $1::int

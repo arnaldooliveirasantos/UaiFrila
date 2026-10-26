@@ -41,7 +41,7 @@ export class AuthRepository extends BaseRepository {
     return map[chave.toUpperCase()] || 1;
   }
 
-  // Busca completa com todos campos incluindo CPF - SAFE sem DDL em caso de permissão negada
+  // Busca completa usando tipos_usuario como fonte de permissão
   async buscarUsuarioPorEmail(email: string) {
     const emailLimpo = email.trim().toLowerCase();
     try {
@@ -52,25 +52,27 @@ export class AuthRepository extends BaseRepository {
     try {
       return await this.query(`
         SELECT u.id, u.email, u.nome_completo, u.cpf, u.cnpj, u.nome_fantasia, u.bairro, u.endereco_completo, u.endereco_lat, u.endereco_lng, u.cidade_id, u.cidade_nome, u.funcao_principal, u.valor_hora_base, u.bio,
-               u.is_freela, u.is_contratante, u.is_admin, 
+               u.tipo_usuario_id, tu.chave as tipo_chave, tu.nome_exibicao as tipo_nome, tu.nivel_permissao,
                u.status_usuario_id, su.chave as status_chave, su.nome_exibicao as status_nome, u.criado_em
         FROM usuarios u
         LEFT JOIN status_usuario su ON su.id = u.status_usuario_id
+        LEFT JOIN tipos_usuario tu ON tu.id = u.tipo_usuario_id
         WHERE LOWER(TRIM(u.email)) = $1
       `, [emailLimpo]);
     } catch (e:any) {
       if (e.code === '42501') {
-        // Permissão negada - não tenta CREATE TABLE, só lança erro claro
-        console.error('❌ 42501 - permissão negada para esquema public. Rode FIX_42501_permissao_public.sql como postgres');
-        throw new Error('Erro de permissão no banco (42501). Rode como superuser: GRANT ALL ON SCHEMA public TO PUBLIC;');
+        console.error('❌ 42501 - permissão negada');
+        throw new Error('Erro de permissão no banco (42501)');
       }
       try {
-        return await this.query(`SELECT id, email, nome_completo, cpf, cnpj, nome_fantasia, bairro, endereco_completo, cidade_nome, funcao_principal, valor_hora_base, is_freela, is_contratante, is_admin, status_usuario_id FROM usuarios WHERE LOWER(TRIM(email)) = $1`, [emailLimpo]);
+        return await this.query(`
+          SELECT u.id, u.email, u.nome_completo, u.cpf, u.tipo_usuario_id, tu.chave as tipo_chave, tu.nivel_permissao
+          FROM usuarios u
+          LEFT JOIN tipos_usuario tu ON tu.id = u.tipo_usuario_id
+          WHERE LOWER(TRIM(u.email)) = $1`, [emailLimpo]);
       } catch (e2:any) {
-        if (e2.code === '42501') throw new Error('Erro de permissão no banco (42501). Rode FIX como postgres');
-        // Último fallback sem criar tabela se não tem permissão
         console.warn('Fallback simples buscarUsuarioPorEmail');
-        return await this.query(`SELECT id, email, nome_completo, cpf FROM usuarios WHERE LOWER(TRIM(email)) = $1`, [emailLimpo]);
+        return await this.query(`SELECT id, email, nome_completo, cpf, tipo_usuario_id FROM usuarios WHERE LOWER(TRIM(email)) = $1`, [emailLimpo]);
       }
     }
   }
@@ -80,11 +82,19 @@ export class AuthRepository extends BaseRepository {
     try {
       return await this.query(`
         SELECT u.id, u.email, u.nome_completo, u.cpf, u.cnpj, u.nome_fantasia, u.bairro, u.endereco_completo, u.endereco_lat, u.endereco_lng, u.cidade_id, u.cidade_nome, u.funcao_principal, u.valor_hora_base, u.bio,
-               u.is_freela, u.is_contratante, u.is_admin, u.status_usuario_id, su.chave as status_chave, u.criado_em
-        FROM usuarios u LEFT JOIN status_usuario su ON su.id = u.status_usuario_id WHERE u.id = $1
+               u.tipo_usuario_id, tu.chave as tipo_chave, tu.nome_exibicao as tipo_nome, tu.nivel_permissao,
+               u.status_usuario_id, su.chave as status_chave, u.criado_em
+        FROM usuarios u 
+        LEFT JOIN status_usuario su ON su.id = u.status_usuario_id 
+        LEFT JOIN tipos_usuario tu ON tu.id = u.tipo_usuario_id
+        WHERE u.id = $1
       `, [id]);
     } catch {
-      return await this.query(`SELECT id, email, nome_completo, cpf, cnpj, nome_fantasia, bairro, endereco_completo, endereco_lat, endereco_lng, cidade_id, cidade_nome, funcao_principal, valor_hora_base, is_freela, is_contratante, is_admin FROM usuarios WHERE id = $1`, [id]);
+      return await this.query(`
+        SELECT u.id, u.email, u.nome_completo, u.tipo_usuario_id, tu.chave as tipo_chave, tu.nivel_permissao
+        FROM usuarios u
+        LEFT JOIN tipos_usuario tu ON tu.id = u.tipo_usuario_id
+        WHERE u.id = $1`, [id]);
     }
   }
 
@@ -95,7 +105,7 @@ export class AuthRepository extends BaseRepository {
 
   async listarEmailsDebug() {
     try {
-      const rows = await this.query(`SELECT u.id, u.email, u.nome_completo, u.cpf, su.chave as status_chave FROM usuarios u LEFT JOIN status_usuario su ON su.id = u.status_usuario_id ORDER BY u.id DESC LIMIT 10`);
+      const rows = await this.query(`SELECT u.id, u.email, u.nome_completo, u.cpf, su.chave as status_chave, tu.chave as tipo_chave FROM usuarios u LEFT JOIN status_usuario su ON su.id = u.status_usuario_id LEFT JOIN tipos_usuario tu ON tu.id = u.tipo_usuario_id ORDER BY u.id DESC LIMIT 10`);
       console.log('📋 USUARIOS NO BANCO:', rows);
       return rows;
     } catch { return []; }
@@ -106,14 +116,24 @@ export class AuthRepository extends BaseRepository {
     await this.garantirStatusUsuario();
     const statusId = dados.status_usuario_id || await this.buscarIdStatusPorChave(dados.status_chave || dados.status || 'AGUARDANDO_VALIDACAO');
     await this.garantirColunasEndereco();
+    // Buscar tipo_usuario_id - default FREELA
+    let tipoId = dados.tipo_usuario_id;
+    if (!tipoId) {
+      const chave = (dados.tipo_chave || dados.tipo || 'FREELA').toUpperCase();
+      try {
+        const row = await this.queryOne(`SELECT id FROM tipos_usuario WHERE chave = $1`, [chave]);
+        tipoId = row?.id || 1;
+      } catch {
+        tipoId = 1;
+      }
+    }
     try {
       const usuarioCriado = await this.query(
-        `INSERT INTO usuarios (nome_completo, cpf, email, senha_hash, cnpj, nome_fantasia, is_freela, is_contratante, status_usuario_id, bairro, endereco_completo, endereco_lat, endereco_lng, cidade_id, cidade_nome, funcao_principal, valor_hora_base, bio) 
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) 
-         RETURNING id, email, nome_completo, cpf, cnpj, nome_fantasia, is_freela, is_contratante, status_usuario_id, endereco_completo, cidade_nome`,
-        [dados.nome, dados.cpf, emailLimpo, senhaHash, dados.cnpj, dados.nomeFantasia, !!dados.isFreela, !!dados.isContratante, statusId, dados.bairro || dados.cidade_nome || 'Centro', dados.endereco || dados.endereco_completo || dados.bairro, dados.lat || dados.endereco_lat, dados.lng || dados.endereco_lng, dados.cidade_id, dados.cidade_nome || dados.cidade || 'Uberlândia', dados.funcao || 'Garçom', dados.valorHora || 20, dados.bio || '']
+        `INSERT INTO usuarios (nome_completo, cpf, email, senha_hash, cnpj, nome_fantasia, tipo_usuario_id, status_usuario_id, bairro, endereco_completo, endereco_lat, endereco_lng, cidade_id, cidade_nome, funcao_principal, valor_hora_base, bio) 
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) 
+         RETURNING id, email, nome_completo, cpf, cnpj, nome_fantasia, tipo_usuario_id, status_usuario_id, endereco_completo, cidade_nome`,
+        [dados.nome, dados.cpf, emailLimpo, senhaHash, dados.cnpj, dados.nomeFantasia, tipoId, statusId, dados.bairro || dados.cidade_nome || 'Centro', dados.endereco || dados.endereco_completo || dados.bairro, dados.lat || dados.endereco_lat, dados.lng || dados.endereco_lng, dados.cidade_id, dados.cidade_nome || dados.cidade || 'Uberlândia', dados.funcao || 'Garçom', dados.valorHora || 20, dados.bio || '']
       );
-      // Cria na nova tabela enderecos_usuario como ativo
       try {
         await this.garantirTabelaEnderecosUsuario();
         const uid = usuarioCriado[0]?.id;
@@ -124,7 +144,7 @@ export class AuthRepository extends BaseRepository {
       return usuarioCriado;
     } catch (err:any) {
       if (err.code === '23505') return await this.buscarUsuarioPorEmail(emailLimpo);
-      return await this.query(`INSERT INTO usuarios (nome_completo, email, senha_hash, status_usuario_id, cpf) VALUES ($1,$2,$3,$4,$5) RETURNING id, email, nome_completo, cpf`, [dados.nome, emailLimpo, senhaHash, statusId, dados.cpf]);
+      return await this.query(`INSERT INTO usuarios (nome_completo, email, senha_hash, status_usuario_id, cpf, tipo_usuario_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, email, nome_completo, cpf, tipo_usuario_id`, [dados.nome, emailLimpo, senhaHash, statusId, dados.cpf, tipoId]);
     }
   }
 
@@ -132,16 +152,15 @@ export class AuthRepository extends BaseRepository {
     const emailLimpo = email.trim().toLowerCase();
     const ativoId = await this.buscarIdStatusPorChave('ATIVO');
     try {
-      return await this.query(`UPDATE usuarios SET status_usuario_id = $1 WHERE LOWER(TRIM(email)) = $2 RETURNING id, email, nome_completo, cpf, status_usuario_id`, [ativoId, emailLimpo]);
+      return await this.query(`UPDATE usuarios SET status_usuario_id = $1 WHERE LOWER(TRIM(email)) = $2 RETURNING id, email, nome_completo, cpf, tipo_usuario_id, status_usuario_id`, [ativoId, emailLimpo]);
     } catch {
       return await this.query(`UPDATE usuarios SET status = 'ATIVO' WHERE LOWER(TRIM(email)) = $1 RETURNING id, email, nome_completo`, [emailLimpo]);
     }
   }
 
-  // API que NÃO atualiza CPF nem EMAIL - só demais campos - AGORA COM ENDEREÇO
+  // API que NÃO atualiza CPF nem EMAIL - usa tipos_usuario
   async atualizarUsuario(id: number, dados: any) {
     await this.garantirColunasEndereco();
-    // Lista branca - CPF e EMAIL propositalmente FORA - bairro mantido por compatibilidade mas preferimos endereco
     const permitidos: any = {
       'nome_completo': dados.nome_completo,
       'cnpj': dados.cnpj,
@@ -155,12 +174,9 @@ export class AuthRepository extends BaseRepository {
       'funcao_principal': dados.funcao_principal,
       'valor_hora_base': dados.valor_hora_base,
       'bio': dados.bio,
-      'is_freela': dados.is_freela,
-      'is_contratante': dados.is_contratante,
+      'tipo_usuario_id': dados.tipo_usuario_id,
     };
 
-    // Regra: se já é DUAL (freela e contratante), não pode voltar para simples
-    // Essa validação é feita no service, aqui só atualiza o que vier
     const campos: string[] = [];
     const valores: any[] = [];
     let idx = 1;
@@ -174,7 +190,7 @@ export class AuthRepository extends BaseRepository {
     if (campos.length === 0) throw new Error('Nenhum campo permitido para atualizar - CPF e Email são bloqueados');
 
     valores.push(id);
-    const sql = `UPDATE usuarios SET ${campos.join(', ')} WHERE id = $${idx} RETURNING id, email, nome_completo, cpf, cnpj, nome_fantasia, bairro, endereco_completo, endereco_lat, endereco_lng, cidade_id, cidade_nome, funcao_principal, valor_hora_base, bio, is_freela, is_contratante, status_usuario_id`;
+    const sql = `UPDATE usuarios SET ${campos.join(', ')} WHERE id = $${idx} RETURNING id, email, nome_completo, cpf, cnpj, nome_fantasia, bairro, endereco_completo, endereco_lat, endereco_lng, cidade_id, cidade_nome, funcao_principal, valor_hora_base, bio, tipo_usuario_id, status_usuario_id`;
     console.log('📝 Atualizando usuario (sem CPF/email):', id, campos);
     try {
       return await this.query(sql, valores);
@@ -482,7 +498,7 @@ async garantirColunasEndereco() {
   }
 
   async buscarTempoExpiracao(): Promise<number> {
-    try { const rows = await this.query(`SELECT valor FROM variaveis_ambiente WHERE chave = 'EMAIL_EXPIRACAO_MINUTOS'`); if (rows[0]) return Number(rows[0].valor); } catch {}
+    try { const rows = await this.query(`SELECT valor FROM variaveis_sistema WHERE chave = 'EMAIL_EXPIRACAO_MINUTOS'`); if (rows[0]) return Number(rows[0].valor); } catch {}
     return 5;
   }
   async existeTemplate(chaveUso: string): Promise<boolean> {
