@@ -2,3 +2,4 @@
 /uaifrila-frontend/node_modules
 /uaifrila-email-worker/node_modules
 uaifrila-api/package-lock.json
+/uaifrila-email-worker/dist
