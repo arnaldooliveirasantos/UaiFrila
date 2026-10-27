@@ -23,12 +23,12 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
     { id: 'mural', label: 'Mural', auth: true, nivel: 0, tipos: ['FREELA','CONTRATANTE','DUAL','FINANCEIRO','SUPORTE','MODERADOR','ADMIN','SUPER_ADMIN'] },
     { id: 'perfil', label: 'Meu Perfil', auth: true, nivel: 0, tipos: ['FREELA','CONTRATANTE','DUAL','FINANCEIRO','SUPORTE','MODERADOR','ADMIN','SUPER_ADMIN'] },
     { id: 'trampos', label: 'Meus Trampos', auth: true, nivel: 0, tipos: ['FREELA','CONTRATANTE','DUAL','FINANCEIRO','SUPORTE','MODERADOR','ADMIN','SUPER_ADMIN'] },
-    { id: 'publicar', label: 'Publicar Vaga', role: 'contratante', nivel: 10, tipos: ['CONTRATANTE','DUAL','ADMIN','SUPER_ADMIN'] },
-    { id: 'candidatos', label: 'Candidatos', role: 'contratante', nivel: 10, tipos: ['CONTRATANTE','DUAL','ADMIN','SUPER_ADMIN'] },
-    { id: 'transacoes', label: 'Transações', role: 'financeiro', nivel: 50, tipos: ['FINANCEIRO','ADMIN','SUPER_ADMIN'] },
-    { id: 'cidades', label: 'Cidades', role: 'admin', nivel: 80, tipos: ['MODERADOR','ADMIN','SUPER_ADMIN'] },
-    { id: 'expansao', label: 'Expansão', role: 'admin', nivel: 90, tipos: ['ADMIN','SUPER_ADMIN'] },
-    { id: 'variaveis', label: 'Variáveis', role: 'super_admin', nivel: 100, tipos: ['SUPER_ADMIN'] },
+    { id: 'publicar', label: 'Publicar Vaga',auth: true,role: 'contratante', nivel: 10, tipos: ['CONTRATANTE','DUAL','ADMIN','SUPER_ADMIN'] },
+    { id: 'candidatos', label: 'Candidatos',auth: true, role: 'contratante', nivel: 10, tipos: ['CONTRATANTE','DUAL','ADMIN','SUPER_ADMIN'] },
+    { id: 'transacoes', label: 'Transações',auth: true, role: 'financeiro', nivel: 50, tipos: ['FINANCEIRO','ADMIN','SUPER_ADMIN'] },
+    { id: 'cidades', label: 'Cidades',auth: true, role: 'admin', nivel: 80, tipos: ['MODERADOR','ADMIN','SUPER_ADMIN'] },
+    { id: 'expansao', label: 'Expansão',auth: true, role: 'admin', nivel: 90, tipos: ['ADMIN','SUPER_ADMIN'] },
+    { id: 'variaveis', label: 'Variáveis',auth: true, role: 'super_admin', nivel: 100, tipos: ['SUPER_ADMIN'] },
     { id: 'codigo', label: 'Código Freela', public: true, nivel: 0, tipos: [] },
   ];
 

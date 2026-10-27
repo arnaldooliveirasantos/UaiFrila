@@ -14,7 +14,7 @@ const pool = new Pool({
 
 const transportador = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT),
+  port: Number(process.env.SMTP_PORT) || 587,
   secure: false,
   auth: {
     user: process.env.SMTP_USER,
@@ -22,12 +22,11 @@ const transportador = nodemailer.createTransport({
   }
 });
 
-// FIX NaN: garante fallback se .env não tiver WORKER_BATCH_SIZE
 const INTERVAL = Number(process.env.WORKER_INTERVAL_MS) || 10000;
 const BATCH = Number(process.env.WORKER_BATCH_SIZE) || 5;
 const MAX_TENTATIVAS = Number(process.env.MAX_TENTATIVAS) || 3;
 
-console.log(`🔧 Config: BATCH=${BATCH} MAX_TENTATIVAS=${MAX_TENTATIVAS} INTERVAL=${INTERVAL} SMTP_USER=${process.env.SMTP_USER}`);
+console.log(`🔧 Worker v14.1 - BATCH=${BATCH} MAX=${MAX_TENTATIVAS} INTERVAL=${INTERVAL} SMTP_USER=${process.env.SMTP_USER}`);
 
 let isProcessing = false;
 
@@ -42,23 +41,14 @@ async function tick() {
       WHERE status_id=(SELECT id FROM email_status WHERE chave='EM_ESPERA') AND expira_em < NOW()
     `);
 
-    // email_remetente = SMTP_USER do .env (sem fallback)
     const res = await client.query(`
-      SELECT 
-        h.id, 
-        h.email_destinatario, 
-        h.titulo_final, 
-        h.conteudo_final, 
-        h.tentativas,
-        $3::text as email_remetente,
-        t.nome_remetente,
-        t.chave_uso
+      SELECT h.id, h.email_destinatario, h.titulo_final, h.conteudo_final, h.tentativas,
+             $3::text as email_remetente, t.nome_remetente, t.chave_uso
       FROM email_historico_disparos h 
       JOIN email_templates t ON h.template_id = t.id 
-      WHERE 
-        h.status_id = (SELECT id FROM email_status WHERE chave='EM_ESPERA') 
+      WHERE h.status_id = (SELECT id FROM email_status WHERE chave='EM_ESPERA') 
         AND h.tentativas < $2::int
-        AND h.enviado_em IS NULL
+        AND (h.enviado_em IS NULL)
         AND (h.expira_em IS NULL OR h.expira_em > NOW())
       ORDER BY h.criado_em ASC 
       LIMIT $1::int
@@ -67,12 +57,10 @@ async function tick() {
 
     if (res.rows.length === 0) return;
 
-    console.log(`📬 ${res.rows.length} email(s) pendente(s) - remetente: ${process.env.SMTP_USER}`);
+    console.log(`📬 ${res.rows.length} email(s) pendente(s)`);
 
     for (const linha of res.rows) {
       try {
-        console.log(`📧 [${linha.id}] ${linha.chave_uso} -> ${linha.email_destinatario} de ${linha.nome_remetente} <${linha.email_remetente}>`);
-
         await transportador.sendMail({
           from: `"${linha.nome_remetente}" <${linha.email_remetente}>`,
           to: linha.email_destinatario,
@@ -83,25 +71,18 @@ async function tick() {
         await client.query(`
           UPDATE email_historico_disparos 
           SET status_id=(SELECT id FROM email_status WHERE chave='ENVIADO'), 
-              enviado_em=NOW(), 
-              atualizado_em=NOW(), 
-              ultima_tentativa=NOW(), 
-              tentativas=tentativas+1,
+              enviado_em=NOW(), atualizado_em=NOW(), ultima_tentativa=NOW(), tentativas=tentativas+1,
               email_remetente=$2::text
           WHERE id=$1::int
         `, [linha.id, linha.email_remetente]);
 
-        console.log(`✅ [${linha.id}] Enviado de ${linha.email_remetente}`);
-
+        console.log(`✅ [${linha.id}] Enviado`);
       } catch (err: any) {
-        const nt = linha.tentativas + 1;
+        const nt = (linha.tentativas || 0) + 1;
         console.error(`❌ [${linha.id}] Erro: ${err.message}`);
         await client.query(`
           UPDATE email_historico_disparos 
-          SET tentativas=$1::int, 
-              ultimo_erro=$2::text,
-              atualizado_em=NOW(), 
-              ultima_tentativa=NOW(),
+          SET tentativas=$1::int, ultimo_erro=$2::text, atualizado_em=NOW(), ultima_tentativa=NOW(),
               status_id = CASE WHEN $1::int >= $3::int THEN (SELECT id FROM email_status WHERE chave='EXPIRADO') ELSE status_id END
           WHERE id=$4::int
         `, [nt, err.message.substring(0,500), MAX_TENTATIVAS, linha.id]);
@@ -109,13 +90,12 @@ async function tick() {
     }
   } catch (e: any) {
     console.error('🔥 Erro tick:', e.message);
-    throw e;
   } finally {
     client.release();
     isProcessing = false;
   }
 }
 
-console.log(`🚀 Email Worker - email_remetente = SMTP_USER (${process.env.SMTP_USER}) - SEM FALLBACK de tabela`);
+console.log(`🚀 Email Worker v14.1 - SEM ALTER TABLE no loop`);
 tick();
 setInterval(tick, INTERVAL);

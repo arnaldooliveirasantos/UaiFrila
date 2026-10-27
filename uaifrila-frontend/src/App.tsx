@@ -10,6 +10,7 @@ import CodigoFreela from './components/CodigoFreela';
 import PainelTransacoes from './components/PainelTransacoes';
 import PainelExpansao from './components/PainelExpansao';
 import { ThemeProvider, useTheme, getInputClass, getLabelClass, getCardClass } from './context/ThemeContext';
+import TelaCadastroVaga from './components/TelaCadastroVaga';
 
 function AppContent() {
   const [telaAtiva, setTelaAtiva] = useState('home');
@@ -64,6 +65,7 @@ function AppContent() {
       {telaAtiva === 'login' && <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />}
       {telaAtiva === 'mural' && (usuario ? <PainelMural usuario={usuario} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'perfil' && (usuario ? <PerfilUsuario usuario={usuario} onAtualizado={(u)=>setUsuario(u)} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
+      {telaAtiva === 'publicar' && (usuario ? <TelaCadastroVaga usuario={usuario} onAtualizado={(u)=>setUsuario(u)} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'trampos' && (usuario ? <PainelMeusTrampos usuario={usuario} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'transacoes' && (usuario ? <PainelTransacoes usuario={usuario} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'expansao' && (usuario ? <PainelExpansao usuario={usuario} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
@@ -83,7 +85,7 @@ function TelaLogin({ onLogin, setTelaAtiva }: { onLogin: (d:any)=>void, setTelaA
   const [erro, setErro] = useState('');
   const [carregando, setCarregando] = useState(false);
   const { isDark } = useTheme();
-  const API = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+  const API = import.meta.env.VITE_API_URL ;
 
   const enviarEmail = async () => {
     setCarregando(true); setErro('');
