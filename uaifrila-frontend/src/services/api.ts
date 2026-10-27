@@ -1,65 +1,76 @@
-// FILE: uaifrila-frontend/src/services/api.ts
-// SUBSTITUIR: todo o arquivo atual - unifica tokens e adiciona refresh + 401 handler
-
-const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:3000/api').replace(/\/$/, '');
+// api.ts sem axios - usa fetch nativo - COM TIMEZONE LOG
+const API_URL = (import.meta.env.VITE_API_URL as string) || 'http://localhost:3000/api';
 
 function getToken(): string | null {
-  // Unifica: tenta nova chave primeiro, depois antiga
-  return localStorage.getItem('uaifrila_token') || localStorage.getItem('@UaiFrila:token');
+  return localStorage.getItem('uaifrila_token') || localStorage.getItem('@UaiFrila:token') || null;
 }
 
-function clearAuthAndRedirect() {
-  localStorage.removeItem('uaifrila_token');
-  localStorage.removeItem('@UaiFrila:token');
-  localStorage.removeItem('uaifrila_usuario');
-  // evita loop se já está na home
-  if (window.location.pathname !== '/' && !window.location.pathname.includes('login')) {
-    window.location.href = '/';
-  }
-}
-
-export async function apiFetch(endpoint: string, options: RequestInit = {}) {
-  const url = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
-  const token = getToken();
-  
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-    ...((options.headers as any) || {}),
-  };
-
-  const res = await fetch(url, { ...options, headers });
-  
-  if (res.status === 401) {
-    const data = await res.json().catch(() => ({}));
-    const msg = (data.erro || '').toLowerCase();
-    if (msg.includes('token') || msg.includes('expirado') || msg.includes('não fornecido') || msg.includes('inválido')) {
-      clearAuthAndRedirect();
-      throw new Error('Sessão expirada - faça login novamente');
-    }
-  }
-
+async function handleResponse(res: Response) {
+  const text = await res.text();
+  let data: any;
+  try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ erro: res.statusText }));
-    throw new Error(err.erro || `Erro ${res.status}`);
+    const msg = data?.erro || data?.message || data?.error || `Erro ${res.status}`;
+    throw new Error(msg);
   }
-  return res.json();
+  return data;
 }
 
 export const api = {
-  get: (url: string) => apiFetch(url),
-  post: (url: string, body: any) => apiFetch(url, { method: 'POST', body: JSON.stringify(body) }),
-  put: (url: string, body: any) => apiFetch(url, { method: 'PUT', body: JSON.stringify(body) }),
-  delete: (url: string) => apiFetch(url, { method: 'DELETE' }),
-  upload: (url: string, formData: FormData) => {
+  get: async (url: string) => {
     const token = getToken();
-    return fetch(`${API_BASE}${url}`, {
-      method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      body: formData,
-    }).then(async r => {
-      if (!r.ok) throw new Error((await r.json().catch(()=>({}))).erro || 'Erro upload');
-      return r.json();
+    const res = await fetch(`${API_URL}${url}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      }
     });
+    return handleResponse(res);
+  },
+  post: async (url: string, data: any) => {
+    const token = getToken();
+    console.log(`[API POST ${url}] Payload:`, JSON.stringify(data, null, 2));
+    console.log(`[API POST] data_inicio=${data.data_inicio} timezone=${data.timezone} local=${data.data_inicio_local}`);
+    if (!data.timezone) console.warn('[API] ⚠️ Frontend não está enviando timezone!');
+    const res = await fetch(`${API_URL}${url}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify(data)
+    });
+    const result = await handleResponse(res);
+    console.log(`[API POST ${url}] Resposta:`, result);
+    return result;
+  },
+  put: async (url: string, data: any) => {
+    const token = getToken();
+    console.log(`[API PUT ${url}] Payload:`, JSON.stringify(data, null, 2));
+    console.log(`[API PUT] data_inicio=${data.data_inicio} timezone=${data.timezone} local=${data.data_inicio_local}`);
+    if (!data.timezone) console.warn('[API] ⚠️ Frontend não está enviando timezone!');
+    const res = await fetch(`${API_URL}${url}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify(data)
+    });
+    const result = await handleResponse(res);
+    console.log(`[API PUT ${url}] Resposta:`, result);
+    return result;
+  },
+  delete: async (url: string) => {
+    const token = getToken();
+    const res = await fetch(`${API_URL}${url}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      }
+    });
+    return handleResponse(res);
   }
 };

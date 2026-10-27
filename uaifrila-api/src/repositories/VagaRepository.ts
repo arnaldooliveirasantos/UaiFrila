@@ -1,81 +1,163 @@
-// FILE: uaifrila-api/src/repositories/VagaRepository.ts
-// SUBSTITUIR arquivo inteiro - corrige campos + paginação + transacao
-
 import { BaseRepository } from './BaseRepository';
+import { DateUtil } from '../utils/DateUtil';
 
 export class VagaRepository extends BaseRepository {
+
   async criarVaga(dados: any) {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
+    const { contratante_id, titulo, descricao, valor_hora, valor, data_inicio, data_fim, funcao, cidade_nome, cidade_id, endereco_id, bairro, timezone } = dados;
+    const vHora = valor_hora || valor || 20;
+    const deviceTz = timezone || 'America/Sao_Paulo';
 
-      const res = await client.query(
-        `INSERT INTO vagas (contratante_id, titulo, descricao, funcao, valor_hora, data_inicio, data_fim, cidade_id, cidade_nome, endereco_id, bairro, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'PENDENTE') RETURNING *`,
-        [
-          dados.contratante_id,
-          dados.titulo,
-          dados.descricao,
-          dados.funcao || 'Garçom',
-          dados.valor_hora || dados.valor || 20,
-          dados.data_inicio,
-          dados.data_fim,
-          dados.cidade_id || null,
-          dados.cidade_nome || 'Uberlândia',
-          dados.endereco_id || null,
-          dados.bairro || 'Centro'
-        ]
-      );
+    console.log(`\n[REPO criar] UTC0 - Recebido: ${data_inicio} tz=${deviceTz}`);
+    
+    const inicioUTC0 = DateUtil.paraUTC0(data_inicio, deviceTz);
+    const fimUTC0 = DateUtil.paraUTC0(data_fim, deviceTz);
+    
+    console.log(`[REPO criar] ${data_inicio} (${deviceTz}) => ${inicioUTC0} UTC0`);
 
-      await client.query('COMMIT');
-      return res.rows;
-    } catch (e) {
-      await client.query('ROLLBACK');
-      console.error('Erro criar vaga:', (e as any).message);
-      throw e;
-    } finally {
-      client.release();
-    }
+    const sql = `
+      WITH nova_vaga AS (
+        INSERT INTO vagas (contratante_id, titulo, descricao, valor_hora, data_inicio, data_fim, funcao, cidade_nome, cidade_id, endereco_id, bairro, status) 
+        VALUES ($1,$2,$3,$4,$5::timestamptz,$6::timestamptz,$7,$8,$9,$10,$11,'ABERTA') 
+        RETURNING *
+      )
+      SELECT 
+        nova_vaga.*,
+        to_char(nova_vaga.data_inicio AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_inicio,
+        to_char(nova_vaga.data_fim AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_fim,
+        to_char(nova_vaga.criado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as criado_em,
+        to_char(nova_vaga.atualizado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as atualizado_em
+      FROM nova_vaga
+    `;
+    const params = [contratante_id, titulo, descricao, vHora, inicioUTC0, fimUTC0, funcao || 'Garçom', cidade_nome || 'Uberlândia', cidade_id || 1, endereco_id || null, bairro || 'Centro'];
+    
+    const rows = await this.query(sql, params);
+    console.log(`[REPO criar] UTC0: ${rows[0]?.data_inicio}`);
+    
+    return rows[0];
   }
 
   async listarVagas(filtros: any = {}) {
-    return this.query(`SELECT * FROM vagas WHERE status = 'PENDENTE' ORDER BY criado_em DESC LIMIT 50`);
+    const sql = `
+      SELECT 
+        v.*,
+        to_char(v.data_inicio AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_inicio,
+        to_char(v.data_fim AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_fim,
+        to_char(v.criado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as criado_em,
+        to_char(v.atualizado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as atualizado_em
+      FROM vagas v 
+      WHERE v.status IN ('ABERTA','PENDENTE') OR v.status IS NULL 
+      ORDER BY v.criado_em DESC LIMIT 100
+    `;
+    return await this.query(sql);
+  }
+
+  async listarVagasPorContratante(contratanteId: number) {
+    if (!contratanteId) return await this.listarVagas();
+    const sql = `
+      SELECT 
+        v.*,
+        (SELECT COUNT(*) FROM candidaturas c WHERE c.vaga_id = v.id) as total_candidaturas,
+        to_char(v.data_inicio AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_inicio,
+        to_char(v.data_fim AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_fim,
+        to_char(v.criado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as criado_em,
+        to_char(v.atualizado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as atualizado_em
+      FROM vagas v 
+      WHERE v.contratante_id = $1 
+      ORDER BY v.criado_em DESC
+    `;
+    return await this.query(sql, [contratanteId]);
   }
 
   async buscarPorId(id: number) {
-    return this.queryOne(`SELECT * FROM vagas WHERE id = $1`, [id]);
-  }
-
-  // NOVO: paginado e com filtros - usar no MuralVagasService
-  async buscarMuralPaginado(usuarioId: number, filtros: { pagina?: number, limite?: number, cidade?: string, funcao?: string, bairro?: string }) {
-    const pagina = Math.max(1, filtros.pagina || 1);
-    const limite = Math.min(50, filtros.limite || 12);
-    const offset = (pagina - 1) * limite;
-
-    let where = "WHERE v.status = 'PENDENTE' AND v.contratante_id != $1";
-    const params: any[] = [usuarioId];
-    let idx = 2;
-
-    if (filtros.cidade) { where += ` AND LOWER(v.cidade_nome) = LOWER($${idx})`; params.push(filtros.cidade); idx++; }
-    if (filtros.funcao) { where += ` AND LOWER(v.funcao) = LOWER($${idx})`; params.push(filtros.funcao); idx++; }
-    if (filtros.bairro) { where += ` AND LOWER(v.bairro) = LOWER($${idx})`; params.push(filtros.bairro); idx++; }
-
-    const vagas = await this.query(
-      `SELECT v.*, u.nome_fantasia as contratante_nome, u.avaliacao_media as contratante_avaliacao,
-              (SELECT COUNT(*)::int FROM candidaturas c WHERE c.vaga_id = v.id) as total_candidaturas
-       FROM vagas v LEFT JOIN usuarios u ON v.contratante_id = u.id
-       ${where}
-       ORDER BY v.criado_em DESC LIMIT $${idx} OFFSET $${idx+1}`,
-      [...params, limite, offset]
-    );
-
-    const totalRes = await this.query(`SELECT COUNT(*)::int as total FROM vagas v ${where}`, params);
-    return { vagas, total: totalRes[0]?.total || 0, pagina, limite, totalPaginas: Math.ceil((totalRes[0]?.total || 0) / limite) };
+    const sql = `
+      SELECT 
+        v.*,
+        to_char(v.data_inicio AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_inicio,
+        to_char(v.data_fim AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_fim,
+        to_char(v.criado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as criado_em,
+        to_char(v.atualizado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as atualizado_em
+      FROM vagas v 
+      WHERE v.id = $1
+    `;
+    const row = await this.queryOne(sql, [id]);
+    if (row) {
+      console.log(`[REPO buscarPorId #${id}] UTC0: ${row.data_inicio}`);
+    }
+    return row || null;
   }
 
   async buscarMuralSemBloqueiosDeAvaliacao(usuarioId: number) {
-    // compatibilidade: retorna formato antigo mas usa novo por baixo
-    const res = await this.buscarMuralPaginado(usuarioId, { pagina: 1, limite: 50 });
-    return res.vagas;
+    if (!usuarioId) return await this.listarVagas();
+    const sql = `
+      SELECT 
+        v.*,
+        u.nome_fantasia as contratante_nome,
+        to_char(v.data_inicio AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_inicio,
+        to_char(v.data_fim AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_fim,
+        to_char(v.criado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as criado_em,
+        to_char(v.atualizado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as atualizado_em
+      FROM vagas v 
+      LEFT JOIN usuarios u ON v.contratante_id = u.id 
+      WHERE (v.status IN ('ABERTA','PENDENTE') OR v.status IS NULL) AND v.contratante_id != $1 
+      ORDER BY v.criado_em DESC LIMIT 100
+    `;
+    return await this.query(sql, [usuarioId]);
   }
+
+  async atualizarVaga(id: number, dados: any) {
+    const deviceTz = dados.timezone || 'America/Sao_Paulo';
+    console.log(`\n[REPO atualizar #${id}] UTC0 - Recebido: ${dados.data_inicio} tz=${deviceTz}`);
+
+    const permitidas = ['titulo','descricao','funcao','valor_hora','cidade_nome','cidade_id','endereco_id','bairro','status'];
+    const campos: string[] = []; const valores: any[] = []; let idx = 1;
+    for (const k of permitidas) {
+      let v = (dados as any)[k]; if (k === 'valor_hora' && v === undefined) v = (dados as any).valor;
+      if (v !== undefined) { campos.push(`${k} = $${idx}`); valores.push(v); idx++; }
+    }
+
+    if (dados.data_inicio) {
+      const utc0 = DateUtil.paraUTC0(dados.data_inicio, deviceTz);
+      console.log(`[REPO atualizar] ${dados.data_inicio} (${deviceTz}) => ${utc0} UTC0`);
+      campos.push(`data_inicio = $${idx}::timestamptz`); valores.push(utc0); idx++;
+    }
+    if (dados.data_fim) {
+      const utc0 = DateUtil.paraUTC0(dados.data_fim, deviceTz);
+      console.log(`[REPO atualizar] ${dados.data_fim} (${deviceTz}) => ${utc0} UTC0`);
+      campos.push(`data_fim = $${idx}::timestamptz`); valores.push(utc0); idx++;
+    }
+
+    if (campos.length === 0) throw new Error('Nenhum campo válido');
+    valores.push(id);
+    const sql = `
+      UPDATE vagas SET ${campos.join(', ')}, atualizado_em = NOW() 
+      WHERE id = $${idx} 
+      RETURNING 
+        id,
+        to_char(data_inicio AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_inicio,
+        to_char(data_fim AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_fim,
+        to_char(criado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as criado_em,
+        to_char(atualizado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as atualizado_em
+    `;
+    const rows = await this.query(sql, valores);
+    console.log(`[REPO atualizar #${id}] Novo UTC0: ${rows[0]?.data_inicio}`);
+    
+    return await this.buscarPorId(id);
+  }
+
+  async cancelarVaga(id: number) {
+    const sql = `
+      UPDATE vagas SET status = 'CANCELADA', atualizado_em = NOW() 
+      WHERE id = $1 
+      RETURNING 
+        id, status,
+        to_char(data_inicio AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_inicio,
+        to_char(data_fim AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_fim,
+        to_char(atualizado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as atualizado_em
+    `;
+    const rows = await this.query(sql, [id]);
+    return rows[0];
+  }
+  async deletarVaga(id: number) { return await this.cancelarVaga(id); }
+  async deletar(id: number) { return await this.cancelarVaga(id); }
 }
