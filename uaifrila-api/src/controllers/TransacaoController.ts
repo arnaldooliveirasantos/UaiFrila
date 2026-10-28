@@ -4,68 +4,65 @@ import { TransacaoRepository } from '../repositories/TransacaoRepository';
 export class TransacaoController {
   private repo = new TransacaoRepository();
 
-  async variaveis(req: Request, res: Response) {
+  private async validarAcessoAdmin(req: any): Promise<boolean> {
+    const user = req.user || req.usuario;
+    if (!user) return false;
+    const nivel = user.nivel_permissao || 0;
+    const chave = (user.tipo_chave || user.role || '').toUpperCase();
+    return nivel >= 50 || ['FINANCEIRO','ADMIN','SUPER_ADMIN','MODERADOR'].includes(chave);
+  }
+
+  // GET /api/transacoes - relatorio (admin/financeiro)
+  public relatorio = async (req: Request, res: Response): Promise<void> => {
     try {
-      // FIX 403: permite qualquer usuário logado ver variaveis, não só admin
-      // Antes tinha verificação de admin que causava 403
-      console.log(`[TransacaoController] variaveis - usuario: ${(req as any).usuario?.id}`);
+      if (!await this.validarAcessoAdmin(req as any)) {
+        res.status(403).json({ erro: 'Acesso negado: apenas admin/financeiro' });
+        return;
+      }
+
+      const { inicio, fim, status, cidade, page, limit } = req.query as any;
       
-      const variaveis = await this.repo.buscarVariaveis();
-      
-      // Sempre retorna com UTC0
-      const variaveisUTC0 = variaveis.map((v: any) => ({
-        ...v,
-        criado_em: v.criado_em ? new Date(v.criado_em).toISOString() : null,
-        atualizado_em: v.atualizado_em ? new Date(v.atualizado_em).toISOString() : null,
-      }));
-      
-      res.json({ variaveis: variaveisUTC0, total: variaveisUTC0.length });
-    } catch (e: any) {
-      console.error('[TransacaoController] Erro variaveis:', e);
-      // Retorna fallback mesmo com erro, para não dar 403 e esconder quadro
-      res.json({ 
-        variaveis: [
-          { chave: 'VAGA_ANTECEDENCIA_MINUTOS', valor: '30', valor_numerico: 30 },
-          { chave: 'TAXA_PLATAFORMA_PERCENTUAL', valor: '10', valor_numerico: 10 }
-        ], 
-        total: 2,
-        fallback: true
+      const resultado = await this.repo.listarPorPeriodo({
+        inicio: inicio as string,
+        fim: fim as string,
+        status: status as string,
+        cidade: cidade as string,
+        page: parseInt(page) || 1,
+        limit: parseInt(limit) || 20
       });
-    }
-  }
 
-  async relatorio(req: Request, res: Response) {
-    try {
-      const { dataInicio, dataFim, page, limit } = req.query;
-      const result = await this.repo.relatorioTransacoes(
-        dataInicio as string,
-        dataFim as string,
-        parseInt(page as string) || 1,
-        parseInt(limit as string) || 20
-      );
-      res.json(result);
+      res.status(200).json({ sucesso: true, ...resultado });
     } catch (e: any) {
-      console.error(e);
+      console.error('Erro relatorio transacoes:', e);
       res.status(500).json({ erro: e.message });
     }
-  }
+  };
 
-  async estatisticas(req: Request, res: Response) {
+  // GET /api/transacoes/estatisticas
+  public estatisticas = async (req: Request, res: Response): Promise<void> => {
     try {
-      const stats = await this.repo.estatisticas();
-      res.json(stats);
-    } catch (e: any) {
-      res.status(500).json({ erro: e.message });
-    }
-  }
+      if (!await this.validarAcessoAdmin(req as any)) {
+        res.status(403).json({ erro: 'Acesso negado' });
+        return;
+      }
 
-  async salvarVariavel(req: Request, res: Response) {
-    try {
-      const { chave, valor } = req.body;
-      const result = await this.repo.salvarVariavel(chave, valor);
-      res.json(result);
+      const stats = await this.repo.obterEstatisticas();
+      const porStatus = await this.repo.obterPorStatus();
+      const porCidade = await this.repo.obterPorCidade();
+
+      res.status(200).json({
+        sucesso: true,
+        estatisticas: stats,
+        porStatus,
+        porCidade
+      });
     } catch (e: any) {
       res.status(500).json({ erro: e.message });
     }
-  }
+  };
+
+  // GET /api/transacoes/relatorio - alias para compatibilidade
+  public relatorioPorPeriodo = async (req: Request, res: Response): Promise<void> => {
+    return this.relatorio(req, res);
+  };
 }
