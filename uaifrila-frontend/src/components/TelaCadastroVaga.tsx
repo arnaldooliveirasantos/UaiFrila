@@ -1,197 +1,498 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useTheme, getInputClass, getLabelClass, getCardClass } from '../context/ThemeContext';
-import { api } from '../services/api';
-import GoogleEnderecoInput from './GoogleEnderecoInput';
+// import { Zap } removido - sem lucide-react
 
-type Props = { usuario: any; onAtualizado?: (u: any) => void; setTelaAtiva?: (tela: string, params?: any) => void; };
+// Utils DateUtil para UTC0 - exige que todas as consultas da API ao banco o timestamp vem com UTC0
+const DateUtil = {
+  // Converte data local (device) + timezone para UTC0 com Z
+  paraUTC0: (dataLocal: string, timezone: string): string => {
+    if (!dataLocal) throw new Error('Data local obrigatória');
+    // Se já tem Z, retorna
+    if (dataLocal.endsWith('Z')) return dataLocal;
+    
+    try {
+      // Parse "2026-10-27T15:00" como wall time na timezone
+      const [datePart, timePart] = dataLocal.split('T');
+      const [y, m, d] = datePart.split('-').map(Number);
+      const [h, min, sec] = (timePart || '00:00').split(':').map(v => parseInt(v) || 0);
+      
+      const desiredWallUTC = Date.UTC(y, m-1, d, h, min, sec || 0);
+      let utcGuess = desiredWallUTC;
+      
+      for (let i = 0; i < 10; i++) {
+        const formatter = new Intl.DateTimeFormat('en-US', {
+          timeZone: timezone,
+          year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: '2-digit', minute: '2-digit', second: '2-digit',
+          hour12: false,
+          hourCycle: 'h23'
+        });
+        const parts = formatter.formatToParts(new Date(utcGuess));
+        const map: any = {};
+        for (const p of parts) map[p.type] = p.value;
+        const tzWallUTC = Date.UTC(
+          Number(map.year), Number(map.month)-1, Number(map.day),
+          Number(map.hour), Number(map.minute), Number(map.second)
+        );
+        const diff = desiredWallUTC - tzWallUTC;
+        if (diff === 0) break;
+        utcGuess += diff;
+      }
+      
+      const result = new Date(utcGuess).toISOString();
+      console.log(`[DateUtil] ${dataLocal} (${timezone}) => ${result} UTC0`);
+      return result;
+    } catch (e) {
+      console.error('[DateUtil] Erro:', e);
+      return new Date(dataLocal).toISOString();
+    }
+  }
+};
 
-function apenasNumeros(v: string) { return (v || '').replace(/\D/g, ''); }
-function formatarMoedaInput(v: string): string {
-  const nums = apenasNumeros(v); if (!nums) return '';
-  const valorCentavos = parseInt(nums, 10); if (isNaN(valorCentavos)) return '';
-  const reais = Math.floor(valorCentavos / 100); const centavos = valorCentavos % 100;
-  return `${reais.toLocaleString('pt-BR')},${centavos.toString().padStart(2,'0')}`;
+function formatarMoedaInput(valor: string): string {
+  const apenasNumeros = valor.replace(/\D/g, '');
+  if (!apenasNumeros) return '';
+  const num = parseInt(apenasNumeros) / 100;
+  return num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
-function parseMoedaParaNumero(formatted: string): number {
-  if (!formatted) return 0; const limpo = formatted.replace(/\./g, '').replace(',', '.'); const n = parseFloat(limpo); return isNaN(n) ? 0 : n;
+
+function parseMoedaParaNumero(valor: string): number {
+  if (!valor) return 0;
+  const limpo = valor.replace(/\./g, '').replace(',', '.');
+  return parseFloat(limpo) || 0;
 }
+
 function calcularHoras(inicio: string, fim: string): number {
-  if (!inicio || !fim) return 0; const d1 = new Date(inicio); const d2 = new Date(fim);
-  if (isNaN(d1.getTime()) || isNaN(d2.getTime())) return 0; const diffMs = d2.getTime() - d1.getTime(); if (diffMs <= 0) return 0;
-  return Math.round((diffMs / (1000*60*60))*100)/100;
+  if (!inicio || !fim) return 0;
+  const d1 = new Date(inicio);
+  const d2 = new Date(fim);
+  const diff = d2.getTime() - d1.getTime();
+  if (diff <= 0) return 0;
+  return diff / (1000 * 60 * 60);
 }
 
-const getDeviceTimezone = (): string => {
-  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo'; } catch { return 'America/Sao_Paulo'; }
-};
+function getMinDateTimeLocal(minutos: number): string {
+  const agora = new Date();
+  agora.setMinutes(agora.getMinutes() + minutos);
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `${agora.getFullYear()}-${pad(agora.getMonth()+1)}-${pad(agora.getDate())}T${pad(agora.getHours())}:${pad(agora.getMinutes())}`;
+}
 
-const utcParaInputLocal = (utcStr: string | Date | null | undefined): string => {
-  if (!utcStr) return '';
+function utcParaInputLocal(utc: string): string {
+  if (!utc) return '';
   try {
-    const d = utcStr instanceof Date ? utcStr : new Date(String(utcStr));
-    if (isNaN(d.getTime())) { const s = String(utcStr); if (s.includes('T')) return s.slice(0,16); return ''; }
-    const ano = d.getFullYear(); const mes = String(d.getMonth()+1).padStart(2,'0');
-    const dia = String(d.getDate()).padStart(2,'0'); const hora = String(d.getHours()).padStart(2,'0');
-    const min = String(d.getMinutes()).padStart(2,'0');
-    return `${ano}-${mes}-${dia}T${hora}:${min}`;
+    const d = new Date(utc);
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   } catch { return ''; }
-};
+}
 
-const formatarLocal = (utcStr: string | Date | null | undefined): string => {
-  if (!utcStr) return '';
-  try { const d = utcStr instanceof Date ? utcStr : new Date(String(utcStr)); if (isNaN(d.getTime())) return String(utcStr); return d.toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', timeZoneName:'short' }); } catch { return String(utcStr); }
-};
+function formatarLocal(utc: string): string {
+  if (!utc) return '';
+  try {
+    const d = new Date(utc);
+    return d.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  } catch { return utc; }
+}
 
-const getMinDateTimeLocal = (minutos: number) => {
-  const agora = new Date(); agora.setMinutes(agora.getMinutes()+minutos);
-  const ano = agora.getFullYear(); const mes = String(agora.getMonth()+1).padStart(2,'0');
-  const dia = String(agora.getDate()).padStart(2,'0'); const hora = String(agora.getHours()).padStart(2,'0');
-  const min = String(agora.getMinutes()).padStart(2,'0');
-  return `${ano}-${mes}-${dia}T${hora}:${min}`;
-};
-const FUNCOES = ['Garçom','Barman','Cumim','Recepcionista','Cozinheiro','Limpeza','Segurança','Outros'];
-
-export default function TelaCadastroVaga({ usuario, setTelaAtiva: propsSetTelaAtiva }: Props) {
-  const { isDark } = useTheme();
-  const [carregando, setCarregando] = useState(false); const [erro, setErro] = useState(''); const [sucesso, setSucesso] = useState(''); const [carregandoEdicao, setCarregandoEdicao] = useState(false);
-  const [enderecoAtivo, setEnderecoAtivo] = useState<any>(null); const [antecedenciaMinutos, setAntecedenciaMinutos] = useState(30);
-  const [vagaEdicao, setVagaEdicao] = useState<any>(null); const [isEditando, setIsEditando] = useState(false);
-  const [minDateTime, setMinDateTime] = useState(()=>getMinDateTimeLocal(30));
-  const [deviceTimezone] = useState(()=>getDeviceTimezone());
-
+export default function TelaCadastroVaga(props: any) {
+  const propsSetTelaAtiva = props.setTelaAtiva;
+  
   const [form, setForm] = useState({
-    funcao:'Garçom', titulo:'', descricao:'', dataHoraInicio:'', dataHoraFim:'',
-    valorHoraStr:'20,00', valorHoraNum:20, ajudaTransporteStr:'15,00', ajudaTransporteNum:15,
-    endereco:'', bairro:'', cidade:'Uberlândia', cidade_id:1, lat:undefined as number|undefined, lng:undefined as number|undefined,
+    funcao: 'Garçom',
+    titulo: '',
+    descricao: '',
+    dataHoraInicio: '',
+    dataHoraFim: '',
+    valorHoraStr: '20,00',
+    valorHoraNum: 20,
+    ajudaTransporteStr: '15,00',
+    ajudaTransporteNum: 15,
+    bairro: 'Centro',
+    cidade: 'Uberlândia',
+    cidade_id: 1,
+    endereco: '',
+    lat: null as any,
+    lng: null as any,
   });
 
-  useEffect(()=>{
-    carregarEnderecoAtivo(); carregarVariaveisSistema();
-    carregarVagaParaEdicao();
-    const interval = setInterval(()=>{ setMinDateTime(getMinDateTimeLocal(antecedenciaMinutos)); },60000);
-    return ()=>clearInterval(interval);
-  },[antecedenciaMinutos]);
+  const [antecedenciaMinutos, setAntecedenciaMinutos] = useState(30);
+  const [minDateTime, setMinDateTime] = useState(getMinDateTimeLocal(30));
+  const [isEditando, setIsEditando] = useState(false);
+  const [vagaEdicao, setVagaEdicao] = useState<any>(null);
+  const [carregandoEdicao, setCarregandoEdicao] = useState(false);
+  const [carregando, setCarregando] = useState(false);
+  const [erro, setErro] = useState('');
+  const [sucesso, setSucesso] = useState('');
+  const [enderecoAtivo, setEnderecoAtivo] = useState<any>(null);
+  const originalUTCRef = useRef<any>(null);
 
-  const carregarVagaParaEdicao = async () => {
-    const vagaStr = localStorage.getItem('uaifrila_vaga_editar');
-    if (!vagaStr) return;
-    let vagaLocal: any = null;
-    try { vagaLocal = JSON.parse(vagaStr); } catch {}
-    if (!vagaLocal?.id) return;
-    setIsEditando(true); setCarregandoEdicao(true);
+  // Carrega variáveis do sistema - FIX 403: usa fallback se der 403
+  const carregarVariaveisSistema = async () => {
     try {
-      let vagaBanco: any = null;
-      try { const res = await api.get(`/vagas/${vagaLocal.id}`); vagaBanco = res.vaga || res.data || res; } catch { const res = await api.get('/vagas/minhas-publicadas'); const lista = res.vagas || res || []; vagaBanco = lista.find((v:any) => v.id === vagaLocal.id); }
-      const vagaFinal = (vagaBanco && vagaBanco.data_inicio) ? vagaBanco : vagaLocal;
-      if (!vagaFinal.data_inicio) throw new Error('Vaga sem data');
-      const utcInicio = vagaFinal.data_inicio; const utcFim = vagaFinal.data_fim;
-      const localInicio = utcParaInputLocal(utcInicio); const localFim = utcParaInputLocal(utcFim);
-      const valorHora = Number(vagaFinal.valor_hora || vagaFinal.valor || 20);
-      const ajuda = Number(vagaFinal.ajuda_custo_transporte || vagaFinal.ajuda_transporte || 15);
-      setForm(f=>({ ...f, funcao: vagaFinal.funcao || 'Garçom', titulo: vagaFinal.titulo || '', descricao: vagaFinal.descricao || '', dataHoraInicio: localInicio, dataHoraFim: localFim, valorHoraStr: valorHora.toFixed(2).replace('.',','), valorHoraNum: valorHora, ajudaTransporteStr: ajuda.toFixed(2).replace('.',','), ajudaTransporteNum: ajuda, bairro: vagaFinal.bairro || f.bairro, cidade: vagaFinal.cidade_nome || f.cidade, cidade_id: vagaFinal.cidade_id || f.cidade_id, }));
-      setVagaEdicao(vagaFinal);
-      setSucesso('Vaga ' + vagaFinal.id + ' carregada - ' + deviceTimezone);
-    } catch (e:any) { setErro(e.message); } finally { setCarregandoEdicao(false); }
+      const token = localStorage.getItem('uaifrila_token');
+      const API = (import.meta as any).env?.VITE_API_URL || 'http://192.168.24.11:3000/api';
+      
+      console.log('[TelaCadastro] Carregando variaveis sistema...');
+      
+      const res = await fetch(`${API}/transacoes/variaveis`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        console.log('[TelaCadastro] Variaveis carregadas:', data);
+        const vars = data.variaveis || data || [];
+        for (const chave of ['VAGA_ANTECEDENCIA_MINUTOS', 'PAGAMENTO_ANTECEDENCIA_MINUTOS']) {
+          const v = vars.find((x: any) => x.chave === chave);
+          if (v) {
+            const minutos = parseInt(v.valor_numerico || v.valor || '30');
+            if (minutos > 0) {
+              setAntecedenciaMinutos(minutos);
+              setMinDateTime(getMinDateTimeLocal(minutos));
+              return;
+            }
+          }
+        }
+      } else if (res.status === 403) {
+        console.warn('[TelaCadastro] 403 em /transacoes/variaveis - usando fallback 30min, mas quadro continua visível');
+        // Não esconde quadro, usa default
+        setAntecedenciaMinutos(30);
+        setMinDateTime(getMinDateTimeLocal(30));
+      } else {
+        console.warn(`[TelaCadastro] Erro ${res.status} em /transacoes/variaveis, usando fallback`);
+        setAntecedenciaMinutos(30);
+        setMinDateTime(getMinDateTimeLocal(30));
+      }
+    } catch (e) {
+      console.warn('[TelaCadastro] Erro carregar variaveis, usando fallback 30min:', e);
+      setAntecedenciaMinutos(30);
+      setMinDateTime(getMinDateTimeLocal(30));
+    }
   };
 
-  const carregarVariaveisSistema = async ()=>{ try { const token = localStorage.getItem('uaifrila_token'); const API = import.meta.env.VITE_API_URL || 'http://localhost:3000/api'; const res = await fetch(`${API}/transacoes/variaveis`, { headers:{ 'Authorization':`Bearer ${token}` } }); if (res.ok) { const data = await res.json(); const vars = data.variaveis || data || []; for (const chave of ['VAGA_ANTECEDENCIA_MINUTOS']) { const v = vars.find((x:any)=>x.chave===chave); if (v) { const minutos = parseInt(v.valor_numerico || v.valor || '30'); if (minutos>0) { setAntecedenciaMinutos(minutos); setMinDateTime(getMinDateTimeLocal(minutos)); return; } } } } } catch {} };
-  const carregarEnderecoAtivo = async ()=>{ try { const data = await api.get('/enderecos'); const lista = data.enderecos || data || []; const ativo = lista.find((e:any)=>e.is_ativo) || lista[0]; if (ativo) { setEnderecoAtivo(ativo); setForm(f=>({...f, endereco:ativo.endereco_completo||'', bairro:ativo.bairro||'Centro', cidade:ativo.cidade_nome||'Uberlândia', cidade_id:ativo.cidade_id||1, lat:ativo.lat, lng:ativo.lng})); } } catch {} };
+  const carregarEnderecoAtivo = async () => {
+    try {
+      const token = localStorage.getItem('uaifrila_token');
+      const API = (import.meta as any).env?.VITE_API_URL || 'http://192.168.24.11:3000/api';
+      const res = await fetch(`${API}/enderecos`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const lista = data.enderecos || data || [];
+        const ativo = lista.find((e: any) => e.is_ativo) || lista[0];
+        if (ativo) {
+          setEnderecoAtivo(ativo);
+          setForm(f => ({
+            ...f,
+            endereco: ativo.endereco_completo || '',
+            bairro: ativo.bairro || 'Centro',
+            cidade: ativo.cidade_nome || 'Uberlândia',
+            cidade_id: ativo.cidade_id || 1,
+            lat: ativo.lat,
+            lng: ativo.lng
+          }));
+        }
+      }
+    } catch {}
+  };
 
-  const handleValorHoraChange = (e:React.ChangeEvent<HTMLInputElement>)=>{ const formatted = formatarMoedaInput(e.target.value); const num = parseMoedaParaNumero(formatted); setForm(f=>({...f, valorHoraStr:formatted, valorHoraNum:num})); };
-  const handleAjudaTransporteChange = (e:React.ChangeEvent<HTMLInputElement>)=>{ const formatted = formatarMoedaInput(e.target.value); const num = parseMoedaParaNumero(formatted); setForm(f=>({...f, ajudaTransporteStr:formatted, ajudaTransporteNum:num})); };
-  const handleInicioChange = (e:React.ChangeEvent<HTMLInputElement>)=>{ const valor = e.target.value; setErro(''); setForm(f=>({...f, dataHoraInicio:valor})); };
-  const handleFimChange = (e:React.ChangeEvent<HTMLInputElement>)=>{ const valor = e.target.value; if (form.dataHoraInicio && valor <= form.dataHoraInicio) { setErro('Saída deve ser maior que entrada'); return; } setErro(''); setForm(f=>({...f, dataHoraFim:valor})); };
-  const cancelarEdicao = ()=>{ localStorage.removeItem('uaifrila_vaga_editar'); setVagaEdicao(null); setIsEditando(false); setForm(f=>({...f, titulo:'', descricao:'', dataHoraInicio:'', dataHoraFim:''})); if (propsSetTelaAtiva) propsSetTelaAtiva('trampos'); };
+  const limparEdicao = () => {
+    localStorage.removeItem('uaifrila_vaga_editar');
+    originalUTCRef.current = null;
+    setVagaEdicao(null);
+    setIsEditando(false);
+    setForm({
+      funcao: 'Garçom',
+      titulo: '',
+      descricao: '',
+      dataHoraInicio: '',
+      dataHoraFim: '',
+      valorHoraStr: '20,00',
+      valorHoraNum: 20,
+      ajudaTransporteStr: '15,00',
+      ajudaTransporteNum: 15,
+      bairro: 'Centro',
+      cidade: 'Uberlândia',
+      cidade_id: 1,
+      endereco: '',
+      lat: null as any,
+      lng: null as any,
+    });
+    setErro('');
+    setSucesso('Formulário limpo para nova vaga!');
+    setTimeout(() => setSucesso(''), 2000);
+  };
+
+  useEffect(() => {
+    carregarVariaveisSistema();
+    carregarEnderecoAtivo();
+    
+    // FIX: Se props.modo === 'nova' ou props.limparEdicao, limpa localStorage
+    if (props.modo === 'nova' || props.limparEdicao) {
+      localStorage.removeItem('uaifrila_vaga_editar');
+    }
+    
+    // Verifica se está editando
+    const vagaStr = localStorage.getItem('uaifrila_vaga_editar');
+    if (vagaStr) {
+      try {
+        const vagaLocal = JSON.parse(vagaStr);
+        if (vagaLocal?.id) {
+          setIsEditando(true);
+          setVagaEdicao(vagaLocal);
+          const inicioLocal = utcParaInputLocal(vagaLocal.data_inicio);
+          const fimLocal = utcParaInputLocal(vagaLocal.data_fim);
+          originalUTCRef.current = { inicio: vagaLocal.data_inicio, fim: vagaLocal.data_fim, inicioLocal, fimLocal };
+          setForm(f => ({
+            ...f,
+            funcao: vagaLocal.funcao || 'Garçom',
+            titulo: vagaLocal.titulo || '',
+            descricao: vagaLocal.descricao || '',
+            dataHoraInicio: inicioLocal,
+            dataHoraFim: fimLocal,
+            valorHoraStr: Number(vagaLocal.valor_hora || 20).toFixed(2).replace('.', ','),
+            valorHoraNum: Number(vagaLocal.valor_hora || 20),
+            ajudaTransporteStr: Number(vagaLocal.ajuda_custo_transporte || 15).toFixed(2).replace('.', ','),
+            ajudaTransporteNum: Number(vagaLocal.ajuda_custo_transporte || 15),
+            bairro: vagaLocal.bairro || f.bairro,
+            cidade: vagaLocal.cidade_nome || f.cidade,
+            cidade_id: vagaLocal.cidade_id || f.cidade_id,
+          }));
+        }
+      } catch {}
+    }
+  }, []);
 
   const horasCalculadas = calcularHoras(form.dataHoraInicio, form.dataHoraFim);
-  const validar = ()=>{
+  const valorTotalHoras = horasCalculadas * form.valorHoraNum;
+  const valorTotalPagar = valorTotalHoras + form.ajudaTransporteNum;
+  const taxaPlataforma = valorTotalPagar * 0.1; // 10%
+  const valorFinal = valorTotalPagar + taxaPlataforma;
+
+  const validar = () => {
     if (!form.titulo || form.titulo.trim().length < 5) return 'Título mínimo 5 caracteres';
     if (!form.descricao || form.descricao.trim().length < 10) return 'Descrição mínima 10 caracteres';
     if (!form.dataHoraInicio) return 'Horário de entrada obrigatório';
     if (!form.dataHoraFim) return 'Horário de saída obrigatório';
-    const inicio = new Date(form.dataHoraInicio); const fim = new Date(form.dataHoraFim);
-    if (!isEditando) { const agora = new Date(); agora.setMinutes(agora.getMinutes()+antecedenciaMinutos); if (inicio < agora) return 'Entrada deve ser maior que agora + ' + antecedenciaMinutos + 'min'; }
+    const inicio = new Date(form.dataHoraInicio);
+    const fim = new Date(form.dataHoraFim);
+    if (!isEditando) {
+      const agora = new Date();
+      agora.setMinutes(agora.getMinutes() + antecedenciaMinutos);
+      if (inicio < agora) return `Entrada deve ser > agora + ${antecedenciaMinutos}min`;
+    }
     if (fim <= inicio) return 'Saída deve ser maior que entrada';
-    const diffH = (fim.getTime()-inicio.getTime())/(1000*60*60); if (diffH < 0.5) return 'Mínimo 30 minutos'; if (diffH > 24) return 'Máximo 24 horas';
-    if (form.valorHoraNum < 5) return 'Valor hora mínimo R$5,00'; if (!form.endereco) return 'Endereço obrigatório'; return null;
+    const diffH = (fim.getTime() - inicio.getTime()) / (1000 * 60 * 60);
+    if (diffH < 0.5) return 'Mínimo 30 minutos';
+    if (diffH > 24) return 'Máximo 24 horas';
+    if (form.valorHoraNum < 5) return 'Valor hora mínimo R$5,00';
+    return null;
   };
 
-  const publicar = async ()=>{
-    const msgErro = validar(); if (msgErro) { setErro(msgErro); return; }
+  const publicar = async () => {
+    const msgErro = validar();
+    if (msgErro) { setErro(msgErro); return; }
     setCarregando(true); setErro(''); setSucesso('');
     try {
-      const tz = getDeviceTimezone();
-      const payload = { 
-        titulo: form.titulo, 
-        descricao: form.descricao, 
-        funcao: form.funcao, 
-        valor_hora: form.valorHoraNum, 
-        data_inicio: form.dataHoraInicio,
-        data_fim: form.dataHoraFim,
-        timezone: tz,
-        cidade_nome: form.cidade||'Uberlândia', 
-        cidade_id: form.cidade_id||enderecoAtivo?.cidade_id||null, 
-        endereco_id: enderecoAtivo?.id||null, 
-        bairro: form.bairro||enderecoAtivo?.bairro||'Centro' 
+      const token = localStorage.getItem('uaifrila_token');
+      const API = (import.meta as any).env?.VITE_API_URL || 'http://192.168.24.11:3000/api';
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo';
+      
+      // CONVERTE PARA UTC0 - exige que todas as consultas da API ao banco o timestamp vem com UTC0
+      const dataInicioUTC0 = DateUtil.paraUTC0(form.dataHoraInicio, timezone);
+      const dataFimUTC0 = DateUtil.paraUTC0(form.dataHoraFim, timezone);
+      
+      console.log(`[Publicar] Local: ${form.dataHoraInicio} (${timezone}) => UTC0: ${dataInicioUTC0}`);
+      
+      const payload = {
+        titulo: form.titulo,
+        descricao: form.descricao,
+        funcao: form.funcao,
+        valor_hora: form.valorHoraNum,
+        valor: form.valorHoraNum,
+        ajuda_transporte: form.ajudaTransporteNum,
+        data_inicio: dataInicioUTC0, // UTC0 com Z
+        data_fim: dataFimUTC0, // UTC0 com Z
+        timezone: timezone,
+        cidade_nome: form.cidade,
+        cidade_id: form.cidade_id,
+        bairro: form.bairro,
+        endereco_id: enderecoAtivo?.id || null,
+        endereco: form.endereco,
       };
       
-      console.log('Enviando', payload);
+      const url = isEditando && vagaEdicao?.id ? `${API}/vagas/${vagaEdicao.id}` : `${API}/vagas/criar`;
+      const method = isEditando ? 'PUT' : 'POST';
       
-      if (isEditando && vagaEdicao) {
-        const res = await api.put('/vagas/' + vagaEdicao.id, payload);
-        const novoUTC = res.vaga?.data_inicio || '';
-        setSucesso('Atualizada - ' + tz + ' para UTC 0: ' + novoUTC);
-        localStorage.removeItem('uaifrila_vaga_editar');
-        setTimeout(()=>{ if (propsSetTelaAtiva) propsSetTelaAtiva('trampos'); },1500);
-      } else {
-        const res = await api.post('/vagas/criar', payload);
-        const novoUTC = res.vaga?.data_inicio || '';
-        setSucesso('Criada - ' + tz + ' para UTC 0: ' + novoUTC);
-        setForm(f=>({...f, titulo:'', descricao:'', dataHoraInicio:'', dataHoraFim:''}));
-      }
-    } catch (e:any) { setErro(e.message); console.error(e); } finally { setCarregando(false); }
+      const res = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+      
+      const data = await res.json();
+      
+      if (!res.ok) throw new Error(data.erro || data.message || 'Erro ao publicar');
+      
+      setSucesso(isEditando ? `Vaga #${vagaEdicao.id} atualizada! UTC0: ${dataInicioUTC0}` : `Vaga criada! UTC0: ${dataInicioUTC0}`);
+      localStorage.removeItem('uaifrila_vaga_editar');
+      setTimeout(() => {
+        if (propsSetTelaAtiva) propsSetTelaAtiva('minhas-publicadas');
+      }, 1500);
+      
+    } catch (e: any) {
+      console.error('[Publicar] Erro:', e);
+      setErro(e.message || 'Erro ao publicar vaga');
+    } finally {
+      setCarregando(false);
+    }
   };
 
-  const inputClass = getInputClass(isDark); const labelClass = getLabelClass(isDark); const cardClass = getCardClass(isDark);
-  const buttonPrimaryClass = isDark ? 'w-full h-[52px] bg-[#0066FF] text-white border-2 border-[#0066FF] font-black uppercase text-sm hover:bg-[#0055DD] transition-all' : 'w-full h-[52px] bg-black text-white border-2 border-black font-black uppercase text-sm hover:bg-zinc-800 transition-all';
+  const cancelarEdicao = () => {
+    localStorage.removeItem('uaifrila_vaga_editar');
+    originalUTCRef.current = null;
+    setVagaEdicao(null);
+    setIsEditando(false);
+    setForm(f => ({ ...f, titulo: '', descricao: '', dataHoraInicio: '', dataHoraFim: '' }));
+    if (propsSetTelaAtiva) propsSetTelaAtiva('trampos');
+  };
 
   return (
-    <div className="min-h-screen w-full flex justify-center px-4 py-6">
-      <div className="w-full max-w-4xl">
-        <div className={cardClass}>
-          <div className={'mb-6 border-b-2 pb-4 ' + (isDark?'border-white':'border-black')}>
-            <div className="flex justify-between items-start">
-              <div>
-                <h1 className="text-2xl md:text-3xl font-black uppercase tracking-tighter">
-                  {isEditando ? 'Editar ' + vagaEdicao?.id + ' - ' + deviceTimezone : 'Publicar - ' + deviceTimezone}
-                </h1>
-                <p className="text-[11px] font-mono mt-2 opacity-60 uppercase">
-                  data inicio e timezone para DateUtil paraUTC0 igual UTC 0
-                </p>
-              </div>
-              {isEditando && (
-                <button onClick={cancelarEdicao} className="px-3 py-1 bg-white text-black border-2 border-black text-[10px] font-black uppercase">
-                  Cancelar
-                </button>
-              )}
+    <div className="max-w-[1280px] mx-auto px-4 md:px-8 py-8 grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr] gap-6">
+      {/* FORM */}
+      <div className="bg-white border-4 border-black p-6 md:p-8 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-black uppercase flex items-center gap-2">⚡ {isEditando ? `Editando Vaga #${vagaEdicao?.id}` : 'Nova Vaga'}</h1>
+          
+        </div>
+
+        <div className="space-y-5">
+          <div>
+            <label className="text-xs font-black uppercase">Título *</label>
+            <input value={form.titulo} onChange={e => setForm({ ...form, titulo: e.target.value.slice(0,100) })} placeholder="Ex: Garçom sábado - 2 quartos" className="w-full border-2 border-black p-3 font-bold" />
+          </div>
+
+          <div>
+            <label className="text-xs font-black uppercase">Descrição *</label>
+            <textarea value={form.descricao} onChange={e => setForm({ ...form, descricao: e.target.value.slice(0,500) })} rows={4} placeholder="Detalhe serviço, horário, materiais..." className="w-full border-2 border-black p-3 font-bold" />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-black uppercase">Função</label>
+              <select value={form.funcao} onChange={e => setForm({ ...form, funcao: e.target.value })} className="w-full border-2 border-black p-3 font-bold">
+                <option>Garçom</option><option>Cozinheiro</option><option>Diarista</option><option>Segurança</option><option>Recepcionista</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-black uppercase">Cidade</label>
+              <input value={form.cidade} onChange={e => setForm({ ...form, cidade: e.target.value })} className="w-full border-2 border-black p-3 font-bold" />
             </div>
           </div>
-          {carregandoEdicao && <div className="mb-6 p-3 bg-[#0066FF] text-white border-2 border-black font-bold text-xs">Buscando UTC 0</div>}
-          {erro && <div className="mb-6 p-3 bg-[#E53935] text-white border-2 border-black font-bold text-xs">{erro}</div>}
-          {sucesso && <div className="mb-6 p-3 bg-[#00C853] text-white border-2 border-black font-bold text-xs">{sucesso}</div>}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <div className="flex flex-col gap-2"><label className={labelClass}>Função</label><select value={form.funcao} onChange={e=>setForm({...form, funcao:e.target.value})} className={inputClass}>{FUNCOES.map(f=><option key={f} value={f}>{f}</option>)}</select></div>
-            <div className="flex flex-col gap-2"><label className={labelClass}>Título</label><input value={form.titulo} onChange={e=>setForm({...form, titulo:e.target.value})} placeholder="Ex: Garçom para evento" className={inputClass} maxLength={150} /></div>
-            <div className="flex flex-col gap-2"><label className={labelClass}>Horário entrada - {deviceTimezone}</label><input type="datetime-local" value={form.dataHoraInicio} onChange={handleInicioChange} className={inputClass} disabled={carregandoEdicao} /><span className="text-[10px] font-mono opacity-50">Envio data inicio mais timezone para paraUTC0</span></div>
-            <div className="flex flex-col gap-2"><label className={labelClass}>Horário saída - {deviceTimezone}</label><input type="datetime-local" value={form.dataHoraFim} min={form.dataHoraInicio} onChange={handleFimChange} className={inputClass} disabled={carregandoEdicao} />{horasCalculadas>0&&<span className={'text-[11px] font-black px-2 py-1 border ' + (isDark?'bg-[#0066FF] text-white border-white':'bg-black text-white border-black')}> {horasCalculadas}h </span>}</div>
-            <div className="flex flex-col gap-2"><label className={labelClass}>Valor hora R$</label><div className="relative"><span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold opacity-60 pointer-events-none">R$</span><input type="text" inputMode="numeric" value={form.valorHoraStr} onChange={handleValorHoraChange} placeholder="20,00" className={inputClass + ' pl-10'} /></div></div>
-            <div className="flex flex-col gap-2"><label className={labelClass}>Ajuda transporte R$</label><div className="relative"><span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold opacity-60 pointer-events-none">R$</span><input type="text" inputMode="numeric" value={form.ajudaTransporteStr} onChange={handleAjudaTransporteChange} placeholder="15,00" className={inputClass + ' pl-10'} /></div></div>
-            <div className="md:col-span-2 flex flex-col gap-2"><label className={labelClass}>Descrição</label><textarea value={form.descricao} onChange={e=>setForm({...form, descricao:e.target.value})} placeholder="Detalhe uniforme, local..." rows={4} className={inputClass + ' min-h-[100px] resize-none py-3'} maxLength={500} /></div>
-            <div className="md:col-span-2 flex flex-col gap-2"><label className={labelClass}>Endereço</label><GoogleEnderecoInput endereco={form.endereco} cidade={form.cidade} cidadeId={form.cidade_id} lat={form.lat} lng={form.lng} onChange={(data:any)=>{ setForm(f=>({...f, endereco:data.endereco||f.endereco, cidade:data.cidade||f.cidade, cidade_id:data.cidade_id||data.cidadeId||f.cidade_id, bairro:data.bairro||f.bairro, lat:data.lat??f.lat, lng:data.lng??f.lng})); }} /></div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-black uppercase">Entrada *</label>
+              <input type="datetime-local" value={form.dataHoraInicio} min={minDateTime} onChange={e => setForm({ ...form, dataHoraInicio: e.target.value })} className="w-full border-2 border-black p-3 font-bold" />
+              <span className="text-[10px] opacity-60">Mínimo: agora + {antecedenciaMinutos}min | Timezone: {Intl.DateTimeFormat().resolvedOptions().timeZone}</span>
+            </div>
+            <div>
+              <label className="text-xs font-black uppercase">Saída *</label>
+              <input type="datetime-local" value={form.dataHoraFim} onChange={e => setForm({ ...form, dataHoraFim: e.target.value })} className="w-full border-2 border-black p-3 font-bold" />
+            </div>
           </div>
-          <button onClick={publicar} disabled={carregando||carregandoEdicao||horasCalculadas===0} className={'mt-8 ' + buttonPrimaryClass + ' ' + ((carregando||carregandoEdicao||horasCalculadas===0)?'opacity-50':'')}>{carregandoEdicao?'Buscando':carregando?'Convertendo':horasCalculadas===0?'Selecione horarios':isEditando?'Atualizar ' + vagaEdicao?.id:'Publicar - ' + deviceTimezone + ' para UTC0'}</button>
-          {isEditando&&(<button onClick={cancelarEdicao} className="mt-3 w-full h-[48px] bg-white text-black border-2 border-black font-black uppercase text-xs">Voltar</button>)}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-black uppercase">Valor Hora R$ *</label>
+              <input value={form.valorHoraStr} onChange={e => {
+                const formatted = formatarMoedaInput(e.target.value);
+                const num = parseMoedaParaNumero(formatted);
+                setForm(f => ({ ...f, valorHoraStr: formatted, valorHoraNum: num }));
+              }} className="w-full border-2 border-black p-3 font-bold" />
+            </div>
+            <div>
+              <label className="text-xs font-black uppercase">Ajuda Transporte R$</label>
+              <input value={form.ajudaTransporteStr} onChange={e => {
+                const formatted = formatarMoedaInput(e.target.value);
+                const num = parseMoedaParaNumero(formatted);
+                setForm(f => ({ ...f, ajudaTransporteStr: formatted, ajudaTransporteNum: num }));
+              }} className="w-full border-2 border-black p-3 font-bold" />
+            </div>
+          </div>
+
+          {erro && <div className="bg-red-100 border-2 border-red-500 p-3 font-bold text-red-700">{erro}</div>}
+          {sucesso && <div className="bg-green-100 border-2 border-green-500 p-3 font-bold text-green-700">{sucesso}</div>}
+
+          <div className="flex gap-3">
+            <button onClick={publicar} disabled={carregando} className="flex-1 bg-black text-white border-2 border-black p-3 font-black uppercase shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] disabled:opacity-50">
+              {carregando ? 'Publicando...' : isEditando ? 'Atualizar Vaga' : 'Publicar Vaga'}
+            </button>
+            {isEditando && (
+              <button onClick={cancelarEdicao} className="bg-white text-black border-2 border-black p-3 font-black uppercase">Cancelar</button>
+            )}
+          </div>
         </div>
+      </div>
+
+      {/* QUADRO VALOR A PAGAR - SEMPRE VISÍVEL, mesmo com 403 */}
+      <div className="space-y-6">
+        <div className="bg-[#FFC700] border-4 border-black p-6 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+          <h2 className="text-xl font-black uppercase mb-4">💰 Valor a Pagar</h2>
+          
+          <div className="space-y-3 font-bold">
+            <div className="flex justify-between">
+              <span>Horas:</span>
+              <span>{horasCalculadas.toFixed(2)}h</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Valor hora:</span>
+              <span>R$ {form.valorHoraNum.toFixed(2).replace('.', ',')}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Subtotal horas:</span>
+              <span>R$ {valorTotalHoras.toFixed(2).replace('.', ',')}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Ajuda transporte:</span>
+              <span>R$ {form.ajudaTransporteNum.toFixed(2).replace('.', ',')}</span>
+            </div>
+            <div className="border-t-2 border-black pt-2 flex justify-between">
+              <span>Subtotal:</span>
+              <span>R$ {valorTotalPagar.toFixed(2).replace('.', ',')}</span>
+            </div>
+            <div className="flex justify-between text-sm opacity-70">
+              <span>Taxa plataforma (10%):</span>
+              <span>R$ {taxaPlataforma.toFixed(2).replace('.', ',')}</span>
+            </div>
+            <div className="border-t-4 border-black pt-3 flex justify-between text-xl">
+              <span>TOTAL:</span>
+              <span>R$ {valorFinal.toFixed(2).replace('.', ',')}</span>
+            </div>
+          </div>
+
+
+        </div>
+
+        <div className="bg-white border-4 border-black p-4 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+          <h3 className="font-black uppercase mb-2">📍 Endereço</h3>
+          <div className="font-bold text-sm">
+            {enderecoAtivo ? (
+              <>
+                <div>{enderecoAtivo.endereco_completo}</div>
+                <div>{form.bairro} - {form.cidade}</div>
+              </>
+            ) : (
+              <div className="opacity-60">Nenhum endereço ativo. Cadastre em Endereços.</div>
+            )}
+          </div>
+        </div>
+
+
       </div>
     </div>
   );

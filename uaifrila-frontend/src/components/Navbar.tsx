@@ -47,7 +47,14 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
     return false;
   });
 
-  const handleNav = (id: string) => { setTelaAtiva(id); setMenuAberto(false); };
+  const handleNav = (id: string) => { 
+    // FIX: ao clicar em Publicar vaga, limpa edição
+    if (id === 'publicar') {
+      localStorage.removeItem('uaifrila_vaga_editar');
+    }
+    setTelaAtiva(id); 
+    setMenuAberto(false); 
+  };
 
   const getBadgeColor = () => {
     const tipo = getTipo();
