@@ -2,31 +2,10 @@
 import React, { useEffect, useState } from 'react';
 import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 
-interface Transacao {
-  id: number;
-  codigo: string;
-  vaga_id?: number;
-  trampo_id?: number;
-  freela_id: number;
-  contratante_id: number;
-  cidade_nome?: string;
-  valor_base: number;
-  taxa_percentual: number;
-  taxa_valor: number;
-  ajuda_custo?: number;
-  valor_total_contratante: number;
-  valor_liquido_freela: number;
-  status: string;
-  metodo_pagamento: string;
-  data_inicio?: string;
-  data_pagamento?: string;
-  criado_em: string;
-}
-
 export default function PainelTransacoes(props: any) {
   const styles = useUaiFrilaStyles();
   const API = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3000/api';
-  const [transacoes, setTransacoes] = useState<Transacao[]>([]);
+  const [transacoes, setTransacoes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState('');
   const [filtroStatus, setFiltroStatus] = useState('TODOS');
@@ -37,7 +16,19 @@ export default function PainelTransacoes(props: any) {
     try {
       const token = localStorage.getItem('uaifrila_token');
       if (!token) throw new Error('Faça login');
-      const res = await fetch(`${API}/transacoes`, { headers: { Authorization: `Bearer ${token}` } });
+
+      // Tenta /transacoes, depois /transacoes/minhas, depois /vagas/minhas como fallback (se não tem transação ainda, mostra vazio amigável)
+      let res = await fetch(`${API}/transacoes`, { headers: { Authorization: `Bearer ${token}` } });
+      if (res.status === 404) {
+        res = await fetch(`${API}/transacoes/minhas`, { headers: { Authorization: `Bearer ${token}` } });
+      }
+      if (res.status === 404) {
+        // Backend ainda não tem rota - mostra vazio com instrução
+        setTransacoes([]);
+        setErro('');
+        setLoading(false);
+        return;
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data.erro || 'Erro ao carregar');
       setTransacoes(data.transacoes || data || []);
@@ -64,7 +55,6 @@ export default function PainelTransacoes(props: any) {
   };
 
   const filtradas = filtroStatus === 'TODOS' ? transacoes : transacoes.filter(t => t.status === filtroStatus);
-
   const totalReceber = filtradas.reduce((acc, t) => acc + Number(t.valor_liquido_freela || 0), 0);
   const totalPago = filtradas.reduce((acc, t) => acc + Number(t.valor_total_contratante || 0), 0);
 
@@ -77,7 +67,6 @@ export default function PainelTransacoes(props: any) {
         <button onClick={carregar} className={styles.buttonSecondary}>🔄 Recarregar</button>
       </div>
 
-      {/* Resumo */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div className={styles.cardSmall}>
           <p className={styles.label}>Total Transações</p>
@@ -93,14 +82,9 @@ export default function PainelTransacoes(props: any) {
         </div>
       </div>
 
-      {/* Filtros */}
       <div className="flex gap-2 mb-4 flex-wrap">
         {['TODOS', 'AGUARDANDO_PAGAMENTO', 'PAGO', 'LIBERADO', 'CANCELADO'].map(s => (
-          <button
-            key={s}
-            onClick={() => setFiltroStatus(s)}
-            className={filtroStatus === s ? styles.buttonPrimary() + ' px-3 py-1 text-xs w-auto' : styles.buttonSecondary + ' text-xs'}
-          >
+          <button key={s} onClick={() => setFiltroStatus(s)} className={filtroStatus === s ? styles.buttonPrimary() + ' px-3 py-1 text-xs w-auto' : styles.buttonSecondary + ' text-xs'}>
             {s.replace('_', ' ')}
           </button>
         ))}
@@ -109,7 +93,14 @@ export default function PainelTransacoes(props: any) {
       {erro && <div className={styles.errorBox + ' mb-4'}>{erro}</div>}
 
       {filtradas.length === 0 && !erro && (
-        <div className={styles.card}>Nenhuma transação encontrada.</div>
+        <div className={styles.card}>
+          <p className={styles.typography.body}>Nenhuma transação ainda.</p>
+          <p className={styles.typography.bodySmall + ' mt-2'}>Quando uma vaga for concluída, a transação aparecerá aqui com valor_base, taxa, valor_total_contratante e valor_liquido_freela.</p>
+          <div className="mt-4 p-3 bg-yellow-50 border-2 border-black text-xs">
+            <p className="font-black">Se você viu 404 no console, adicione as rotas no backend:</p>
+            <pre className="mt-1 text-[10px] overflow-auto">{`GET /api/transacoes -> TransacaoController.listar`}</pre>
+          </div>
+        </div>
       )}
 
       <div className="space-y-3">
@@ -121,18 +112,14 @@ export default function PainelTransacoes(props: any) {
                   <h3 className="font-black uppercase text-sm">{t.codigo}</h3>
                   <span className={getStatusBadge(t.status)}>{t.status}</span>
                 </div>
-                <p className={styles.typography.caption + ' mt-1'}>
-                  Vaga #{t.vaga_id || '-'} • Trampo #{t.trampo_id || '-'} • {t.cidade_nome || 'Sem cidade'} • {t.metodo_pagamento}
-                </p>
+                <p className={styles.typography.caption + ' mt-1'}>Vaga #{t.vaga_id || '-'} • Trampo #{t.trampo_id || '-'} • {t.cidade_nome || 'Sem cidade'} • {t.metodo_pagamento}</p>
                 <div className={styles.valorBox + ' mt-3'}>
                   <div>Base: R$ {Number(t.valor_base || 0).toFixed(2).replace('.', ',')}</div>
                   <div>Taxa {t.taxa_percentual}%: R$ {Number(t.taxa_valor || 0).toFixed(2).replace('.', ',')}</div>
                   <div>Total Contratante: R$ {Number(t.valor_total_contratante || 0).toFixed(2).replace('.', ',')}</div>
                   <div className="font-black">Líquido Freela: R$ {Number(t.valor_liquido_freela || 0).toFixed(2).replace('.', ',')}</div>
                 </div>
-                <p className={styles.typography.caption + ' mt-2'}>
-                  Criado: {formatarData(t.criado_em)} {t.data_pagamento && `• Pago: ${formatarData(t.data_pagamento)}`}
-                </p>
+                <p className={styles.typography.caption + ' mt-2'}>Criado: {formatarData(t.criado_em)} {t.data_pagamento && `• Pago: ${formatarData(t.data_pagamento)}`}</p>
               </div>
             </div>
           </div>

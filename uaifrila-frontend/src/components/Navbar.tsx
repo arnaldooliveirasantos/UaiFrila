@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { useTheme } from '../context/ThemeContext';
 import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
@@ -13,43 +14,29 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
   
   const isFreela = () => ['FREELA','DUAL'].includes(getTipo()) || getNivel() === 0;
   const isContratante = () => ['CONTRATANTE','DUAL'].includes(getTipo()) || getNivel() >= 10;
-  const isDual = () => getTipo() === 'DUAL' || getNivel() === 20;
-  const isFinanceiro = () => getNivel() >= 50 || ['FINANCEIRO','ADMIN','SUPER_ADMIN'].includes(getTipo());
-  const isSuporte = () => getNivel() >= 60 || ['SUPORTE','ADMIN','SUPER_ADMIN'].includes(getTipo());
-  const isModerador = () => getNivel() >= 80 || ['MODERADOR','ADMIN','SUPER_ADMIN'].includes(getTipo());
   const isAdmin = () => getNivel() >= 90 || ['ADMIN','SUPER_ADMIN'].includes(getTipo());
   const isSuperAdmin = () => getTipo() === 'SUPER_ADMIN' || getNivel() >= 100;
 
+  // MENU FIXO - Todos botões redirecionando corretamente
   const menu = [
-    { id: 'mural', label: 'Mural', auth: true, nivel: 0, tipos: ['FREELA','CONTRATANTE','DUAL','FINANCEIRO','SUPORTE','MODERADOR','ADMIN','SUPER_ADMIN'] },
-    { id: 'perfil', label: 'Meu Perfil', auth: true, nivel: 0, tipos: ['FREELA','CONTRATANTE','DUAL','FINANCEIRO','SUPORTE','MODERADOR','ADMIN','SUPER_ADMIN'] },
-    { id: 'trampos', label: 'Meus Trampos', auth: true, nivel: 0, tipos: ['FREELA','CONTRATANTE','DUAL','FINANCEIRO','SUPORTE','MODERADOR','ADMIN','SUPER_ADMIN'] },
-    { id: 'publicar', label: 'Publicar Vaga',auth: true,role: 'contratante', nivel: 10, tipos: ['CONTRATANTE','DUAL','ADMIN','SUPER_ADMIN'] },
-    { id: 'candidatos', label: 'Candidatos',auth: true, role: 'contratante', nivel: 10, tipos: ['CONTRATANTE','DUAL','ADMIN','SUPER_ADMIN'] },
-    { id: 'transacoes', label: 'Transações',auth: true, role: 'financeiro', nivel: 50, tipos: ['FINANCEIRO','ADMIN','SUPER_ADMIN'] },
-    { id: 'cidades', label: 'Cidades',auth: true, role: 'admin', nivel: 80, tipos: ['MODERADOR','ADMIN','SUPER_ADMIN'] },
-    { id: 'expansao', label: 'Expansão',auth: true, role: 'admin', nivel: 90, tipos: ['ADMIN','SUPER_ADMIN'] },
-    { id: 'variaveis', label: 'Variáveis',auth: true, role: 'super_admin', nivel: 100, tipos: ['SUPER_ADMIN'] },
-    { id: 'codigo', label: 'Código Freela', public: true, nivel: 0, tipos: [] },
+    { id: 'mural', label: 'Mural', auth: true, show: () => !!usuario },
+    { id: 'perfil', label: 'Meu Perfil', auth: true, show: () => !!usuario },
+    { id: 'publicar', label: 'Publicar Vaga', auth: true, show: () => !!usuario && (isContratante() || isAdmin() || isSuperAdmin()) },
+    { id: 'trampos', label: 'Meus Trampos', auth: true, show: () => !!usuario },
+    { id: 'transacoes', label: 'Transações', auth: true, show: () => !!usuario }, // Liberado para todos logados
+    { id: 'expansao', label: 'Expansão', auth: true, show: () => !!usuario }, // Liberado para todos logados
+    { id: 'cidades', label: 'Cidades', auth: true, show: () => !!usuario && isAdmin() },
+    { id: 'variaveis', label: 'Variáveis', auth: true, show: () => !!usuario && isSuperAdmin() },
+    { id: 'codigoFreela', label: 'Código Freela', public: true, show: () => true },
   ];
 
-  const filtrado = menu.filter((m:any) => {
-    if (m.public) return true;
-    if (!usuario) return false;
-    if (m.auth) return true;
-    if (getNivel() >= m.nivel) return true;
-    if (m.tipos.includes(getTipo())) return true;
-    if (m.role === 'contratante' && (isContratante() || isAdmin() || isSuperAdmin())) return true;
-    if (m.role === 'financeiro' && isFinanceiro()) return true;
-    if (m.role === 'admin' && (isModerador() || isAdmin() || isSuperAdmin())) return true;
-    if (m.role === 'super_admin' && isSuperAdmin()) return true;
-    return false;
-  });
+  const filtrado = menu.filter((m:any) => m.show());
 
   const handleNav = (id: string) => { 
     if (id === 'publicar') {
       localStorage.removeItem('uaifrila_vaga_editar');
     }
+    console.log('[Navbar] Navegando para:', id);
     setTelaAtiva(id); 
     setMenuAberto(false); 
   };
@@ -59,8 +46,6 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
     if (tipo === 'SUPER_ADMIN') return 'default';
     if (tipo === 'ADMIN') return 'warning';
     if (tipo === 'FINANCEIRO') return 'success';
-    if (tipo === 'MODERADOR') return 'default';
-    if (tipo === 'SUPORTE') return 'default';
     if (tipo === 'DUAL') return 'warning';
     if (tipo === 'CONTRATANTE') return 'danger';
     return 'warning';
@@ -75,14 +60,14 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
           {usuario && <span className={styles.badge(getBadgeVariant())}>{getTipo()}</span>}
         </div>
 
-        <div className="hidden lg:flex items-center gap-1 flex-wrap max-w-[70%]">
+        <div className="hidden lg:flex items-center gap-1 flex-wrap max-w-[75%]">
           {filtrado.map((item:any) => {
             const ativo = telaAtiva === item.id;
             return (
               <button 
                 key={item.id} 
                 onClick={() => handleNav(item.id)} 
-                className={ativo ? styles.buttonPrimary() : styles.buttonSecondary}
+                className={ativo ? styles.buttonPrimary() + ' px-3 py-1 text-xs w-auto' : styles.buttonSecondary + ' text-xs px-3 py-1'}
               >
                 {item.label}
               </button>
@@ -91,11 +76,7 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
         </div>
 
         <div className="flex items-center gap-2">
-          <button 
-            onClick={toggleTheme} 
-            className={styles.buttonSecondary}
-            title="Alternar tema"
-          >
+          <button onClick={toggleTheme} className={styles.buttonSecondary + ' text-xs px-2 py-1'} title="Alternar tema">
             {styles.isDark ? '☾' : '☀'}
           </button>
           
@@ -103,59 +84,36 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
             {usuario ? (
               <>
                 <span className={`text-xs font-bold max-w-[120px] truncate ${styles.isDark ? 'text-white' : 'text-black'}`}>{usuario.nome_completo || usuario.nome}</span>
-                <button onClick={onLogout} className={styles.buttonDanger}>Sair</button>
+                <button onClick={onLogout} className={styles.buttonDanger + ' text-xs'}>Sair</button>
               </>
             ) : (
               <>
-                <button onClick={() => handleNav('login')} className={styles.buttonSecondary}>Login</button>
-                <button onClick={() => handleNav('cadastro')} className={styles.buttonPrimary()}>Cadastro</button>
+                <button onClick={() => handleNav('login')} className={styles.buttonSecondary + ' text-xs'}>Login</button>
+                <button onClick={() => handleNav('cadastro')} className={styles.buttonPrimary() + ' px-3 py-1 text-xs w-auto'}>Cadastro</button>
               </>
             )}
           </div>
 
-          <button onClick={() => setMenuAberto(!menuAberto)} className={`${styles.buttonSecondary} lg:hidden w-10 h-10 flex flex-col items-center justify-center gap-1`}>
-            <span className={`block w-5 h-0.5 transition-all ${styles.isDark ? 'bg-white' : 'bg-black'} ${menuAberto ? 'rotate-45 translate-y-1.5' : ''}`} />
-            <span className={`block w-5 h-0.5 ${styles.isDark ? 'bg-white' : 'bg-black'} ${menuAberto ? 'opacity-0' : ''}`} />
-            <span className={`block w-5 h-0.5 transition-all ${styles.isDark ? 'bg-white' : 'bg-black'} ${menuAberto ? '-rotate-45 -translate-y-1.5' : ''}`} />
-          </button>
+          <button onClick={() => setMenuAberto(!menuAberto)} className="lg:hidden p-2 border-2 border-black bg-white text-black">☰</button>
         </div>
       </div>
 
+      {/* Mobile Menu */}
       {menuAberto && (
-        <div className={`lg:hidden absolute top-[72px] left-0 right-0 border-b-2 max-h-[80vh] overflow-y-auto shadow-xl ${styles.isDark ? 'bg-zinc-900 border-zinc-700' : 'bg-white border-black'}`}>
-          <div className="p-4 space-y-2">
-            {usuario && (
-              <div className={styles.cardSmall}>
-                <span className={styles.label}>Perfil atual</span>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className={styles.badge(getBadgeVariant())}>{getTipo()}</span>
-                  <span className="text-xs font-bold truncate">{usuario.nome_completo || usuario.nome}</span>
-                </div>
-              </div>
-            )}
-            {filtrado.map((item:any) => {
-              const ativo = telaAtiva === item.id;
-              return (
-                <button 
-                  key={item.id} 
-                  onClick={() => handleNav(item.id)} 
-                  className={`${ativo ? styles.buttonPrimary() : styles.buttonSecondary} w-full text-left justify-between flex items-center`}
-                >
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
-            <div className={`border-t-2 mt-4 pt-4 space-y-2 ${styles.isDark ? 'border-zinc-700' : 'border-black/10'}`}>
-              {usuario ? (
-                <button onClick={() => { onLogout(); setMenuAberto(false); }} className={`${styles.buttonDanger} w-full`}>Sair</button>
-              ) : (
-                <>
-                  <button onClick={() => handleNav('login')} className={`${styles.buttonSecondary} w-full`}>Login</button>
-                  <button onClick={() => handleNav('cadastro')} className={`${styles.buttonPrimary()} w-full`}>Cadastro</button>
-                </>
-              )}
-            </div>
-          </div>
+        <div className={`lg:hidden border-t-2 p-4 space-y-2 ${styles.isDark ? 'bg-zinc-900 border-zinc-700' : 'bg-white border-black'}`}>
+          {filtrado.map((item:any) => (
+            <button key={item.id} onClick={() => handleNav(item.id)} className={`w-full text-left px-3 py-2 border-2 font-black text-xs uppercase ${telaAtiva===item.id ? 'bg-black text-white border-black' : styles.isDark ? 'bg-zinc-800 text-white border-zinc-700' : 'bg-white text-black border-black'}`}>
+              {item.label}
+            </button>
+          ))}
+          {usuario ? (
+            <button onClick={() => { onLogout(); setMenuAberto(false); }} className={styles.buttonDanger + ' w-full'}>Sair - {usuario.nome_completo || usuario.nome}</button>
+          ) : (
+            <>
+              <button onClick={() => handleNav('login')} className={styles.buttonSecondary + ' w-full'}>Login</button>
+              <button onClick={() => handleNav('cadastro')} className={styles.buttonPrimary() + ' w-full'}>Cadastro</button>
+            </>
+          )}
         </div>
       )}
     </nav>

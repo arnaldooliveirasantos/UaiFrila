@@ -1,16 +1,24 @@
+
 import { BaseRepository } from './BaseRepository';
 
 export class CidadeRepository extends BaseRepository {
+  async listarTodas() {
+    return await this.query(`SELECT * FROM cidades ORDER BY ativa DESC, nome ASC`);
+  }
+
   async listarAtivas() {
-    try {
-      return await this.query(`SELECT id, nome, cidade_nome, estado, uf FROM cidades WHERE is_ativo = true OR is_ativo IS NULL ORDER BY nome ASC LIMIT 100`);
-    } catch {
-      // Fallback se tabela cidades não existir
-      return [
-        { id: 1, nome: 'Uberlândia', cidade_nome: 'Uberlândia', estado: 'MG', uf: 'MG' },
-        { id: 2, nome: 'Anápolis', cidade_nome: 'Anápolis', estado: 'GO', uf: 'GO' },
-        { id: 3, nome: 'Goiânia', cidade_nome: 'Goiânia', estado: 'GO', uf: 'GO' },
-      ];
-    }
+    return await this.query(`SELECT * FROM cidades WHERE ativa=true ORDER BY nome ASC`);
+  }
+
+  async buscarPorId(id: number) {
+    return await this.queryOne(`SELECT * FROM cidades WHERE id=$1`, [id]);
+  }
+
+  async criar(dados: any) {
+    const res = await this.query(
+      `INSERT INTO cidades (nome, estado, codigo_ibge, ativa, lat, lng, raio_km, populacao, regiao, status_expansao) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [dados.nome, dados.estado, dados.codigo_ibge, true, dados.lat, dados.lng, dados.raio_km||20, dados.populacao, dados.regiao, 'ATIVA']
+    );
+    return res[0];
   }
 }

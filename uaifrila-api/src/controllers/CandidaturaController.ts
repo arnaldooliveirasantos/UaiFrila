@@ -1,36 +1,55 @@
 
 import { Request, Response } from 'express';
-import { CandidaturaRepository } from '../repositories/CandidaturaRepository';
+import { CandidaturaService } from '../services/CandidaturaService';
 
 export class CandidaturaController {
-  private repo = new CandidaturaRepository();
+  private service: CandidaturaService;
 
-  candidatar = async (req:Request, res:Response)=>{
-    try{
-      const usuario = (req as any).usuario;
+  constructor() {
+    this.service = new CandidaturaService();
+  }
+
+  candidatar = async (req: Request, res: Response) => {
+    try {
+      const usuarioId = (req as any).usuario.id;
       const { vaga_id, mensagem } = req.body;
-      const id = Number(vaga_id || req.params.id);
-      if(!id) { res.status(400).json({ erro:'vaga_id obrigatório' }); return; }
-      const cand = await this.repo.candidatar(id, usuario.id, mensagem);
-      res.json({ sucesso:true, candidatura:cand });
-    }catch(e:any){ res.status(400).json({ erro:e.message }); }
+      const vagaId = Number(vaga_id || req.params.id);
+      const result = await this.service.candidatar(vagaId, usuarioId, mensagem);
+      res.status(201).json({ sucesso: true, candidatura: result });
+    } catch (e: any) {
+      res.status(400).json({ erro: e.message });
+    }
   };
 
-  listarPorVaga = async (req:Request, res:Response)=>{
-    try{
+  listarPorVaga = async (req: Request, res: Response) => {
+    try {
       const vagaId = Number(req.params.id);
-      const lista = await this.repo.listarPorVaga(vagaId);
-      res.json({ sucesso:true, candidaturas:lista });
-    }catch(e:any){ res.status(500).json({ erro:e.message }); }
+      const candidaturas = await this.service.listarPorVaga(vagaId);
+      res.json({ sucesso: true, candidaturas });
+    } catch (e: any) {
+      res.status(500).json({ erro: e.message });
+    }
   };
 
-  aceitar = async (req:Request, res:Response)=>{
-    try{
-      const usuario = (req as any).usuario;
+  listarMinhas = async (req: Request, res: Response) => {
+    try {
+      const usuarioId = (req as any).usuario.id;
+      const candidaturas = await this.service.listarPorUsuario(usuarioId);
+      res.json({ sucesso: true, candidaturas });
+    } catch (e: any) {
+      res.status(500).json({ erro: e.message });
+    }
+  };
+
+  aceitar = async (req: Request, res: Response) => {
+    try {
+      const contratanteId = (req as any).usuario.id;
       const vagaId = Number(req.params.id);
       const candidaturaId = Number(req.params.candidaturaId);
-      const trampo = await this.repo.aceitarCandidatura(vagaId, candidaturaId, usuario.id);
-      res.json({ sucesso:true, trampo });
-    }catch(e:any){ res.status(400).json({ erro:e.message }); }
+      const trampo = await this.service.aceitar(vagaId, candidaturaId, contratanteId);
+      res.json({ sucesso: true, trampo });
+    } catch (e: any) {
+      res.status(400).json({ erro: e.message });
+    }
   };
 }
