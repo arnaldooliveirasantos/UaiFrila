@@ -37,27 +37,27 @@ CREATE TABLE estados (
   UNIQUE(sigla, pais_id)
 );
 
-CREATE TABLE cidades (
-  id SERIAL PRIMARY KEY,
-  nome VARCHAR(100) NOT NULL,
-  estado VARCHAR(2) DEFAULT 'MG' NOT NULL,
-  codigo_ibge VARCHAR(10),
-  ativa BOOLEAN DEFAULT true NOT NULL,
-  lat DOUBLE PRECISION,
-  lng DOUBLE PRECISION,
-  raio_km INT DEFAULT 20 NOT NULL,
-  populacao INT,
-  regiao VARCHAR(50),
-  pais_id INT,
-  estado_id INT,
-  cep_prefixo VARCHAR(10),
-  status_expansao VARCHAR(20) DEFAULT 'ATIVA',
-  demanda_score INT DEFAULT 0,
-  vagas_abertas INT DEFAULT 0,
-  freelas_ativos INT DEFAULT 0,
-  criado_em TIMESTAMP DEFAULT NOW(),
-  atualizado_em TIMESTAMP DEFAULT NOW(),
-  UNIQUE(nome, estado)
+create table cidades (
+  id SERIAL primary key,
+nome VARCHAR(100) not null,
+estado VARCHAR(2) default 'MG' not null,
+codigo_ibge VARCHAR(10),
+ativa BOOLEAN default true not null,
+lat DOUBLE precision,
+lng DOUBLE precision,
+raio_km INT default 20 not null,
+populacao INT,
+regiao VARCHAR(50),
+pais_id INT,
+estado_id INT,
+cep_prefixo VARCHAR(10),
+status_expansao VARCHAR(20) default 'ATIVA',
+demanda_score INT default 0,
+vagas_abertas INT default 0,
+freelas_ativos INT default 0,
+criado_em TIMESTAMP default NOW(),
+atualizado_em TIMESTAMP default NOW(),
+unique(nome, estado)
 );
 
 CREATE INDEX idx_cidades_nome ON cidades(nome);
@@ -190,16 +190,35 @@ CREATE TABLE vagas (
   descricao TEXT,
   funcao VARCHAR(50),
   valor_hora NUMERIC(10,2) NOT NULL,
+  valor_servico NUMERIC(10,2) ,
+  valor_transporte NUMERIC(10,2) ,
+  total_freela NUMERIC(10,2),
+  status VARCHAR(20) DEFAULT 'PENDENTE',
   data_inicio TIMESTAMP NOT NULL,
   data_fim TIMESTAMP NOT NULL,
-  cidade_id INT REFERENCES cidades(id),
-  cidade_nome VARCHAR(100),
-  endereco_id INT REFERENCES enderecos_usuario(id),
-  bairro VARCHAR(100),
-  status VARCHAR(20) DEFAULT 'PENDENTE',
   criado_em TIMESTAMP DEFAULT NOW(),
   atualizado_em TIMESTAMP DEFAULT NOW()
 );
+
+
+-- =====================================================================
+--  5.1  ENDERECOS_VAGA
+-- =====================================================================
+CREATE TABLE enderecos_Vaga (
+  id SERIAL PRIMARY KEY,
+  vaga_id INT NOT NULL REFERENCES vagas(id) ON DELETE CASCADE,
+  endereco_completo TEXT NOT NULL,
+  bairro VARCHAR(150),
+  cidade_id INT REFERENCES cidades(id),
+  cidade_nome VARCHAR(100) NOT NULL,
+  estado VARCHAR(2) DEFAULT 'MG',
+  lat DOUBLE PRECISION,
+  lng DOUBLE PRECISION,
+  is_ativo BOOLEAN DEFAULT true NOT NULL,
+  criado_em TIMESTAMP DEFAULT NOW(),
+  atualizado_em TIMESTAMP DEFAULT NOW()
+);
+
 
 CREATE TABLE candidaturas (
   id SERIAL PRIMARY KEY,
@@ -402,12 +421,12 @@ LEFT JOIN cidades c ON c.id = eu.cidade_id;
 
 CREATE VIEW vw_mural_vagas AS
 SELECT v.*, u.nome_completo as contratante_nome, u.email as contratante_email,
-  c.nome as cidade_nome_real, c.ativa as cidade_ativa, eu.endereco_completo as endereco_referencia,
+  c.nome as cidade_nome_real, c.ativa as cidade_ativa, ev.endereco_completo as endereco_referencia,
   (SELECT COUNT(*) FROM candidaturas cand WHERE cand.vaga_id = v.id) as total_candidaturas
 FROM vagas v
 JOIN usuarios u ON u.id = v.contratante_id
-LEFT JOIN cidades c ON c.id = v.cidade_id
-LEFT JOIN enderecos_usuario eu ON eu.id = v.endereco_id
+LEFT JOIN Enderecos_vaga ev ON v.id = ev.vaga_id
+LEFT JOIN cidades c ON c.id = ev.cidade_id
 WHERE v.status = 'PENDENTE';
 
 CREATE VIEW cidades_ativas AS SELECT * FROM cidades WHERE ativa = true;
@@ -503,25 +522,38 @@ INSERT INTO email_templates (chave_uso, titulo_assunto, conteudo_corpo, email_re
 ('CONFIRMACAO_CADASTRO', 'Confirme seu cadastro - UAI FRILA', 'Olá {{NOME}}, seu código é {{CODIGO}}. E-mail: {{EMAIL}}', 'noreply@uaifrila.com.br', 'UAI FRILA'),
 ('2FA_LOGIN', 'Código de login - UAI FRILA', 'Seu código de login é {{CODIGO}}', 'noreply@uaifrila.com.br', 'UAI FRILA');
 
-INSERT INTO variaveis_sistema (chave, valor, valor_numerico, tipo, descricao, categoria) VALUES
-('EMAIL_EXPIRACAO_MINUTOS', '5', 5, 'number', 'Tempo expiração código e-mail em minutos', 'email'),
-('TAXA_PLATAFORMA_PERCENTUAL', '15', 15, 'number', 'Taxa da plataforma % - legado', 'financeiro'),
-('TAXA_CANCELAMENTO', '40', 40, 'number', 'Taxa cancelamento R$ - legado', 'financeiro'),
-('VALOR_MINIMO_HORA', '15', 15, 'number', 'Valor mínimo hora', 'financeiro'),
-('RAIO_MAXIMO_CIDADE_KM', '30', 30, 'number', 'Raio máximo cidade km - legado', 'cidade'),
-('PAGAMENTO_ANTECEDENCIA_MINUTOS', '60', 60, 'number', 'Minutos de antecedência para pagamento antes do trampo', 'pagamento'),
-('PAGAMENTO_EXPIRA_AUTO_MINUTOS', '30', 30, 'number', 'Minutos para expirar pagamento não confirmado (início + 30min)', 'pagamento'),
-('TAXA_INTERMEDIACAO_PERCENTUAL', '15', 15, 'number', 'Taxa de intermediação da plataforma em %', 'financeiro'),
-('TAXA_CANCELAMENTO_VALOR', '40', 40, 'number', 'Multa por cancelamento < 4h em R$', 'financeiro'),
-('TAXA_CANCELAMENTO_LIMITE_MINUTOS', '240', 240, 'number', 'Limite em minutos para aplicar multa de cancelamento (4h)', 'financeiro'),
-('FREELA_CANCELAMENTO_LIMITE_MINUTOS', '240', 240, 'number', 'Tempo mínimo antes do trampo que freela pode cancelar sem multa', 'freela'),
-('FREELA_BANIMENTO_POR_NO_SHOW', 'true', 1, 'boolean', 'Se deve banir freela por no-show', 'freela'),
-('FREELA_BANIMENTO_MESES', '3', 3, 'number', 'Meses de banimento por no-show', 'freela'),
-('FREELA_OPORTUNIDADES_MAX', '5', 5, 'number', 'Máximo de candidaturas simultâneas por freela', 'freela'),
-('MEI_LIMITE_MENSAL', '1500', 1500, 'number', 'Limite MEI por contratante por mês em R$', 'financeiro'),
-('ESCROW_LIBERACAO_AUTOMATICA_HORAS', '24', 24, 'number', 'Horas para liberação automática do escrow após finalização', 'pagamento'),
-('CIDADE_RAIO_KM_PADRAO', '20', 20, 'number', 'Raio padrão em KM para validar endereço na cidade', 'cidade');
-
+INSERT INTO variaveis_sistema (chave, valor, valor_numerico, tipo, descricao, categoria, editavel) VALUES
+('EMAIL_EXPIRACAO_MINUTOS', '5', 5, 'number', 'Tempo expiração código e-mail em minutos', 'email', true),
+('TAXA_PLATAFORMA_PERCENTUAL', '10', 10, 'number', 'Taxa da plataforma % - legado', 'financeiro', true),
+('TAXA_CANCELAMENTO', '40', 40, 'number', 'Taxa cancelamento R$ - legado', 'financeiro', true),
+('VALOR_MINIMO_HORA', '15', 15, 'number', 'Valor mínimo hora', 'financeiro', true),
+('RAIO_MAXIMO_CIDADE_KM', '30', 30, 'number', 'Raio máximo cidade km - legado', 'cidade', true),
+('PAGAMENTO_ANTECEDENCIA_MINUTOS', '60', 60, 'number', 'Minutos de antecedência para pagamento antes do trampo', 'pagamento', true),
+('PAGAMENTO_EXPIRA_AUTO_MINUTOS', '30', 30, 'number', 'Minutos para expirar pagamento não confirmado (início + 30min)', 'pagamento', true),
+('TAXA_INTERMEDIACAO_PERCENTUAL', '15', 15, 'number', 'Taxa de intermediação da plataforma em %', 'financeiro', true),
+('TAXA_CANCELAMENTO_VALOR', '40', 40, 'number', 'Multa por cancelamento < 4h em R$', 'financeiro', true),
+('TAXA_CANCELAMENTO_LIMITE_MINUTOS', '240', 240, 'number', 'Limite em minutos para aplicar multa de cancelamento (4h)', 'financeiro', true),
+('FREELA_CANCELAMENTO_LIMITE_MINUTOS', '240', 240, 'number', 'Tempo mínimo antes do trampo que freela pode cancelar sem multa', 'freela', true),
+('FREELA_BANIMENTO_POR_NO_SHOW', 'true', 1, 'boolean', 'Se deve banir freela por no-show', 'freela', true),
+('FREELA_BANIMENTO_MESES', '3', 3, 'number', 'Meses de banimento por no-show', 'freela', true),
+('FREELA_OPORTUNIDADES_MAX', '5', 5, 'number', 'Máximo de candidaturas simultâneas por freela', 'freela', true),
+('MEI_LIMITE_MENSAL', '1500', 1500, 'number', 'Limite MEI por contratante por mês em R$', 'financeiro', true),
+('ESCROW_LIBERACAO_AUTOMATICA_HORAS', '24', 24, 'number', 'Horas para liberação automática do escrow após finalização', 'pagamento', true),
+('CIDADE_RAIO_KM_PADRAO', '20', 20, 'number', 'Raio padrão em KM para validar endereço na cidade', 'cidade', true), 
+('VALOR_MINIMO_VAGA', '75', 75.00, 'number', 'Valor minimo que contratante pode solicitar um servico (R$)', 'vagas', true),
+('TAXA_PIX_PERCENTUAL', '1', 1.00, 'number', 'Taxa PIX 1% sobre subtotal servico', 'financeiro', true),
+('TAXA_CARTAO_PERCENTUAL', '4', 4.00, 'number', 'Taxa Cartao 4% sobre subtotal servico', 'financeiro', true),
+('COMISSAO_APLICATIVO', '10', 10.00, 'number', 'Comissao aplicativo 10% sobre subtotal', 'financeiro', true),
+('VAGA_ANTECEDENCIA_MINUTOS', '30', 30.00, 'number', 'Antecedencia minima para criar vaga em minutos', 'vagas', true)
+ON CONFLICT (chave) 
+DO UPDATE SET 
+  valor = EXCLUDED.valor,
+  valor_numerico = EXCLUDED.valor_numerico,
+  tipo = EXCLUDED.tipo,
+  descricao = EXCLUDED.descricao,
+  categoria = EXCLUDED.categoria,
+  editavel = EXCLUDED.editavel,
+  atualizado_em = NOW();
 -- SUPER ADMIN OBRIGATÓRIO
 INSERT INTO usuarios (
   nome_completo, cpf, email, senha_hash, cnpj, nome_fantasia,
@@ -552,32 +584,32 @@ INSERT INTO enderecos_usuario (usuario_id, endereco_completo, bairro, cidade_id,
 (1, 'Av. Floriano Peixoto, 1000 - Centro, Uberlândia - MG', 'Centro', 1, 'Uberlândia', -18.9186, -48.2772, true);
 
 -- GRANTS - USUARIOS DE BANCO PARA APLICAÇÃO
-CREATE ROLE uaifrila_app WITH LOGIN PASSWORD 'UaiFrila@App2024!';
-CREATE ROLE uaifrila_readonly WITH LOGIN PASSWORD 'UaiFrila@Read2024!';
-CREATE ROLE uaifrila_worker WITH LOGIN PASSWORD 'UaiFrila@Worker2024!';
+CREATE ROLE uaifrila_app_dev WITH LOGIN PASSWORD 'UaiFrila@pp2024!';
+CREATE ROLE uaifrila_readonly_dev WITH LOGIN PASSWORD 'UaiFrila@ead2024!';
+CREATE ROLE uaifrila_worker_dev WITH LOGIN PASSWORD 'UaiFrila@Worker2024!';
 
-GRANT CONNECT ON DATABASE uaifrila TO uaifrila_app;
-GRANT USAGE ON SCHEMA public TO uaifrila_app;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO uaifrila_app;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO uaifrila_app;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO uaifrila_app;
+GRANT CONNECT ON DATABASE uaifrila TO uaifrila_app_dev;
+GRANT USAGE ON SCHEMA public TO uaifrila_app_dev;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO uaifrila_app_dev;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO uaifrila_app_dev;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO uaifrila_app_dev;
 
-GRANT CONNECT ON DATABASE uaifrila TO uaifrila_readonly;
-GRANT USAGE ON SCHEMA public TO uaifrila_readonly;
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO uaifrila_readonly;
-GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO uaifrila_readonly;
+GRANT CONNECT ON DATABASE uaifrila TO uaifrila_readonly_dev;
+GRANT USAGE ON SCHEMA public TO uaifrila_readonly_dev;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO uaifrila_readonly_dev;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO uaifrila_readonly_dev;
 
-GRANT CONNECT ON DATABASE uaifrila TO uaifrila_worker;
-GRANT USAGE ON SCHEMA public TO uaifrila_worker;
-GRANT SELECT, INSERT, UPDATE ON transacoes TO uaifrila_worker;
-GRANT SELECT, INSERT, UPDATE ON email_historico_disparos TO uaifrila_worker;
-GRANT SELECT, INSERT, UPDATE ON trampos TO uaifrila_worker;
-GRANT SELECT, INSERT, UPDATE ON candidaturas TO uaifrila_worker;
-GRANT SELECT ON vagas TO uaifrila_worker;
-GRANT SELECT ON usuarios TO uaifrila_worker;
-GRANT SELECT ON variaveis_sistema TO uaifrila_worker;
-GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO uaifrila_worker;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO uaifrila_worker;
+GRANT CONNECT ON DATABASE uaifrila TO uaifrila_worker_dev;
+GRANT USAGE ON SCHEMA public TO uaifrila_worker_dev;
+GRANT SELECT, INSERT, UPDATE ON transacoes TO uaifrila_worker_dev;
+GRANT SELECT, INSERT, UPDATE ON email_historico_disparos TO uaifrila_worker_dev;
+GRANT SELECT, INSERT, UPDATE ON trampos TO uaifrila_worker_dev;
+GRANT SELECT, INSERT, UPDATE ON candidaturas TO uaifrila_worker_dev;
+GRANT SELECT ON vagas TO uaifrila_worker_dev;
+GRANT SELECT ON usuarios TO uaifrila_worker_dev;
+GRANT SELECT ON variaveis_sistema TO uaifrila_worker_dev;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO uaifrila_worker_dev;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO uaifrila_worker_dev;
 
 GRANT ALL ON SCHEMA public TO PUBLIC;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO PUBLIC;

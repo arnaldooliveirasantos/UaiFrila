@@ -1,146 +1,124 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 
 const API = (import.meta as any).env?.VITE_API_URL || 'http://192.168.24.11:3000/api';
 
-function formatarDataLocal(utc: string): string {
-  if (!utc) return '';
-  try {
-    const d = new Date(utc);
-    return d.toLocaleString('pt-BR', { 
-      day: '2-digit', 
-      month: '2-digit', 
-      year: 'numeric', 
-      hour: '2-digit', 
-      minute: '2-digit' 
-    });
-  } catch { return utc; }
-}
-
 export default function PainelMeusTrampos(props: any) {
-  const setTelaAtiva = props.setTelaAtiva;
-  const [aba, setAba] = useState<'publicadas' | 'mural'>('publicadas');
+  const styles = useUaiFrilaStyles();
   const [vagas, setVagas] = useState<any[]>([]);
-  const [carregando, setCarregando] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState('');
 
   const carregar = async () => {
-    setCarregando(true);
+    setLoading(true);
+    setErro('');
     try {
       const token = localStorage.getItem('uaifrila_token');
-      if (aba === 'publicadas') {
-        const res = await fetch(`${API}/vagas/minhas-publicadas`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const data = await res.json();
-        const lista = data.vagas || data || [];
-        setVagas(lista);
-      } else {
-        const res = await fetch(`${API}/vagas/mural`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const data = await res.json();
-        const lista = data.vagas || data.mural || data || [];
-        setVagas(lista);
+      let res = await fetch(`${API}/vagas/minhas`, { headers: { 'Authorization': `Bearer ${token}` } });
+      if (!res.ok) {
+        res = await fetch(`${API}/vagas/minhas-publicadas`, { headers: { 'Authorization': `Bearer ${token}` } });
       }
-    } catch (e: any) { 
-      console.error(e); 
-    } finally { 
-      setCarregando(false); 
+      if (!res.ok) {
+        res = await fetch(`${API}/vagas/contratante`, { headers: { 'Authorization': `Bearer ${token}` } });
+      }
+      
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.erro || `Erro ${res.status}`);
+      }
+      
+      const lista = data.vagas || data || [];
+      setVagas(Array.isArray(lista) ? lista : []);
+    } catch (e: any) {
+      setErro(e.message || 'Erro ao carregar vagas');
+    } finally {
+      setLoading(false);
     }
   };
 
-  useEffect(() => { carregar(); }, [aba]);
+  useEffect(() => { carregar(); }, []);
+
+  const formatarData = (utc: string) => {
+    if (!utc) return '';
+    try { return new Date(utc).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); } catch { return utc; }
+  };
 
   const editar = (vaga: any) => {
-    console.log('[PainelMeusTrampos] Editando vaga:', vaga.id);
     localStorage.setItem('uaifrila_vaga_editar', JSON.stringify(vaga));
-    if (setTelaAtiva) {
-      // Redireciona para tela de cadastro de vaga
-      setTelaAtiva('publicar');
-    } else {
-      console.error('setTelaAtiva não definido');
-    }
+    if (props.setTelaAtiva) props.setTelaAtiva('criar-vaga');
   };
 
   const cancelar = async (id: number) => {
-    if (!confirm(`Cancelar vaga #${id}?`)) return;
+    if (!confirm('Cancelar vaga?')) return;
     try {
       const token = localStorage.getItem('uaifrila_token');
-      const res = await fetch(`${API}/vagas/${id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        alert('Vaga cancelada!');
-        carregar();
-      }
-    } catch (e: any) {
-      alert('Erro ao cancelar: ' + e.message);
-    }
+      const res = await fetch(`${API}/vagas/${id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+      if (res.ok) { alert('Vaga cancelada'); carregar(); }
+      else { const data = await res.json(); alert(data.erro || 'Erro'); }
+    } catch (e: any) { alert('Erro: ' + e.message); }
   };
 
+  const getStatusBadge = (vaga: any) => {
+    const now = new Date();
+    const fim = vaga.data_fim ? new Date(vaga.data_fim) : null;
+    if (fim && fim < now) return <span className={styles.badge('danger')}>Finalizada</span>;
+    if (vaga.status === 'cancelada') return <span className={styles.badge('danger')}>Cancelada</span>;
+    if (vaga.status === 'preenchida' || vaga.status === 'concluida') return <span className={styles.badge('success')}>{vaga.status}</span>;
+    return <span className={styles.badge('success')}>Ativa</span>;
+  };
+
+  if (loading) return <div className={styles.pageContainer + ' font-black'}>Carregando minhas vagas...</div>;
+
   return (
-    <div className="max-w-[1280px] mx-auto px-4 md:px-8 py-8">
-      {/* HEADER LIMPO - sem timezone, sem UTC0, sem localidade */}
-      <div className="bg-[#1a1a1a] border-4 border-black p-6 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] mb-6">
-        <h1 className="text-2xl font-black uppercase text-white">Meus Trampos</h1>
-        
-        <div className="flex gap-2 mt-4">
-          <button 
-            onClick={() => setAba('publicadas')} 
-            className={`px-4 py-2 border-2 border-black text-xs font-black uppercase ${aba === 'publicadas' ? 'bg-[#FFC700] text-black' : 'bg-white text-black'}`}
-          >
-            Minhas Publicadas
-          </button>
-          <button 
-            onClick={() => setAba('mural')} 
-            className={`px-4 py-2 border-2 border-black text-xs font-black uppercase ${aba === 'mural' ? 'bg-[#FFC700] text-black' : 'bg-white text-black'}`}
-          >
-            Mural
-          </button>
+    <div className={styles.pageContainer}>
+      <h1 className={`${styles.typography.h1} mb-6`}>Meus Trampos Publicados</h1>
+
+      {erro && <div className={`${styles.errorBox} mb-4`}>{erro}</div>}
+
+      {vagas.length === 0 && !erro && (
+        <div className={styles.card}>
+          <p className={`${styles.typography.body} font-bold`}>Nenhuma vaga publicada. Crie uma em Nova Vaga.</p>
+          <div className="mt-4">
+            <button className={styles.buttonPrimary()} onClick={() => props.setTelaAtiva && props.setTelaAtiva('criar-vaga')}>
+              Criar Nova Vaga
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* LISTA */}
-      <div className="space-y-4">
-        {carregando && <div className="bg-white border-4 border-black p-6 font-bold">Carregando...</div>}
-        
-        {!carregando && vagas.length === 0 && (
-          <div className="bg-white border-4 border-black p-6 font-bold">Nenhuma vaga encontrada.</div>
-        )}
-
-        {!carregando && vagas.map((v: any) => (
-          <div key={v.id} className="bg-white border-4 border-black p-4 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
-            <div className="flex justify-between items-start">
-              <div>
-                <h3 className="font-black uppercase">{v.funcao} - {v.titulo}</h3>
-                <p className="text-xs mt-1 opacity-70">{v.descricao}</p>
-                {/* DATA LIMPA - sem BRT, sem Local, sem UTC, sem timezone */}
-                <p className="text-xs mt-2 font-bold">
-                  📅 {formatarDataLocal(v.data_inicio)} → {formatarDataLocal(v.data_fim)}
+      <div className="space-y-3">
+        {vagas.map((v: any) => (
+          <div key={v.id} className={styles.cardSmall}>
+            <div className="flex justify-between items-start gap-4">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 flex-wrap mb-1">
+                  <h3 className="font-black uppercase">{v.titulo}</h3>
+                  {getStatusBadge(v)}
+                </div>
+                <p className={`${styles.typography.bodySmall} opacity-70`}>
+                  R$ {Number(v.valor_hora).toFixed(2).replace('.', ',')}/h • {v.funcao} | {formatarData(v.data_inicio)} → {formatarData(v.data_fim)}
                 </p>
-                <p className="text-[10px] mt-1">R$ {v.valor_hora} • {v.cidade_nome}</p>
+                <p className={`${styles.typography.bodySmall} mt-1`}>
+                  📍 {v.endereco_completo || v.cidade_nome || 'Sem endereço'} {v.bairro || v.endereco_bairro ? `- ${v.bairro || v.endereco_bairro}` : ''}
+                </p>
+                {v.descricao && (
+                  <p className={`${styles.typography.bodySmall} mt-2 opacity-70 line-clamp-2`}>{v.descricao}</p>
+                )}
               </div>
-              <span className="text-[10px] bg-yellow-400 text-black px-2 py-1 font-black border-2 border-black">{v.status} #{v.id}</span>
-            </div>
-            
-            {/* BOTÕES LIMPOS - sem timezone */}
-            <div className="flex gap-2 mt-3">
-              <button 
-                onClick={() => editar(v)} 
-                className="px-3 py-1 bg-black text-white border-2 border-black text-[10px] font-black uppercase"
-              >
-                ✎ EDITAR
-              </button>
-              <button 
-                onClick={() => cancelar(v.id)} 
-                className="px-3 py-1 bg-red-600 text-white border-2 border-black text-[10px] font-black uppercase"
-              >
-                ✕ CANCELAR
-              </button>
+              <div className="flex flex-col sm:flex-row gap-2 ml-4 shrink-0">
+                <button onClick={() => editar(v)} className={styles.buttonWarning}>Editar</button>
+                <button onClick={() => cancelar(v.id)} className={styles.buttonDanger}>Cancelar</button>
+              </div>
             </div>
           </div>
         ))}
       </div>
+
+      {vagas.length > 0 && (
+        <div className="mt-6">
+          <button className={styles.buttonSecondary} onClick={carregar}>Atualizar Lista</button>
+        </div>
+      )}
     </div>
   );
 }

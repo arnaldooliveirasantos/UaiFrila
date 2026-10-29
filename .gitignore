@@ -4,3 +4,4 @@
 uaifrila-api/package-lock.json
 /uaifrila-email-worker/dist
 /uaifrila-api/dist
+uaifrila-email-worker/.env

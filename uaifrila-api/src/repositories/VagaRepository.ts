@@ -1,163 +1,148 @@
+
 import { BaseRepository } from './BaseRepository';
 import { DateUtil } from '../utils/DateUtil';
 
 export class VagaRepository extends BaseRepository {
 
-  async criarVaga(dados: any) {
-    const { contratante_id, titulo, descricao, valor_hora, valor, data_inicio, data_fim, funcao, cidade_nome, cidade_id, endereco_id, bairro, timezone } = dados;
-    const vHora = valor_hora || valor || 20;
-    const deviceTz = timezone || 'America/Sao_Paulo';
-
-    console.log(`\n[REPO criar] UTC0 - Recebido: ${data_inicio} tz=${deviceTz}`);
-    
-    const inicioUTC0 = DateUtil.paraUTC0(data_inicio, deviceTz);
-    const fimUTC0 = DateUtil.paraUTC0(data_fim, deviceTz);
-    
-    console.log(`[REPO criar] ${data_inicio} (${deviceTz}) => ${inicioUTC0} UTC0`);
-
-    const sql = `
-      WITH nova_vaga AS (
-        INSERT INTO vagas (contratante_id, titulo, descricao, valor_hora, data_inicio, data_fim, funcao, cidade_nome, cidade_id, endereco_id, bairro, status) 
-        VALUES ($1,$2,$3,$4,$5::timestamptz,$6::timestamptz,$7,$8,$9,$10,$11,'ABERTA') 
-        RETURNING *
-      )
-      SELECT 
-        nova_vaga.*,
-        to_char(nova_vaga.data_inicio AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_inicio,
-        to_char(nova_vaga.data_fim AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_fim,
-        to_char(nova_vaga.criado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as criado_em,
-        to_char(nova_vaga.atualizado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as atualizado_em
-      FROM nova_vaga
-    `;
-    const params = [contratante_id, titulo, descricao, vHora, inicioUTC0, fimUTC0, funcao || 'Garçom', cidade_nome || 'Uberlândia', cidade_id || 1, endereco_id || null, bairro || 'Centro'];
-    
-    const rows = await this.query(sql, params);
-    console.log(`[REPO criar] UTC0: ${rows[0]?.data_inicio}`);
-    
+  async criarEnderecoVaga(dados: { vaga_id: number; endereco_completo: string; bairro?: string; cidade_id?: number; cidade_nome: string; estado?: string; lat?: number; lng?: number; }){
+    try{ await this.query(`UPDATE enderecos_Vaga SET is_ativo=false WHERE vaga_id=$1 AND is_ativo=true`, [dados.vaga_id]); }catch{}
+    const rows = await this.query(`INSERT INTO enderecos_Vaga (vaga_id, endereco_completo, bairro, cidade_id, cidade_nome, estado, lat, lng, is_ativo) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true) RETURNING *`, [dados.vaga_id, dados.endereco_completo, dados.bairro||'Centro', dados.cidade_id||1, dados.cidade_nome||'Uberlândia', dados.estado||'MG', dados.lat||null, dados.lng||null]);
     return rows[0];
   }
 
-  async listarVagas(filtros: any = {}) {
-    const sql = `
-      SELECT 
-        v.*,
-        to_char(v.data_inicio AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_inicio,
-        to_char(v.data_fim AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_fim,
-        to_char(v.criado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as criado_em,
-        to_char(v.atualizado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as atualizado_em
-      FROM vagas v 
-      WHERE v.status IN ('ABERTA','PENDENTE') OR v.status IS NULL 
-      ORDER BY v.criado_em DESC LIMIT 100
-    `;
-    return await this.query(sql);
+  // CRIA VAGA - segue exatamente as colunas do 00-CRIACAO-BANCO-NOVO-COMPLETO.sql
+  async criarVaga(dados: any){
+    const client = await this.pool.connect();
+    try{
+      await client.query('BEGIN');
+      const { contratante_id, titulo, descricao, funcao, valor_servico, valor_transporte, valor_hora, data_inicio, data_fim, timezone, endereco_completo, bairro, cidade_id, cidade_nome, estado, lat, lng, numero } = dados;
+      const tz = timezone || 'America/Sao_Paulo';
+      const inicioUTC0 = DateUtil.paraUTC0(data_inicio, tz);
+      const fimUTC0 = DateUtil.paraUTC0(data_fim, tz);
+
+      // Calculo alinhado com variaveis_sistema: TAXA_PIX 1%, TAXA_CARTAO 4%, COMISSAO 10%
+      const d1 = new Date(inicioUTC0); const d2 = new Date(fimUTC0);
+      let horas = (d2.getTime() - d1.getTime()) / (1000*60*60);
+      if (horas <=0 || isNaN(horas)) horas = 8;
+
+      const vServ = Number(valor_servico || 75);
+      const vTransp = Number(valor_transporte || 15);
+      const base = vServ + vTransp;
+
+      // Busca taxas do banco se existirem
+      let taxaPix = 1, taxaCartao = 4, comissao = 10;
+      try{
+        const vars = await client.query(`SELECT chave, valor_numerico FROM variaveis_sistema WHERE chave IN ('TAXA_PIX_PERCENTUAL','TAXA_CARTAO_PERCENTUAL','COMISSAO_APLICATIVO')`);
+        for(const r of vars.rows){
+          if(r.chave==='TAXA_PIX_PERCENTUAL') taxaPix = Number(r.valor_numerico);
+          if(r.chave==='TAXA_CARTAO_PERCENTUAL') taxaCartao = Number(r.valor_numerico);
+          if(r.chave==='COMISSAO_APLICATIVO') comissao = Number(r.valor_numerico);
+        }
+      }catch{}
+
+      const meio = dados.meio_pagamento || 'pix';
+      const taxaPct = meio === 'cartao' ? taxaCartao : taxaPix;
+      const freelaRecebe = base - (base*taxaPct/100) - (base*comissao/100);
+      const vHoraFinal = Number(valor_hora || 0) >0 ? Number(valor_hora) : (freelaRecebe / horas);
+
+      // INSERT com colunas REAIS do banco: valor_servico, valor_transporte, total_freela, valor_hora
+      const res = await client.query(
+        `INSERT INTO vagas (contratante_id, titulo, descricao, funcao, valor_hora, valor_servico, valor_transporte, total_freela, status, data_inicio, data_fim) 
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'ABERTA',$9::timestamptz,$10::timestamptz) RETURNING *`,
+        [contratante_id, titulo, descricao, funcao||'Garçom', vHoraFinal, vServ, vTransp, freelaRecebe, inicioUTC0, fimUTC0]
+      );
+      const vagaId = res.rows[0].id;
+
+      if(endereco_completo){
+        const enderecoFinal = numero ? `${endereco_completo}, ${numero}` : endereco_completo;
+        await client.query(`UPDATE enderecos_Vaga SET is_ativo=false WHERE vaga_id=$1`, [vagaId]);
+        await client.query(`INSERT INTO enderecos_Vaga (vaga_id, endereco_completo, bairro, cidade_id, cidade_nome, estado, lat, lng, is_ativo) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true)`, [vagaId, enderecoFinal, bairro||'Centro', cidade_id||1, cidade_nome||'Uberlândia', estado||'MG', lat||null, lng||null]);
+      }
+
+      await client.query('COMMIT');
+      return await this.queryOne(`SELECT v.*, ev.endereco_completo, ev.bairro as endereco_bairro, ev.cidade_nome, ev.estado FROM vagas v LEFT JOIN enderecos_Vaga ev ON ev.vaga_id=v.id AND ev.is_ativo=true WHERE v.id=$1`, [vagaId]);
+    }catch(e){ await client.query('ROLLBACK'); throw e; }finally{ client.release(); }
   }
 
-  async listarVagasPorContratante(contratanteId: number) {
-    if (!contratanteId) return await this.listarVagas();
-    const sql = `
-      SELECT 
-        v.*,
-        (SELECT COUNT(*) FROM candidaturas c WHERE c.vaga_id = v.id) as total_candidaturas,
-        to_char(v.data_inicio AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_inicio,
-        to_char(v.data_fim AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_fim,
-        to_char(v.criado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as criado_em,
-        to_char(v.atualizado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as atualizado_em
-      FROM vagas v 
-      WHERE v.contratante_id = $1 
-      ORDER BY v.criado_em DESC
-    `;
-    return await this.query(sql, [contratanteId]);
+  async listarVagasPorContratante(contratanteId: number){
+    return await this.query(
+      `SELECT v.id, v.titulo, v.descricao, v.funcao, v.valor_hora, v.valor_servico, v.valor_transporte, v.total_freela, v.status, 
+              to_char(v.data_inicio AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_inicio,
+              to_char(v.data_fim AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_fim,
+              v.criado_em, ev.endereco_completo, ev.bairro as endereco_bairro, ev.cidade_nome, ev.estado
+       FROM vagas v LEFT JOIN enderecos_Vaga ev ON ev.vaga_id=v.id AND ev.is_ativo=true 
+       WHERE v.contratante_id=$1 ORDER BY v.criado_em DESC`, [contratanteId]
+    );
   }
 
-  async buscarPorId(id: number) {
-    const sql = `
-      SELECT 
-        v.*,
-        to_char(v.data_inicio AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_inicio,
-        to_char(v.data_fim AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_fim,
-        to_char(v.criado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as criado_em,
-        to_char(v.atualizado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as atualizado_em
-      FROM vagas v 
-      WHERE v.id = $1
-    `;
-    const row = await this.queryOne(sql, [id]);
-    if (row) {
-      console.log(`[REPO buscarPorId #${id}] UTC0: ${row.data_inicio}`);
-    }
-    return row || null;
+  async buscarMuralSemBloqueiosDeAvaliacao(usuarioId: number, page=1, limit=20){
+    const offset = (page-1)*limit;
+    return await this.query(
+      `SELECT v.id, v.titulo, v.descricao, v.funcao, v.valor_hora, v.valor_servico, v.valor_transporte, v.total_freela, v.status,
+              to_char(v.data_inicio AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_inicio,
+              to_char(v.data_fim AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_fim,
+              ev.endereco_completo, ev.bairro as endereco_bairro, ev.cidade_nome, ev.estado, u.nome_completo as contratante_nome
+       FROM vagas v 
+       LEFT JOIN enderecos_Vaga ev ON ev.vaga_id=v.id AND ev.is_ativo=true 
+       LEFT JOIN usuarios u ON u.id=v.contratante_id
+       WHERE v.status IN ('ABERTA','PENDENTE') AND v.contratante_id != $1
+       ORDER BY v.criado_em DESC LIMIT $2 OFFSET $3`, [usuarioId, limit, offset]
+    );
   }
 
-  async buscarMuralSemBloqueiosDeAvaliacao(usuarioId: number) {
-    if (!usuarioId) return await this.listarVagas();
-    const sql = `
-      SELECT 
-        v.*,
-        u.nome_fantasia as contratante_nome,
-        to_char(v.data_inicio AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_inicio,
-        to_char(v.data_fim AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_fim,
-        to_char(v.criado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as criado_em,
-        to_char(v.atualizado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as atualizado_em
-      FROM vagas v 
-      LEFT JOIN usuarios u ON v.contratante_id = u.id 
-      WHERE (v.status IN ('ABERTA','PENDENTE') OR v.status IS NULL) AND v.contratante_id != $1 
-      ORDER BY v.criado_em DESC LIMIT 100
-    `;
-    return await this.query(sql, [usuarioId]);
+  async buscarPorId(id: number){
+    return await this.queryOne(
+      `SELECT v.*, ev.endereco_completo, ev.bairro as endereco_bairro, ev.cidade_id, ev.cidade_nome, ev.estado, ev.lat, ev.lng,
+              to_char(v.data_inicio AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_inicio,
+              to_char(v.data_fim AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_fim
+       FROM vagas v LEFT JOIN enderecos_Vaga ev ON ev.vaga_id=v.id AND ev.is_ativo=true WHERE v.id=$1`, [id]
+    );
   }
 
-  async atualizarVaga(id: number, dados: any) {
-    const deviceTz = dados.timezone || 'America/Sao_Paulo';
-    console.log(`\n[REPO atualizar #${id}] UTC0 - Recebido: ${dados.data_inicio} tz=${deviceTz}`);
+  async atualizarVaga(id: number, dados: any){
+    const client = await this.pool.connect();
+    try{
+      await client.query('BEGIN');
+      const cur = await client.query(`SELECT * FROM vagas WHERE id=$1`, [id]);
+      if(cur.rows.length===0) throw new Error('Vaga não encontrada');
+      const v = cur.rows[0];
 
-    const permitidas = ['titulo','descricao','funcao','valor_hora','cidade_nome','cidade_id','endereco_id','bairro','status'];
-    const campos: string[] = []; const valores: any[] = []; let idx = 1;
-    for (const k of permitidas) {
-      let v = (dados as any)[k]; if (k === 'valor_hora' && v === undefined) v = (dados as any).valor;
-      if (v !== undefined) { campos.push(`${k} = $${idx}`); valores.push(v); idx++; }
-    }
+      const titulo = dados.titulo ?? v.titulo;
+      const descricao = dados.descricao ?? v.descricao;
+      const funcao = dados.funcao ?? v.funcao;
+      const vServ = Number(dados.valor_servico ?? v.valor_servico ?? 75);
+      const vTransp = Number(dados.valor_transporte ?? v.valor_transporte ?? 15);
+      const meio = dados.meio_pagamento ?? 'pix';
+      const taxaPct = meio === 'cartao' ? 4 : 1;
+      const totalFreela = (vServ + vTransp) - ((vServ+vTransp)*taxaPct/100) - ((vServ+vTransp)*10/100);
+      
+      let dataInicio = dados.data_inicio || v.data_inicio;
+      let dataFim = dados.data_fim || v.data_fim;
+      let horas = 8;
+      try{ const d1 = new Date(dataInicio); const d2 = new Date(dataFim); horas = (d2.getTime()-d1.getTime())/(1000*60*60); }catch{}
+      if(horas<=0) horas=8;
+      const vHora = totalFreela / horas;
 
-    if (dados.data_inicio) {
-      const utc0 = DateUtil.paraUTC0(dados.data_inicio, deviceTz);
-      console.log(`[REPO atualizar] ${dados.data_inicio} (${deviceTz}) => ${utc0} UTC0`);
-      campos.push(`data_inicio = $${idx}::timestamptz`); valores.push(utc0); idx++;
-    }
-    if (dados.data_fim) {
-      const utc0 = DateUtil.paraUTC0(dados.data_fim, deviceTz);
-      console.log(`[REPO atualizar] ${dados.data_fim} (${deviceTz}) => ${utc0} UTC0`);
-      campos.push(`data_fim = $${idx}::timestamptz`); valores.push(utc0); idx++;
-    }
+      await client.query(
+        `UPDATE vagas SET titulo=$1, descricao=$2, funcao=$3, valor_hora=$4, valor_servico=$5, valor_transporte=$6, total_freela=$7, data_inicio=$8::timestamptz, data_fim=$9::timestamptz, atualizado_em=NOW() WHERE id=$10`,
+        [titulo, descricao, funcao, vHora, vServ, vTransp, totalFreela, dataInicio, dataFim, id]
+      );
 
-    if (campos.length === 0) throw new Error('Nenhum campo válido');
-    valores.push(id);
-    const sql = `
-      UPDATE vagas SET ${campos.join(', ')}, atualizado_em = NOW() 
-      WHERE id = $${idx} 
-      RETURNING 
-        id,
-        to_char(data_inicio AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_inicio,
-        to_char(data_fim AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_fim,
-        to_char(criado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as criado_em,
-        to_char(atualizado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as atualizado_em
-    `;
-    const rows = await this.query(sql, valores);
-    console.log(`[REPO atualizar #${id}] Novo UTC0: ${rows[0]?.data_inicio}`);
-    
-    return await this.buscarPorId(id);
+      if(dados.endereco_completo){
+        await client.query(`UPDATE enderecos_Vaga SET is_ativo=false WHERE vaga_id=$1`, [id]);
+        await client.query(`INSERT INTO enderecos_Vaga (vaga_id, endereco_completo, bairro, cidade_id, cidade_nome, estado, lat, lng, is_ativo) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true)`, [id, dados.endereco_completo, dados.bairro||'Centro', dados.cidade_id||1, dados.cidade_nome||'Uberlândia', dados.estado||'MG', dados.lat||null, dados.lng||null]);
+      }
+
+      await client.query('COMMIT');
+      return await this.queryOne(`SELECT v.*, ev.endereco_completo FROM vagas v LEFT JOIN enderecos_Vaga ev ON ev.vaga_id=v.id AND ev.is_ativo=true WHERE v.id=$1`, [id]);
+    }catch(e){ await client.query('ROLLBACK'); throw e; }finally{ client.release(); }
   }
 
-  async cancelarVaga(id: number) {
-    const sql = `
-      UPDATE vagas SET status = 'CANCELADA', atualizado_em = NOW() 
-      WHERE id = $1 
-      RETURNING 
-        id, status,
-        to_char(data_inicio AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_inicio,
-        to_char(data_fim AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as data_fim,
-        to_char(atualizado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as atualizado_em
-    `;
-    const rows = await this.query(sql, [id]);
-    return rows[0];
+  async cancelarVaga(id: number){
+    return await this.query(`UPDATE vagas SET status='CANCELADA', atualizado_em=NOW() WHERE id=$1`, [id]);
   }
-  async deletarVaga(id: number) { return await this.cancelarVaga(id); }
-  async deletar(id: number) { return await this.cancelarVaga(id); }
+
+  async deletarVaga(id: number){
+    return await this.query(`DELETE FROM vagas WHERE id=$1`, [id]);
+  }
 }

@@ -1,42 +1,33 @@
-import { BaseService } from './BaseService';
 import { VagaRepository } from '../repositories/VagaRepository';
 
-export class VagaService extends BaseService {
-  private vagaRepo = new VagaRepository();
+export class VagaService {
+  private repo = new VagaRepository();
 
-  async criar(dados: any) {
-    this.validateRequired(dados, ['contratante_id', 'titulo']);
-    try {
-      const result = await this.vagaRepo.criarVaga(dados);
-      // criarVaga retorna array ou objeto dependendo do repo
-      if (Array.isArray(result)) return result[0];
-      return result;
-    } catch (e: any) {
-      this.handleError(e, 'VagaService.criar');
-    }
+  async criarVaga(dados: any) {
+    return await this.repo.criarVaga(dados);
   }
 
-  async listar(filtros?: any) {
-    return await this.vagaRepo.listarVagas(filtros);
-  }
-
-  async listarPorContratante(contratanteId: number) {
-    return await this.vagaRepo.listarVagasPorContratante(contratanteId);
+  async listarVagasPorContratante(contratanteId: number) {
+    return await this.repo.listarVagasPorContratante(contratanteId);
   }
 
   async buscarPorId(id: number) {
-    return await this.vagaRepo.buscarPorId(id);
+    return await this.repo.buscarPorId(id);
   }
 
-  async atualizar(id: number, dados: any) {
-    return await this.vagaRepo.atualizarVaga(id, dados);
+  async mural(usuarioId: number) {
+    return await this.repo.buscarMuralSemBloqueiosDeAvaliacao(usuarioId);
   }
 
-  async cancelar(id: number) {
-    return await this.vagaRepo.cancelarVaga(id);
+  async atualizarVaga(id: number, dados: any) {
+    return await this.repo.atualizarVaga(id, dados);
   }
 
-  async deletar(id: number) {
-    return await this.vagaRepo.deletarVaga(id);
+  async cancelarVaga(id: number) {
+    return await this.repo.cancelarVaga(id);
+  }
+
+  async deletarVaga(id: number) {
+    return await this.repo.deletarVaga(id);
   }
 }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useTheme, getInputClass, getLabelClass, getCardClass } from '../context/ThemeContext';
+import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 import ValidacaoCodigo from './ValidacaoCodigo';
 import GoogleEnderecoInput from './GoogleEnderecoInput';
 
@@ -41,7 +41,7 @@ const TERMOS = [
 ];
 
 export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, modoEdicao = false, onAtualizado }: Props) {
-  const { isDark } = useTheme();
+  const styles = useUaiFrilaStyles();
   const [queroTrampar, setQueroTrampar] = useState(true);
   const [queroContratar, setQueroContratar] = useState(false);
   const [form, setForm] = useState({
@@ -62,7 +62,6 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
   const API = import.meta.env.VITE_API_URL;
   if (!API) throw new Error('VITE_API_URL não definida no .env - configure no arquivo .env');
 
-  // Calcula tipo_chave baseado nos dois botões
   const getTipoChave = () => {
     if (queroTrampar && queroContratar) return 'DUAL';
     if (queroContratar) return 'CONTRATANTE';
@@ -140,8 +139,8 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
 
       const contentType = res.headers.get('content-type') || '';
       if (!contentType.includes('application/json')) {
-        const text = await res.text();
-        throw new Error(`Backend retornou ${res.status} não-JSON. Verifique API em ${API}.`);
+        await res.text();
+        throw new Error(`Falha ao comunicar com o servidor. Tente novamente.`);
       }
 
       const data = await res.json();
@@ -155,24 +154,16 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
     return <ValidacaoCodigo email={form.email} tipo="cadastro" onValidado={() => { onCadastro?.(); }} onVoltar={() => setEtapa('form')} />;
   }
 
-  const inputClass = getInputClass(isDark);
-  const labelClass = getLabelClass(isDark);
-  const cardClass = getCardClass(isDark);
-
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      <div className={cardClass}>
-        <h2 className="text-3xl font-black uppercase tracking-tighter">Cadastro</h2>
+    <div className={styles.pageContainer}>
+      <div className={styles.card}>
+        <h2 className={styles.typography.h1 + ' text-3xl'}>Cadastro</h2>
 
-        {/* BOTÕES QUERO TRAMPAR / QUERO CONTRATAR - PODE ESCOLHER OS 2 */}
         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
           <button
             type="button"
             onClick={() => setQueroTrampar(!queroTrampar)}
-            className={`p-6 border-2 text-left transition-all flex items-center gap-4
-              ${queroTrampar 
-                ? 'bg-[#FFC700] border-black text-black shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]' 
-                : isDark ? 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-white' : 'bg-white border-black/20 text-black/50 hover:border-black'}`}
+            className={`${queroTrampar ? styles.cardHighlight + ' p-6 flex items-center gap-4 text-left' : styles.cardSmall + ' flex items-center gap-4 text-left opacity-70 hover:opacity-100'} transition-all`}
           >
             <span className="text-4xl">💪</span>
             <div>
@@ -187,10 +178,7 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
           <button
             type="button"
             onClick={() => setQueroContratar(!queroContratar)}
-            className={`p-6 border-2 text-left transition-all flex items-center gap-4
-              ${queroContratar 
-                ? 'bg-[#E53935] border-black text-white shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]' 
-                : isDark ? 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-white' : 'bg-white border-black/20 text-black/50 hover:border-black'}`}
+            className={`${queroContratar ? 'p-6 border-4 bg-[#E53935] text-white border-black flex items-center gap-4 text-left shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]' : styles.cardSmall + ' flex items-center gap-4 text-left opacity-70 hover:opacity-100'} transition-all`}
           >
             <span className="text-4xl">🏢</span>
             <div>
@@ -204,30 +192,29 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
         </div>
 
         {queroTrampar && queroContratar && (
-          <div className={`mt-3 p-3 border-2 text-xs font-bold ${isDark ? 'bg-[#0066FF]/20 border-[#0066FF] text-white' : 'bg-black text-white border-black'}`}>
+          <div className={styles.badge('success') + ' mt-3 block w-fit text-xs p-3 normal-case border-2'}>
             ✨ Você será cadastrado como DUAL - pode trampar e contratar!
           </div>
         )}
 
-        {/* FORMULÁRIO COM ESTILO UNIFICADO */}
         <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="flex flex-col gap-1">
-            <label className={labelClass}>Nome completo</label>
-            <input value={form.nome} onChange={e=>setForm({...form, nome: e.target.value})} placeholder="Seu nome" className={inputClass} />
+            <label className={styles.label}>Nome completo</label>
+            <input value={form.nome} onChange={e=>setForm({...form, nome: e.target.value})} placeholder="Seu nome" className={styles.input} />
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className={labelClass}>CPF {modoEdicao && <span className="text-[8px]">🔒</span>}</label>
+            <label className={styles.label}>CPF {modoEdicao && <span className="text-[8px]">🔒</span>}</label>
             {modoEdicao ? (
-              <input value={mascararCPF(form.cpfOriginal)} disabled className={`${inputClass} bg-zinc-200 cursor-not-allowed`} />
+              <input value={mascararCPF(form.cpfOriginal)} disabled className={styles.input + ' opacity-60 cursor-not-allowed'} />
             ) : (
-              <input value={formatarCPF(form.cpf)} onChange={e=>setForm({...form, cpf: apenasNumeros(e.target.value).slice(0,11)})} placeholder="000.000.000-00" className={inputClass} />
+              <input value={formatarCPF(form.cpf)} onChange={e=>setForm({...form, cpf: apenasNumeros(e.target.value).slice(0,11)})} placeholder="000.000.000-00" className={styles.input} />
             )}
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className={labelClass}>E-mail {modoEdicao && <span className="text-[8px]">🔒</span>}</label>
-            <input type="email" value={form.email} disabled={modoEdicao} onChange={e=>setForm({...form, email: e.target.value.toLowerCase()})} placeholder="seu@email.com" className={`${inputClass} ${modoEdicao ? 'bg-zinc-200 cursor-not-allowed' : ''} lowercase`} />
+            <label className={styles.label}>E-mail {modoEdicao && <span className="text-[8px]">🔒</span>}</label>
+            <input type="email" value={form.email} disabled={modoEdicao} onChange={e=>setForm({...form, email: e.target.value.toLowerCase()})} placeholder="seu@email.com" className={`${styles.input} ${modoEdicao ? 'opacity-60 cursor-not-allowed' : ''} lowercase`} />
           </div>
 
           <div className="md:col-span-2">
@@ -256,14 +243,14 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
           {isFreela && (
             <>
               <div className="flex flex-col gap-1">
-                <label className={labelClass}>Função</label>
-                <select value={form.funcao} onChange={e=>setForm({...form, funcao: e.target.value})} className={inputClass}>
+                <label className={styles.label}>Função</label>
+                <select value={form.funcao} onChange={e=>setForm({...form, funcao: e.target.value})} className={styles.select}>
                   {['Garçom','Bartender','Cozinheiro','Auxiliar de Cozinha','Recepcionista','Segurança','Limpeza','Outros'].map(f=><option key={f} value={f}>{f}</option>)}
                 </select>
               </div>
               <div className="flex flex-col gap-1">
-                <label className={labelClass}>Valor Hora (R$)</label>
-                <input type="number" value={form.valorHora} onChange={e=>setForm({...form, valorHora: Number(e.target.value)})} className={inputClass} />
+                <label className={styles.label}>Valor Hora (R$)</label>
+                <input type="number" value={form.valorHora} onChange={e=>setForm({...form, valorHora: Number(e.target.value)})} className={styles.input} />
               </div>
             </>
           )}
@@ -271,30 +258,31 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
           {isContratante && (
             <>
               <div className="flex flex-col gap-1">
-                <label className={labelClass}>CNPJ (opcional)</label>
-                <input value={formatarCNPJ(form.cnpj)} onChange={e=>setForm({...form, cnpj: apenasNumeros(e.target.value).slice(0,14)})} placeholder="00.000.000/0000-00" className={inputClass} />
+                <label className={styles.label}>CNPJ (opcional)</label>
+                <input value={formatarCNPJ(form.cnpj)} onChange={e=>setForm({...form, cnpj: apenasNumeros(e.target.value).slice(0,14)})} placeholder="00.000.000/0000-00" className={styles.input} />
               </div>
               <div className="flex flex-col gap-1">
-                <label className={labelClass}>Nome Fantasia</label>
-                <input value={form.nomeFantasia} onChange={e=>setForm({...form, nomeFantasia: e.target.value})} placeholder="Nome Fantasia" className={inputClass} />
+                <label className={styles.label}>Nome Fantasia</label>
+                <input value={form.nomeFantasia} onChange={e=>setForm({...form, nomeFantasia: e.target.value})} placeholder="Nome Fantasia" className={styles.input} />
               </div>
             </>
           )}
         </div>
 
-        <h3 className="mt-8 font-black uppercase text-sm">Termos</h3>
+        <h3 className={styles.typography.h3 + ' mt-8'}>Termos</h3>
         <div className="mt-3 space-y-2">
           {TERMOS.map((t,i)=>(
-            <label key={t.id} className={`flex gap-3 p-3 border-2 text-xs cursor-pointer ${isDark ? 'border-zinc-700 hover:border-white bg-zinc-900' : 'border-black/10 hover:border-black bg-white'}`}>
+            <label key={t.id} className={`${styles.cardSmall} flex gap-3 text-xs cursor-pointer`}>
               <input type="checkbox" checked={form.termos[i]} onChange={e=>{ const nt=[...form.termos]; nt[i]=e.target.checked; setForm({...form, termos: nt}); }} />
               <div><span className="font-black">{t.titulo}</span> <span className="opacity-70">- {t.desc}</span></div>
             </label>
           ))}
         </div>
 
-        {erro && <div className="mt-4 p-3 bg-[#E53935] text-white border-2 border-black text-xs font-bold">❌ {erro}</div>}
+        {erro && <div className={styles.errorBox + ' mt-4'}>❌ {erro}</div>}
+        {mensagem && <div className={styles.successBox + ' mt-4'}>{mensagem}</div>}
 
-        <button onClick={handleSubmit} disabled={carregando} className={`mt-8 w-full py-4 font-black uppercase text-sm border-2 border-black transition-all ${isDark ? 'bg-[#0066FF] text-white hover:bg-[#0055DD]' : 'bg-black text-white hover:bg-zinc-800'} ${carregando ? 'opacity-50' : ''}`}>
+        <button onClick={handleSubmit} disabled={carregando} className={styles.buttonPrimary(carregando) + ' mt-8'}>
           {carregando ? 'Salvando...' : modoEdicao ? 'Salvar Alterações' : `Cadastrar como ${getTipoChave()}`}
         </button>
       </div>

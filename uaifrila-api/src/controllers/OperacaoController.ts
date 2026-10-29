@@ -1,33 +1,24 @@
 import { Request, Response } from 'express';
+import { BaseController } from './BaseController';
 import { OperacaoService } from '../services/OperacaoService';
 
-export class OperacaoController {
+export class OperacaoController extends BaseController {
   private service = new OperacaoService();
 
-  public candidatar = async (req: any, res: Response): Promise<void> => {
-    try {
-      const result = await this.service.candidatar(req.body.vagaId, req.user.id);
-      res.json(result);
-    } catch (e: any) {
-      res.status(500).json({ erro: e.message });
-    }
+  public candidatar = async (req: Request, res: Response): Promise<void> => {
+    await this.executar(res, async () => {
+      const usuarioId = this.getUsuarioId(req);
+      const { vaga_id } = req.body;
+      const result = await this.service.candidatar(parseInt(vaga_id), usuarioId);
+      this.sucesso(res, { candidatura: result });
+    });
   };
 
-  public aceitar = async (req: any, res: Response): Promise<void> => {
-    try {
-      const result = await this.service.aceitarCandidatura(req.body.candidaturaId, req.user.id);
-      res.json(result);
-    } catch (e: any) {
-      res.status(500).json({ erro: e.message });
-    }
-  };
-
-  public historicoChat = async (req: any, res: Response): Promise<void> => {
-    try {
-      const historico = await this.service.historicoChat(Number(req.params.vagaId));
-      res.json({ mensagens: historico });
-    } catch (e: any) {
-      res.status(500).json({ erro: e.message });
-    }
+  public listar = async (req: Request, res: Response): Promise<void> => {
+    await this.executar(res, async () => {
+      const usuarioId = this.getUsuarioId(req);
+      const ops = await this.service.listarOperacoes(usuarioId);
+      this.sucessoLista(res, ops as any[], 'operacoes');
+    });
   };
 }
