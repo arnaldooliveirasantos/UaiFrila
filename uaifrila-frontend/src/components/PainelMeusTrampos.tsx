@@ -44,8 +44,14 @@ export default function PainelMeusTrampos(props: any) {
   };
 
   const editar = (vaga: any) => {
+    console.log('[MeusTrampos] Editando vaga:', vaga.id, vaga.titulo);
     localStorage.setItem('uaifrila_vaga_editar', JSON.stringify(vaga));
-    if (props.setTelaAtiva) props.setTelaAtiva('criar-vaga');
+    if (props.setTelaAtiva) {
+      console.log('[MeusTrampos] Navegando para publicar com edição');
+      props.setTelaAtiva('publicar');
+    } else {
+      console.error('[MeusTrampos] setTelaAtiva não definido');
+    }
   };
 
   const cancelar = async (id: number) => {
@@ -79,7 +85,7 @@ export default function PainelMeusTrampos(props: any) {
         <div className={styles.card}>
           <p className={`${styles.typography.body} font-bold`}>Nenhuma vaga publicada. Crie uma em Nova Vaga.</p>
           <div className="mt-4">
-            <button className={styles.buttonPrimary()} onClick={() => props.setTelaAtiva && props.setTelaAtiva('criar-vaga')}>
+            <button className={styles.buttonPrimary()} onClick={() => props.setTelaAtiva && props.setTelaAtiva('publicar')}>
               Criar Nova Vaga
             </button>
           </div>

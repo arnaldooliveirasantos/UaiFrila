@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
 type Theme = 'light' | 'dark';
@@ -7,13 +8,15 @@ interface ThemeContextType {
   toggleTheme: () => void;
   isDark: boolean;
   styles: any;
+  pageBackgroundStyle: React.CSSProperties;
 }
 
 const ThemeContext = createContext<ThemeContextType>({ 
   theme: 'dark' as Theme, 
   toggleTheme: () => {}, 
   isDark: true,
-  styles: {} as any 
+  styles: {} as any,
+  pageBackgroundStyle: {}
 });
 
 const STORAGE_KEY = 'uaifrila:theme';
@@ -39,8 +42,29 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
 
   const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
 
+  // FUNDO OFICIAL COM GRID
+  // Claro: #FFFFFF + grid mostarda #CC9900 1.2px 22% 36px
+  // Escuro: #000 puro + grid azul #0066FF 1.2px 22% 40px
+  const pageBackgroundStyle: React.CSSProperties = theme === 'dark' ? {
+    backgroundColor: '#000000',
+    backgroundImage: `
+      linear-gradient(to right, rgba(0,102,255,0.22) 1.2px, transparent 1.2px),
+      linear-gradient(to bottom, rgba(0,102,255,0.22) 1.2px, transparent 1.2px)
+    `,
+    backgroundSize: '40px 40px',
+    backgroundPosition: '0 0',
+  } : {
+    backgroundColor: '#FFFFFF',
+    backgroundImage: `
+      linear-gradient(to right, rgba(204,153,0,0.22) 1.2px, transparent 1.2px),
+      linear-gradient(to bottom, rgba(204,153,0,0.22) 1.2px, transparent 1.2px)
+    `,
+    backgroundSize: '36px 36px',
+    backgroundPosition: '0 0',
+  };
+
   const styles = {
-    bgGeral: theme === 'dark' ? 'bg-[#0b0f19]' : 'bg-[#F3F4F6]',
+    bgGeral: theme === 'dark' ? 'bg-black' : 'bg-white',
     bgQuadros: theme === 'dark' 
       ? 'bg-black text-white border-[#0066FF]' 
       : 'bg-white text-black border-black',
@@ -56,8 +80,8 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme, isDark: theme === 'dark', styles }}>
-      <div className={`min-h-screen transition-colors duration-300 ${styles.bgGeral}`}>
+    <ThemeContext.Provider value={{ theme, toggleTheme, isDark: theme === 'dark', styles, pageBackgroundStyle }}>
+      <div style={pageBackgroundStyle} className={`min-h-screen transition-colors duration-300 ${theme === 'dark' ? 'text-white' : 'text-black'}`}>
         {children}
       </div>
     </ThemeContext.Provider>
@@ -70,7 +94,6 @@ export const useTheme = () => {
   return ctx;
 };
 
-// Helper para inputs padronizados - USAR EM TODOS OS FORMULARIOS
 export const getInputClass = (isDark: boolean, extra = '') => {
   return `w-full h-[48px] px-4 text-sm border-2 outline-none font-medium transition-all rounded-none
     ${isDark 
