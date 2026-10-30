@@ -1,40 +1,29 @@
+
 import { BaseService } from './BaseService';
 import { BaseRepository } from '../repositories/BaseRepository';
 
-class OperacaoRepo extends BaseRepository {
-  async candidatar(vagaId: number, usuarioId: number) {
-    try {
-      // Se tabela candidaturas não existir, só retorna stub
-      return await this.query(`INSERT INTO candidaturas (vaga_id, freela_id, status) VALUES ($1,$2,'PENDENTE') RETURNING *`, [vagaId, usuarioId]);
-    } catch {
-      return [{ vaga_id: vagaId, freela_id: usuarioId, status: 'PENDENTE', mensagem: 'Candidatura stub - crie tabela candidaturas' }];
-    }
-  }
-}
-
 export class OperacaoService extends BaseService {
-  private opRepo: OperacaoRepo;
-
+  private repository: BaseRepository;
   constructor(repository?: BaseRepository) {
-    super(repository);
-    this.opRepo = new OperacaoRepo();
+    super();
+    this.repository = repository || new BaseRepository();
   }
-
-  async candidatar(vagaId: number, usuarioId: number) {
-    this.validateRequired({ vagaId, usuarioId }, ['vagaId', 'usuarioId']);
+  async candidatar(dados: any) {
     try {
-      return await this.opRepo.candidatar(vagaId, usuarioId);
-    } catch (e) {
-      this.handleError(e, 'OperacaoService.candidatar');
-    }
+      this.validateRequired(dados, ['vagaId', 'usuarioId']);
+      const pool = BaseRepository.getPool() as any;
+      if (!pool) throw new Error('Pool não configurado');
+      const rows = await pool.query('INSERT INTO candidaturas (vaga_id, usuario_id, freela_id, status) VALUES ($1,$2,$2,$3) RETURNING *', [dados.vagaId, dados.usuarioId, 'PENDENTE']);
+      return rows.rows[0];
+    } catch (e:any) { this.handleError(e, 'OperacaoService.candidatar'); throw e; }
   }
-
   async listarOperacoes(usuarioId: number) {
-    this.validateRequired({ usuarioId }, ['usuarioId']);
     try {
-      return [];
-    } catch (e) {
-      this.handleError(e, 'OperacaoService.listarOperacoes');
-    }
+      this.validateRequired({ usuarioId }, ['usuarioId']);
+      const pool = BaseRepository.getPool() as any;
+      if (!pool) return [];
+      const rows = await pool.query('SELECT * FROM candidaturas WHERE usuario_id=$1 ORDER BY criado_em DESC', [usuarioId]);
+      return rows.rows;
+    } catch (e:any) { this.handleError(e, 'OperacaoService.listarOperacoes'); throw e; }
   }
 }

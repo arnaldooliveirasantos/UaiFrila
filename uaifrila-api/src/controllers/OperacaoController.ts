@@ -1,24 +1,16 @@
+
 import { Request, Response } from 'express';
-import { BaseController } from './BaseController';
 import { OperacaoService } from '../services/OperacaoService';
 
-export class OperacaoController extends BaseController {
-  private service = new OperacaoService();
-
-  public candidatar = async (req: Request, res: Response): Promise<void> => {
-    await this.executar(res, async () => {
-      const usuarioId = this.getUsuarioId(req);
-      const { vaga_id } = req.body;
-      const result = await this.service.candidatar(parseInt(vaga_id), usuarioId);
-      this.sucesso(res, { candidatura: result });
-    });
-  };
-
-  public listar = async (req: Request, res: Response): Promise<void> => {
-    await this.executar(res, async () => {
-      const usuarioId = this.getUsuarioId(req);
-      const ops = await this.service.listarOperacoes(usuarioId);
-      this.sucessoLista(res, ops as any[], 'operacoes');
-    });
+export class OperacaoController {
+  private service: OperacaoService;
+  constructor() { this.service = new OperacaoService(); }
+  candidatar = async (req: Request, res: Response) => {
+    try {
+      const vaga_id = req.params.vaga_id || req.params.id || req.body.vaga_id;
+      const usuarioId = (req as any).usuario?.id || req.body.usuario_id;
+      const result = await (this.service as any).candidatar({ vagaId: parseInt(vaga_id), usuarioId });
+      res.json({ sucesso:true, candidatura: result });
+    } catch (e:any) { res.status(500).json({ erro:e.message }); }
   };
 }

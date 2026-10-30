@@ -1,6 +1,8 @@
+
 import React, { useState, useEffect } from 'react';
 import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 import CadastroUnificado from './CadastroUnificado';
+import { useTiposUsuario } from './useTiposUsuario';
 
 interface Props {
   usuario?: any;
@@ -9,6 +11,7 @@ interface Props {
 
 export default function PerfilUsuario({ usuario: usuarioProp, onAtualizado }: Props) {
   const styles = useUaiFrilaStyles();
+  const { getTipoUsuario, getBadgeVariant } = useTiposUsuario();
   const [usuario, setUsuario] = useState<any>(usuarioProp);
   const [carregando, setCarregando] = useState(!usuarioProp);
   const [erro, setErro] = useState('');
@@ -50,18 +53,16 @@ export default function PerfilUsuario({ usuario: usuarioProp, onAtualizado }: Pr
     );
   }
 
-  const tipoChave = usuario?.tipo_chave || usuario?.tipoChave || 'FREELA';
+  const tipoDB = getTipoUsuario(usuario);
+  const tipoChave = tipoDB?.chave?.toUpperCase() || usuario?.tipo_chave?.toUpperCase() || usuario?.role?.toUpperCase() || 'FREELA';
+  const tipoNome = tipoDB?.nome_exibicao || tipoChave;
 
   return (
     <div className={styles.pageContainer}>
-      {/* Header do Perfil */}
       <div className="flex flex-col gap-4 mb-6">
         <div className="flex items-center justify-between">
           <h1 className={styles.typography.h1}>Meu Perfil</h1>
-          <span className={styles.badge(
-            tipoChave === 'CONTRATANTE' ? 'danger' :
-            tipoChave === 'DUAL' ? 'warning' : 'success'
-          )}>
+          <span className={styles.badge(getBadgeVariant(usuario))}>
             {tipoChave}
           </span>
         </div>
@@ -78,7 +79,6 @@ export default function PerfilUsuario({ usuario: usuarioProp, onAtualizado }: Pr
         </div>
       )}
 
-      {/* Reutiliza CadastroUnificado em modo edição - mantém toda lógica de validação, máscaras e submit */}
       <div className={styles.card}>
         <CadastroUnificado
           usuario={usuario}
@@ -90,9 +90,8 @@ export default function PerfilUsuario({ usuario: usuarioProp, onAtualizado }: Pr
         />
       </div>
 
-      {/* Info adicional minimalista */}
       {usuario && (
-        <div className="mt-6 flex gap-2">
+        <div className="mt-6 flex gap-2 flex-wrap">
           <span className={styles.badge('default')}>{usuario.email || 'sem e-mail'}</span>
           {usuario.cidade_nome && <span className={styles.badge('default')}>{usuario.cidade_nome}</span>}
         </div>

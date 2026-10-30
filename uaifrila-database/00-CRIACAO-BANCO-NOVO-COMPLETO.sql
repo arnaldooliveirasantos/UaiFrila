@@ -519,8 +519,111 @@ INSERT INTO email_status (chave, nome) VALUES
 ('EXPIRADO','Expirado');
 
 INSERT INTO email_templates (chave_uso, titulo_assunto, conteudo_corpo, email_remetente, nome_remetente) VALUES
-('CONFIRMACAO_CADASTRO', 'Confirme seu cadastro - UAI FRILA', 'Olá {{NOME}}, seu código é {{CODIGO}}. E-mail: {{EMAIL}}', 'noreply@uaifrila.com.br', 'UAI FRILA'),
-('2FA_LOGIN', 'Código de login - UAI FRILA', 'Seu código de login é {{CODIGO}}', 'noreply@uaifrila.com.br', 'UAI FRILA');
+('CONFIRMACAO_CADASTRO', 'Confirme seu cadastro - Código {{CODIGO}} - UAI FRILA', 
+'<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="font-family: sans-serif; background: #FFFFFF; margin: 0; padding: 0;">
+  <div style="max-width: 600px; margin: 0 auto; border: 4px solid #000; background: #FFFFFF;">
+    <!-- HEADER com grid mostarda -->
+    <div style="background: #000; color: #fff; padding: 20px; text-align: center; background-image: linear-gradient(to right, rgba(204,153,0,0.22) 1.2px, transparent 1.2px), linear-gradient(to bottom, rgba(204,153,0,0.22) 1.2px, transparent 1.2px); background-size: 36px 36px;">
+      <h1 style="font-weight: 900; font-size: 28px; margin: 0; letter-spacing: -1px;">UAI FRILA</h1>
+      <p style="font-size: 11px; font-weight: 700; text-transform: uppercase; margin: 4px 0 0 0; letter-spacing: 2px;">Trampos diários em Uberlândia</p>
+    </div>
+    
+    <div style="padding: 24px;">
+      <p style="font-size: 14px;">Olá, <b>{{NOME}}</b>!</p>
+      <p style="font-size: 13px;">Seu cadastro no Uai Frila está quase pronto. Confirme seu e-mail:</p>
+      
+      <!-- CÓDIGO GRANDE -->
+      <div style="background: #FFC700; border: 4px solid #000; padding: 20px; text-align: center; margin: 20px 0; box-shadow: 6px 6px 0px 0px rgba(0,0,0,1);">
+        <p style="font-size: 11px; font-weight: 900; text-transform: uppercase; margin: 0;">Seu código de 6 dígitos</p>
+        <p style="font-size: 38px; font-weight: 900; letter-spacing: 8px; margin: 10px 0;">{{CODIGO}}</p>
+        <p style="font-size: 10px; margin: 0;">Válido por {{TEMPO_EXPIRACAO}} minutos • Não compartilhe</p>
+      </div>
+
+      <!-- BOTÃO VALIDAR AUTOMÁTICO -->
+      <div style="margin: 24px 0;">
+        <a href="{{LINK_VALIDAR}}" style="display: block; background: #0066FF; color: #fff; text-align: center; padding: 18px; font-weight: 900; text-transform: uppercase; text-decoration: none; border: 3px solid #000; box-shadow: 4px 4px 0px 0px rgba(0,0,0,1); font-size: 13px;">
+          ✅ CLIQUE AQUI PARA VALIDAR AUTOMATICAMENTE
+        </a>
+        <p style="font-size: 10px; color: #666; text-align: center; margin-top: 10px;">Se o botão não funcionar, copie o código e cole na tela de validação<br>Link direto: {{LINK_VALIDAR}}</p>
+      </div>
+
+      <!-- DICA MOBILE - ANTI REFRESH -->
+      <div style="background: #f3f3f3; border: 2px solid #000; padding: 14px; margin: 20px 0;">
+        <p style="font-size: 11px; margin: 0;"><b>📱 Está no celular?</b> Deixe a aba do Uai Frila aberta! Abra este e-mail em outra aba ou app. Seu progresso fica salvo mesmo se atualizar a página. O timer continua contando.</p>
+      </div>
+
+      <hr style="border: none; border-top: 3px dashed #000; margin: 24px 0;">
+
+      <!-- CANCELAR -->
+      <div style="text-align: center; background: #fff; border: 2px solid #E53935; padding: 16px;">
+        <p style="font-size: 11px; font-weight: 900; margin: 0 0 8px 0; text-transform: uppercase;">Não foi você que fez este cadastro?</p>
+        <a href="{{LINK_CANCELAR}}" style="color: #E53935; font-size: 12px; font-weight: 900; text-transform: uppercase;">🚫 Não sou eu - Cancelar e bloquear cadastro</a>
+        <p style="font-size: 9px; color: #999; margin: 8px 0 0 0;">Se você não solicitou, clique acima e seu e-mail será protegido contra uso indevido.</p>
+      </div>
+
+      <p style="font-size: 9px; color: #999; text-align: center; margin-top: 24px;">Uai Frila - Trampos diários • Valor por serviço + transporte • Pix no dia • {{FRONTEND_URL}}</p>
+    </div>
+  </div>
+</body>
+</html>',
+'noreply@uaifrila.com.br', 'UAI FRILA');
+
+-- 2. LOGIN - Com link mágico anti-refresh
+INSERT INTO email_templates (chave_uso, titulo_assunto, conteudo_corpo, email_remetente, nome_remetente) VALUES
+('2FA_LOGIN', 'Seu código de acesso: {{CODIGO}} - UAI FRILA',
+'<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="font-family: sans-serif; background: #000; margin: 0; padding: 0;">
+  <div style="max-width: 600px; margin: 0 auto; border: 4px solid #fff; background: #000; color: #fff;">
+    <div style="background: #000; color: #fff; padding: 20px; text-align: center; border-bottom: 4px solid #fff; background-image: linear-gradient(to right, rgba(0,102,255,0.22) 1.2px, transparent 1.2px), linear-gradient(to bottom, rgba(0,102,255,0.22) 1.2px, transparent 1.2px); background-size: 40px 40px;">
+      <h1 style="font-weight: 900; font-size: 28px; margin: 0;">UAI FRILA</h1>
+      <p style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px;">Código de acesso</p>
+    </div>
+    
+    <div style="padding: 24px;">
+      <p style="font-size: 14px;">Olá, <b>{{NOME}}</b>! Seu código de acesso:</p>
+      
+      <div style="background: #000; color: #fff; border: 4px solid #fff; padding: 20px; text-align: center; margin: 20px 0;">
+        <p style="font-size: 11px; font-weight: 900; text-transform: uppercase; margin: 0; color: #fff;">Código</p>
+        <p style="font-size: 38px; font-weight: 900; letter-spacing: 8px; margin: 10px 0; color: #fff;">{{CODIGO}}</p>
+        <p style="font-size: 10px; margin: 0; color: #ccc;">Válido por {{TEMPO_EXPIRACAO}} minutos</p>
+      </div>
+
+      <div style="margin: 24px 0;">
+        <a href="{{LINK_VALIDAR}}" style="display: block; background: #fff; color: #000; text-align: center; padding: 18px; font-weight: 900; text-transform: uppercase; text-decoration: none; border: 3px solid #fff; font-size: 13px;">
+          🔓 CLIQUE PARA ENTRAR AUTOMATICAMENTE
+        </a>
+        <p style="font-size: 10px; color: #999; text-align: center; margin-top: 10px;">Link direto: {{LINK_VALIDAR}}</p>
+      </div>
+
+      <div style="background: #111; border: 2px solid #333; padding: 14px;">
+        <p style="font-size: 11px; margin: 0; color: #ccc;"><b style="color: #fff;">📱 No celular:</b> Você pode voltar para a aba do Uai Frila e colar o código. Não precisa decorar, seu login fica salvo se atualizar. Deixe a aba aberta!</p>
+      </div>
+
+      <p style="font-size: 9px; color: #666; text-align: center; margin-top: 24px;">Se não foi você, ignore. Código expira em {{TEMPO_EXPIRACAO}} minutos. {{FRONTEND_URL}}</p>
+    </div>
+  </div>
+</body>
+</html>',
+'noreply@uaifrila.com.br', 'UAI FRILA');
+
+-- 3. RECUPERAÇÃO / REENVIO
+INSERT INTO email_templates (chave_uso, titulo_assunto, conteudo_corpo, email_remetente, nome_remetente) VALUES
+('REENVIO_CODIGO', 'Novo código: {{CODIGO}} - UAI FRILA',
+'<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 4px solid #000; padding: 24px;">
+  <h1 style="font-weight: 900;">UAI FRILA</h1>
+  <p>Olá {{NOME}}, novo código solicitado:</p>
+  <div style="background: #FFC700; border: 4px solid #000; padding: 20px; text-align: center; margin: 20px 0;">
+    <p style="font-size: 36px; font-weight: 900; letter-spacing: 8px;">{{CODIGO}}</p>
+  </div>
+  <a href="{{LINK_VALIDAR}}" style="display: block; background: #0066FF; color: #fff; text-align: center; padding: 16px; font-weight: 900; text-decoration: none;">VALIDAR AGORA</a>
+  <p style="font-size: 11px; margin-top: 16px;">Se não foi você, clique aqui para cancelar: <a href="{{LINK_CANCELAR}}">Cancelar cadastro</a></p>
+</div>',
+'noreply@uaifrila.com.br', 'UAI FRILA');
 
 INSERT INTO variaveis_sistema (chave, valor, valor_numerico, tipo, descricao, categoria, editavel) VALUES
 ('EMAIL_EXPIRACAO_MINUTOS', '5', 5, 'number', 'Tempo expiração código e-mail em minutos', 'email', true),

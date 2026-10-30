@@ -1,7 +1,9 @@
+
 import React, { useState, useEffect } from 'react';
 import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 import ValidacaoCodigo from './ValidacaoCodigo';
 import GoogleEnderecoInput from './GoogleEnderecoInput';
+import { useTiposUsuario } from './useTiposUsuario';
 
 interface Props {
   onCadastro?: () => void;
@@ -44,6 +46,7 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
   const styles = useUaiFrilaStyles();
   const [queroTrampar, setQueroTrampar] = useState(true);
   const [queroContratar, setQueroContratar] = useState(false);
+  const [tipoOrigem, setTipoOrigem] = useState<string | null>(null);
   const [form, setForm] = useState({
     nome: '', cpf: '', cpfOriginal: '', email: '',
     cnpj: '', nomeFantasia: '',
@@ -59,17 +62,14 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState('');
   const [mensagem, setMensagem] = useState('');
-  const API = import.meta.env.VITE_API_URL;
-  if (!API) throw new Error('VITE_API_URL não definida no .env - configure no arquivo .env');
+  const API = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3000/api';
+  const { tipos, getTipoUsuario } = useTiposUsuario();
 
   const getTipoChave = () => {
     if (queroTrampar && queroContratar) return 'DUAL';
     if (queroContratar) return 'CONTRATANTE';
     return 'FREELA';
   };
-
-  const isFreela = queroTrampar;
-  const isContratante = queroContratar;
 
   useEffect(() => {
     const tipo = localStorage.getItem('uaifrila_tipo_cadastro');
@@ -79,12 +79,42 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
     }
   }, []);
 
+  // REGRA: FREELA = só trampar, CONTRATANTE = só contratar, OUTROS = DUAL (ambos marcados e bloqueados)
   useEffect(() => {
     if (modoEdicao && usuarioProp) {
-      const t = usuarioProp.tipo_chave || 'FREELA';
-      if (t === 'DUAL') { setQueroTrampar(true); setQueroContratar(true); }
-      else if (t === 'CONTRATANTE') { setQueroTrampar(false); setQueroContratar(true); }
-      else { setQueroTrampar(true); setQueroContratar(false); }
+      const tipoDB = getTipoUsuario(usuarioProp);
+      let t = '';
+      if (tipoDB?.chave) {
+        t = tipoDB.chave.toUpperCase();
+      } else if (usuarioProp.role) {
+        const roleUpper = usuarioProp.role.toUpperCase();
+        if (['SUPER_ADMIN','ADMIN','FINANCEIRO','DUAL','CONTRATANTE','FREELA'].includes(roleUpper)) {
+          t = roleUpper;
+        }
+      } else if (usuarioProp.tipo_chave) {
+        t = usuarioProp.tipo_chave.toUpperCase();
+      } else {
+        t = 'FREELA';
+      }
+
+      setTipoOrigem(t);
+      console.log('[CadastroUnificado] Tipo:', t, 'DB:', tipoDB, 'role:', usuarioProp.role);
+
+      // REGRA DUAL para outros tipos
+      if (t === 'CONTRATANTE') { 
+        setQueroTrampar(false); 
+        setQueroContratar(true); 
+      }
+      else if (t === 'FREELA') { 
+        setQueroTrampar(true); 
+        setQueroContratar(false); 
+      }
+      else { 
+        // QUALQUER diferente de FREELA e CONTRATANTE = regra DUAL: ambos marcados e bloqueados
+        setQueroTrampar(true); 
+        setQueroContratar(true); 
+      }
+
       setForm({
         nome: usuarioProp.nome_completo || '',
         cpf: apenasNumeros(usuarioProp.cpf || ''),
@@ -106,124 +136,160 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
         endereco_lat: usuarioProp.endereco_lat,
         endereco_lng: usuarioProp.endereco_lng,
         comoChega: usuarioProp.como_chega || 'Moto',
-        ajudaUber: usuarioProp.ajuda_uber || 10,
+        ajudaUber: usuarioProp.aja_uber || usuarioProp.ajuda_uber || 10,
         termos: [true, true, true, true, true],
         temMei: usuarioProp.tem_mei || false
       });
     }
-  }, [modoEdicao, usuarioProp]);
+  }, [usuarioProp, tipos]);
 
   const handleSubmit = async () => {
-    setErro(''); setMensagem('');
-    if (!form.nome || !form.cpf || !form.email) { setErro('Preencha nome, CPF e e-mail'); return; }
-    if (!queroTrampar && !queroContratar) { setErro('Escolha pelo menos uma opção: Quero Trampar ou Quero Contratar'); return; }
+    setErro('');
+    setMensagem('');
     if (!form.termos.every(Boolean)) { setErro('Aceite todos os termos'); return; }
+    if (!form.nome || !form.email || !form.cpf) { setErro('Preencha nome, e-mail e CPF'); return; }
     setCarregando(true);
     try {
-      const res = await fetch(`${API}/auth/cadastro`, {
+      const payload = {
+        nome: form.nome,
+        cpf: form.cpf,
+        email: form.email.toLowerCase(),
+        cnpj: form.cnpj,
+        nomeFantasia: form.nomeFantasia,
+        funcao: form.funcao,
+        valorHora: form.valorHora,
+        bio: form.bio,
+        bairro: form.bairro,
+        endereco: form.endereco_completo,
+        endereco_completo: form.endereco_completo,
+        cidade: form.cidade_nome,
+        cidade_id: form.cidade_id,
+        cidade_nome: form.cidade_nome,
+        lat: form.endereco_lat,
+        lng: form.endereco_lng,
+        endereco_lat: form.endereco_lat,
+        endereco_lng: form.endereco_lng,
+        tipo_chave: modoEdicao ? tipoOrigem : getTipoChave(),
+        temMei: form.temMei,
+        comoChega: form.comoChega,
+        ajudaUber: form.ajudaUber
+      };
+      const url = modoEdicao ? `${API}/usuarios/atualizar` : `${API}/auth/cadastro`;
+      const token = localStorage.getItem('uaifrila_token');
+      const res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          nome: form.nome, cpf: form.cpf, email: form.email,
-          cnpj: form.cnpj, nomeFantasia: form.nomeFantasia,
-          funcao: form.funcao, valorHora: form.valorHora, bio: form.bio,
-          bairro: form.bairro, endereco: form.endereco_completo || form.endereco,
-          endereco_completo: form.endereco_completo || form.endereco,
-          cidade: form.cidade_nome, cidade_nome: form.cidade_nome, cidade_id: form.cidade_id,
-          lat: form.endereco_lat || form.lat, lng: form.endereco_lng || form.lng,
-          endereco_lat: form.endereco_lat || form.lat, endereco_lng: form.endereco_lng || form.lng,
-          tipo_chave: getTipoChave(),
-          temMei: form.temMei
-        })
+        headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) },
+        body: JSON.stringify(payload)
       });
-
-      const contentType = res.headers.get('content-type') || '';
-      if (!contentType.includes('application/json')) {
-        await res.text();
-        throw new Error(`Falha ao comunicar com o servidor. Tente novamente.`);
-      }
-
       const data = await res.json();
-      if (!res.ok) throw new Error(data.erro || 'Erro no cadastro');
-      setEtapa('codigo');
-    } catch (e: any) { setErro(e.message); }
+      if (!res.ok) throw new Error(data.erro || 'Erro ao salvar');
+      if (modoEdicao) {
+        setMensagem('Perfil atualizado!');
+        onAtualizado?.(data.usuario || payload);
+        localStorage.setItem('uaifrila_usuario', JSON.stringify(data.usuario || payload));
+      } else {
+        localStorage.setItem('uaifrila_usuario_temp', JSON.stringify({ email: form.email, nome: form.nome }));
+        setEtapa('codigo');
+      }
+    } catch (e:any) { setErro(e.message); }
     finally { setCarregando(false); }
   };
 
   if (etapa === 'codigo') {
-    return <ValidacaoCodigo email={form.email} tipo="cadastro" onValidado={() => { onCadastro?.(); }} onVoltar={() => setEtapa('form')} />;
+    return <ValidacaoCodigo email={form.email} tipo={modoEdicao ? 'atualizacao' : 'cadastro'} onValidado={(u) => { onCadastro?.(); onAtualizado?.(u); }} onVoltar={() => setEtapa('form')} />;
   }
 
+  const isEdicao = modoEdicao;
+  const isFreela = tipoOrigem === 'FREELA';
+  const isContratante = tipoOrigem === 'CONTRATANTE';
+  const isOutrosTipos = tipoOrigem && !['FREELA','CONTRATANTE'].includes(tipoOrigem);
+
   return (
-    <div className={styles.pageContainer}>
-      <div className={styles.card}>
-        <h2 className={styles.typography.h1 + ' text-3xl'}>Cadastro</h2>
+    <div className="w-full">
+      <div className={`${styles.card} p-4 md:p-6`}>
+        {(() => {
+          // REGRA DUAL para outros tipos: ambos bloqueados
+          const bloqueiaFreela = isEdicao && (isFreela || isOutrosTipos);
+          const bloqueiaContratante = isEdicao && (isContratante || isOutrosTipos);
+          return (
+            <>
+              <h2 className={`${styles.typography.h2} mb-6`}>CADASTRO - {tipoOrigem || getTipoChave()}</h2>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <button
+                  disabled={!!bloqueiaFreela}
+                  onClick={() => { if (bloqueiaFreela) return; setQueroTrampar(!queroTrampar); }}
+                  className={`${bloqueiaFreela ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'} border-2 p-4 flex items-center gap-3 text-left ${queroTrampar ? 'bg-yellow-400 border-black' : 'bg-zinc-900 border-zinc-700'}`}
+                >
+                  <div className="text-2xl">💪</div>
+                  <div>
+                    <div className="font-black text-xs">QUERO TRAMPAR {bloqueiaFreela ? '🔒' : ''}</div>
+                    <div className="text-[11px] opacity-70">Trabalhar como freela {isFreela ? '(obrigatório)' : ''}</div>
+                  </div>
+                  <div className={`ml-auto w-6 h-6 border-2 flex items-center justify-center ${queroTrampar ? 'bg-black border-black text-white' : 'border-current'}`}>
+                    {queroTrampar && '✓'}
+                  </div>
+                </button>
 
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-          <button
-            type="button"
-            onClick={() => setQueroTrampar(!queroTrampar)}
-            className={`${queroTrampar ? styles.cardHighlight + ' p-6 flex items-center gap-4 text-left' : styles.cardSmall + ' flex items-center gap-4 text-left opacity-70 hover:opacity-100'} transition-all`}
-          >
-            <span className="text-4xl">💪</span>
-            <div>
-              <div className="font-black uppercase text-sm">Quero Trampar</div>
-              <div className="text-[11px]">Trabalhar como freela</div>
-            </div>
-            <div className={`ml-auto w-6 h-6 border-2 flex items-center justify-center ${queroTrampar ? 'bg-black border-black text-[#FFC700]' : 'border-current'}`}>
-              {queroTrampar && '✓'}
-            </div>
-          </button>
+                <button
+                  disabled={!!bloqueiaContratante}
+                  onClick={() => { if (bloqueiaContratante) return; setQueroContratar(!queroContratar); }}
+                  className={`${bloqueiaContratante ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'} border-2 p-4 flex items-center gap-3 text-left ${queroContratar ? 'bg-blue-500 border-black text-white' : 'bg-zinc-900 border-zinc-700'}`}
+                >
+                  <div className="text-2xl">🏢</div>
+                  <div>
+                    <div className="font-black text-xs">QUERO CONTRATAR {bloqueiaContratante ? '🔒' : ''}</div>
+                    <div className="text-[11px] opacity-70">Contratar freelas {isContratante ? '(obrigatório)' : ''}</div>
+                  </div>
+                  <div className={`ml-auto w-6 h-6 border-2 flex items-center justify-center ${queroContratar ? 'bg-black border-black text-white' : 'border-current'}`}>
+                    {queroContratar && '✓'}
+                  </div>
+                </button>
+              </div>
 
-          <button
-            type="button"
-            onClick={() => setQueroContratar(!queroContratar)}
-            className={`${queroContratar ? 'p-6 border-4 bg-[#E53935] text-white border-black flex items-center gap-4 text-left shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]' : styles.cardSmall + ' flex items-center gap-4 text-left opacity-70 hover:opacity-100'} transition-all`}
-          >
-            <span className="text-4xl">🏢</span>
-            <div>
-              <div className="font-black uppercase text-sm">Quero Contratar</div>
-              <div className="text-[11px]">Contratar freelas</div>
-            </div>
-            <div className={`ml-auto w-6 h-6 border-2 flex items-center justify-center ${queroContratar ? 'bg-black border-black text-white' : 'border-current'}`}>
-              {queroContratar && '✓'}
-            </div>
-          </button>
-        </div>
+              {isEdicao && (
+                <div className="mb-6">
+                  {isContratante && (
+                    <div className={`${styles.badge('danger')} text-[11px] p-2 normal-case border-2 block`}>
+                      🔒 Tipo CONTRATANTE - Quero Contratar é obrigatório (🔒)
+                    </div>
+                  )}
+                  {isFreela && (
+                    <div className={`${styles.badge('success')} text-[11px] p-2 normal-case border-2 block`}>
+                      🔒 Tipo FREELA - Quero Trampar é obrigatório (🔒)
+                    </div>
+                  )}
+                  {/* Para outros tipos (DUAL, SUPER_ADMIN, etc) - sem mensagem debug, só bloqueia ambos seguindo regra DUAL */}
+                </div>
+              )}
+            </>
+          );
+        })()}
 
-        {queroTrampar && queroContratar && (
-          <div className={styles.badge('success') + ' mt-3 block w-fit text-xs p-3 normal-case border-2'}>
-            ✨ Você será cadastrado como DUAL - pode trampar e contratar!
-          </div>
-        )}
-
-        <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="flex flex-col gap-1">
             <label className={styles.label}>Nome completo</label>
-            <input value={form.nome} onChange={e=>setForm({...form, nome: e.target.value})} placeholder="Seu nome" className={styles.input} />
+            <input value={form.nome} onChange={e=>setForm({...form, nome: e.target.value})} className={styles.input} />
           </div>
-
           <div className="flex flex-col gap-1">
-            <label className={styles.label}>CPF {modoEdicao && <span className="text-[8px]">🔒</span>}</label>
+            <label className={styles.label}>CPF 🔒</label>
             {modoEdicao ? (
-              <input value={mascararCPF(form.cpfOriginal)} disabled className={styles.input + ' opacity-60 cursor-not-allowed'} />
+              <input value={mascararCPF(form.cpfOriginal)} disabled className={styles.input + ' opacity-60'} />
             ) : (
-              <input value={formatarCPF(form.cpf)} onChange={e=>setForm({...form, cpf: apenasNumeros(e.target.value).slice(0,11)})} placeholder="000.000.000-00" className={styles.input} />
+              <input value={formatarCPF(form.cpf)} onChange={e=>setForm({...form, cpf: apenasNumeros(e.target.value).slice(0,11)})} className={styles.input} />
             )}
           </div>
-
           <div className="flex flex-col gap-1">
-            <label className={styles.label}>E-mail {modoEdicao && <span className="text-[8px]">🔒</span>}</label>
-            <input type="email" value={form.email} disabled={modoEdicao} onChange={e=>setForm({...form, email: e.target.value.toLowerCase()})} placeholder="seu@email.com" className={`${styles.input} ${modoEdicao ? 'opacity-60 cursor-not-allowed' : ''} lowercase`} />
+            <label className={styles.label}>E-mail 🔒</label>
+            <input type="email" value={form.email} disabled={modoEdicao} className={`${styles.input} ${modoEdicao ? 'opacity-60' : ''}`} />
           </div>
-
           <div className="md:col-span-2">
             <GoogleEnderecoInput
-              endereco={form.endereco_completo || form.endereco}
-              cidade={form.cidade_nome || form.cidade}
+              endereco={form.endereco_completo}
+              cidade={form.cidade_nome}
               cidadeId={form.cidade_id}
-              lat={form.endereco_lat || form.lat}
-              lng={form.endereco_lng || form.lng}
+              lat={form.endereco_lat}
+              lng={form.endereco_lng}
               onChange={(data) => setForm({
                 ...form,
                 endereco: data.endereco,
@@ -239,34 +305,6 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
               })}
             />
           </div>
-
-          {isFreela && (
-            <>
-              <div className="flex flex-col gap-1">
-                <label className={styles.label}>Função</label>
-                <select value={form.funcao} onChange={e=>setForm({...form, funcao: e.target.value})} className={styles.select}>
-                  {['Garçom','Bartender','Cozinheiro','Auxiliar de Cozinha','Recepcionista','Segurança','Limpeza','Outros'].map(f=><option key={f} value={f}>{f}</option>)}
-                </select>
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className={styles.label}>Valor Hora (R$)</label>
-                <input type="number" value={form.valorHora} onChange={e=>setForm({...form, valorHora: Number(e.target.value)})} className={styles.input} />
-              </div>
-            </>
-          )}
-
-          {isContratante && (
-            <>
-              <div className="flex flex-col gap-1">
-                <label className={styles.label}>CNPJ (opcional)</label>
-                <input value={formatarCNPJ(form.cnpj)} onChange={e=>setForm({...form, cnpj: apenasNumeros(e.target.value).slice(0,14)})} placeholder="00.000.000/0000-00" className={styles.input} />
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className={styles.label}>Nome Fantasia</label>
-                <input value={form.nomeFantasia} onChange={e=>setForm({...form, nomeFantasia: e.target.value})} placeholder="Nome Fantasia" className={styles.input} />
-              </div>
-            </>
-          )}
         </div>
 
         <h3 className={styles.typography.h3 + ' mt-8'}>Termos</h3>
@@ -274,7 +312,7 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
           {TERMOS.map((t,i)=>(
             <label key={t.id} className={`${styles.cardSmall} flex gap-3 text-xs cursor-pointer`}>
               <input type="checkbox" checked={form.termos[i]} onChange={e=>{ const nt=[...form.termos]; nt[i]=e.target.checked; setForm({...form, termos: nt}); }} />
-              <div><span className="font-black">{t.titulo}</span> <span className="opacity-70">- {t.desc}</span></div>
+              <div><span className="font-black">{t.titulo}</span> - {t.desc}</div>
             </label>
           ))}
         </div>

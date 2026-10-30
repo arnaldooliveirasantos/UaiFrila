@@ -1,4 +1,3 @@
-
 import { BaseRepository } from './BaseRepository';
 
 export class CidadeRepository extends BaseRepository {
@@ -20,5 +19,14 @@ export class CidadeRepository extends BaseRepository {
       [dados.nome, dados.estado, dados.codigo_ibge, true, dados.lat, dados.lng, dados.raio_km||20, dados.populacao, dados.regiao, 'ATIVA']
     );
     return res[0];
+  }
+
+  async buscarTodasComHierarquia() {
+    return await this.query('SELECT * FROM cidades ORDER BY nome');
+  }
+
+  async atualizarStatus(id: number, ativo: boolean) {
+    const rows = await this.query('UPDATE cidades SET ativa=$2, atualizado_em=NOW() WHERE id=$1 RETURNING *', [id, ativo]);
+    return rows[0] || null;
   }
 }
