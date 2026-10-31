@@ -13,33 +13,71 @@ export default function PerfilUsuario({ usuario: usuarioProp, onAtualizado }: Pr
   const styles = useUaiFrilaStyles();
   const { getTipoUsuario, getBadgeVariant } = useTiposUsuario();
   const [usuario, setUsuario] = useState<any>(usuarioProp);
-  const [carregando, setCarregando] = useState(!usuarioProp);
+  const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
 
   useEffect(() => {
-    if (usuarioProp) {
-      setUsuario(usuarioProp);
-      setCarregando(false);
-    } else {
-      const ls = localStorage.getItem('uaifrila_usuario');
-      const token = localStorage.getItem('uaifrila_token');
-      if (ls && token) {
-        setCarregando(true);
-        const API = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3000/api';
-        fetch(`${API}/usuarios/me`, {
-          headers: { 'Authorization': `Bearer ${token}` }
+    const token = localStorage.getItem('uaifrila_token');
+    const ls = localStorage.getItem('uaifrila_usuario');
+    const API = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3000/api';
+
+    // Sempre busca do backend via view vw_usuarios_com_endereco_ativo para ter endereço
+    if (token) {
+      setCarregando(true);
+      fetch(`${API}/usuarios/me`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data.usuario) {
+            console.log('[PerfilUsuario] Usuario completo da API com endereco_ativo:', {
+              id: data.usuario.id,
+              endereco_ativo_completo: data.usuario.endereco_ativo_completo,
+              endereco_ativo_bairro: data.usuario.endereco_ativo_bairro,
+              endereco_ativo_cep: data.usuario.endereco_ativo_cep,
+              endereco_ativo_numero: data.usuario.endereco_ativo_numero,
+              endereco_ativo_cidade: data.usuario.endereco_ativo_cidade,
+              endereco_ativo_cidade_id: data.usuario.endereco_ativo_cidade_id
+            });
+            setUsuario(data.usuario);
+            // Atualiza localStorage com dados completos
+            localStorage.setItem('uaifrila_usuario', JSON.stringify(data.usuario));
+          } else if (usuarioProp) {
+            console.log('[PerfilUsuario] API não retornou usuario, usando prop', usuarioProp);
+            setUsuario(usuarioProp);
+          } else if (ls) {
+            try { setUsuario(JSON.parse(ls)); } catch {}
+          }
         })
-          .then(res => res.json())
-          .then(data => {
-            setUsuario(data.usuario || JSON.parse(ls));
-          })
-          .catch(() => {
-            try { setUsuario(JSON.parse(ls)); } catch { setErro('Não foi possível carregar o perfil'); }
-          })
-          .finally(() => setCarregando(false));
+        .catch((e) => {
+          console.log('[PerfilUsuario] Erro ao buscar /usuarios/me, usando fallback', e);
+          if (usuarioProp) setUsuario(usuarioProp);
+          else if (ls) { try { setUsuario(JSON.parse(ls)); } catch { setErro('Não foi possível carregar o perfil'); } }
+          else setErro('Não foi possível carregar o perfil');
+        })
+        .finally(() => setCarregando(false));
+    } else {
+      if (usuarioProp) {
+        setUsuario(usuarioProp);
+        setCarregando(false);
+      } else if (ls) {
+        try { 
+          const parsed = JSON.parse(ls);
+          console.log('[PerfilUsuario] Usando localStorage (sem endereco_ativo):', parsed);
+          setUsuario(parsed); 
+        } catch { setErro('Não foi possível carregar o perfil'); }
+        setCarregando(false);
       } else {
         setCarregando(false);
       }
+    }
+  }, []); // Sempre busca na montagem para ter endereço atualizado
+
+  // Atualiza se prop mudar
+  useEffect(() => {
+    if (usuarioProp?.id && usuarioProp?.endereco_ativo_completo) {
+      console.log('[PerfilUsuario] Prop atualizada com endereco_ativo, atualizando estado');
+      setUsuario(usuarioProp);
     }
   }, [usuarioProp]);
 
@@ -47,7 +85,7 @@ export default function PerfilUsuario({ usuario: usuarioProp, onAtualizado }: Pr
     return (
       <div className={styles.pageContainerSmall}>
         <div className={styles.card}>
-          <p className={`${styles.typography.body} animate-pulse`}>Carregando seu perfil...</p>
+          <p className={`${styles.typography.body} animate-pulse`}>Carregando seu perfil com endereço...</p>
         </div>
       </div>
     );
@@ -68,7 +106,7 @@ export default function PerfilUsuario({ usuario: usuarioProp, onAtualizado }: Pr
         </div>
         {usuario?.nome_completo && (
           <p className={`${styles.typography.body} ${styles.isDark ? 'text-zinc-300' : 'text-zinc-600'}`}>
-            Atualize suas informações quando precisar
+            Atualize suas informações quando precisar - endereço carregado da view
           </p>
         )}
       </div>
@@ -84,7 +122,9 @@ export default function PerfilUsuario({ usuario: usuarioProp, onAtualizado }: Pr
           usuario={usuario}
           modoEdicao={true}
           onAtualizado={(u) => {
+            console.log('[PerfilUsuario] Atualizado:', u);
             setUsuario(u);
+            localStorage.setItem('uaifrila_usuario', JSON.stringify(u));
             onAtualizado?.(u);
           }}
         />
@@ -93,7 +133,11 @@ export default function PerfilUsuario({ usuario: usuarioProp, onAtualizado }: Pr
       {usuario && (
         <div className="mt-6 flex gap-2 flex-wrap">
           <span className={styles.badge('default')}>{usuario.email || 'sem e-mail'}</span>
-          {usuario.cidade_nome && <span className={styles.badge('default')}>{usuario.cidade_nome}</span>}
+          {usuario.endereco_ativo_cidade && <span className={styles.badge('default')}>📍 {usuario.endereco_ativo_cidade} - {usuario.endereco_ativo_bairro}</span>}
+          {usuario.cidade_nome && !usuario.endereco_ativo_cidade && <span className={styles.badge('default')}>{usuario.cidade_nome}</span>}
+          {usuario.endereco_ativo_bairro && <span className={styles.badge('default')}>{usuario.endereco_ativo_bairro}</span>}
+          {usuario.endereco_ativo_cep && <span className={styles.badge('default')}>CEP {usuario.endereco_ativo_cep}</span>}
+          <span className="text-[10px] font-mono opacity-50">ID {usuario.id} | Endereço ID {usuario.endereco_ativo_id || 'sem'}</span>
         </div>
       )}
     </div>

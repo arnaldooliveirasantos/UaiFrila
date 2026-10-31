@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
+import BlocoEndereco from './BlocoEndereco';
 
 type MeioPagamento = 'pix' | 'cartao';
 
@@ -65,123 +66,7 @@ const DateUtil = {
 // ========================================================
 // Componente Endereço - Bloco reutilizável
 // ========================================================
-function BlocoEndereco({ form, setForm, cidades, buscandoCep, setBuscandoCep }: any) {
-  const styles = useUaiFrilaStyles();
 
-  const buscarCep = async (cepRaw: string) => {
-    const cep = cepRaw.replace(/\D/g, '');
-    if (cep.length !== 8) return;
-    setBuscandoCep(true);
-    try {
-      const res = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
-      const data = await res.json();
-      if (data.erro) throw new Error('CEP não encontrado');
-      
-      let cidadeId = form.cidade_id;
-      const cidadeEncontrada = cidades.find((c: any) => 
-        (c.nome?.toLowerCase() === data.localidade.toLowerCase() || 
-         c.cidade_nome?.toLowerCase() === data.localidade.toLowerCase()) &&
-        (c.estado === data.uf || c.uf === data.uf)
-      );
-      if (cidadeEncontrada) cidadeId = cidadeEncontrada.id;
-
-      setForm((f: any) => ({
-        ...f,
-        cep: data.cep || cepRaw,
-        enderecoCompleto: data.logradouro || f.enderecoCompleto,
-        bairro: data.bairro || f.bairro,
-        cidade: data.localidade || f.cidade,
-        cidade_id: cidadeId || f.cidade_id,
-        estado: data.uf || f.estado,
-        complemento: data.complemento || f.complemento,
-      }));
-    } catch (e: any) {
-      console.error('Erro buscar CEP:', e.message);
-    } finally {
-      setBuscandoCep(false);
-    }
-  };
-
-  return (
-    <div className={styles.cardSmall}>
-      <h3 className={styles.typography.h3 + ' mb-1'}>📍 Endereço da Vaga</h3>
-      <p className={styles.typography.caption + ' mb-3'}>Preencha o CEP para autocompletar o endereço</p>
-      
-      <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2">
-        <div>
-          <label className={styles.label}>CEP *</label>
-          <input 
-            value={form.cep} 
-            onChange={e => setForm({ ...form, cep: e.target.value })} 
-            onBlur={e => buscarCep(e.target.value)}
-            placeholder="38400-000" 
-            className={styles.input} 
-          />
-        </div>
-        <div className="flex items-end">
-          <button 
-            type="button" 
-            onClick={() => buscarCep(form.cep)} 
-            disabled={buscandoCep}
-            className={buscandoCep ? styles.buttonPrimary(true) : styles.buttonWarning}
-            style={{ height: '48px' }}
-          >
-            {buscandoCep ? 'Buscando...' : 'Buscar CEP'}
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-[2fr_1fr] gap-3 mt-3">
-        <div>
-          <label className={styles.label}>Rua / Avenida *</label>
-          <input value={form.enderecoCompleto} onChange={e => setForm({ ...form, enderecoCompleto: e.target.value })} placeholder="Av. Floriano Peixoto" className={styles.input} />
-        </div>
-        <div>
-          <label className={styles.label}>Número</label>
-          <input value={form.numero || ''} onChange={e => setForm({ ...form, numero: e.target.value })} placeholder="1000" className={styles.input} />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-        <div>
-          <label className={styles.label}>Bairro *</label>
-          <input value={form.bairro} onChange={e => setForm({ ...form, bairro: e.target.value })} placeholder="Centro" className={styles.input} />
-        </div>
-        <div>
-          <label className={styles.label}>Complemento</label>
-          <input value={form.complemento} onChange={e => setForm({ ...form, complemento: e.target.value })} placeholder="Bloco A, Sala 2" className={styles.input} />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-[2fr_1fr] gap-3 mt-3">
-        <div>
-          <label className={styles.label}>Cidade *</label>
-          <select value={form.cidade_id} onChange={e => {
-            const cidadeId = Number(e.target.value);
-            const cidade = cidades.find((c: any) => c.id === cidadeId);
-            setForm({ ...form, cidade_id: cidadeId, cidade: cidade?.nome || cidade?.cidade_nome || '', estado: cidade?.estado || cidade?.uf || form.estado });
-          }} className={styles.select}>
-            {cidades.length > 0 ? cidades.map((c: any) => (
-              <option key={c.id} value={c.id}>{c.nome || c.cidade_nome} - {c.estado || c.uf}</option>
-            )) : (
-              <><option value={1}>Uberlândia - MG</option><option value={2}>Anápolis - GO</option></>
-            )}
-          </select>
-        </div>
-        <div>
-          <label className={styles.label}>Estado *</label>
-          <select value={form.estado} onChange={e => setForm({ ...form, estado: e.target.value })} className={styles.select}>
-            <option value="MG">MG</option><option value="GO">GO</option><option value="SP">SP</option><option value="RJ">RJ</option><option value="DF">DF</option><option value="BA">BA</option><option value="PR">PR</option><option value="RS">RS</option><option value="SC">SC</option><option value="ES">ES</option><option value="MT">MT</option><option value="MS">MS</option>
-          </select>
-        </div>
-      </div>
-
-      <div className="mt-3">
-        <div className={styles.badge('default')}>Preview: {form.enderecoCompleto} {form.numero ? `, ${form.numero}` : ''} - {form.bairro}, {form.cidade} - {form.estado} | CEP {form.cep}</div>
-      </div>
-    </div>
-  );
-}
 
 export default function TelaCadastroVaga(props: any) {
   const styles = useUaiFrilaStyles();
@@ -227,7 +112,7 @@ export default function TelaCadastroVaga(props: any) {
     } catch {}
   };
   const carregarCidades = async () => {
-    try { const res = await fetch(`${API}/cidades/ativas`); if (res.ok) { const data = await res.json(); setCidades(data.cidades || data || []); } } catch {}
+    try { const res = await fetch(`${API}/cidades`); if (res.ok) { const data = await res.json(); setCidades(data.cidades || data.data || data || []); } } catch {}
   };
 
   useEffect(() => {
@@ -240,8 +125,20 @@ export default function TelaCadastroVaga(props: any) {
           setIsEditando(true); setVagaEdicao(vagaLocal);
           const inicioLocal = utcParaInputLocal(vagaLocal.data_inicio);
           const fimLocal = utcParaInputLocal(vagaLocal.data_fim);
-          const valorServ = Number(vagaLocal.valor_servico || 75);
+          const valorServ = Number(vagaLocal.valor_servico || vagaLocal.valor_hora || 75);
           const valorTransp = Number(vagaLocal.valor_transporte || 0);
+          // Tenta extrair numero do endereco_completo se estiver no formato "Rua, 123"
+          let enderecoSemNumero = vagaLocal.endereco_completo || '';
+          let numeroExtraido = vagaLocal.numero || '';
+          if (!numeroExtraido && enderecoSemNumero.includes(',')) {
+            const partes = enderecoSemNumero.split(',');
+            const ultima = partes[partes.length-1].trim();
+            if (/^\d+/.test(ultima)) {
+              numeroExtraido = ultima.split(' ')[0];
+              // Mantém endereco sem numero para não duplicar
+              // enderecoSemNumero = partes.slice(0,-1).join(',').trim();
+            }
+          }
           setForm(f => ({
             ...f,
             funcao: vagaLocal.funcao || 'Garçom',
@@ -250,10 +147,15 @@ export default function TelaCadastroVaga(props: any) {
             valorServicoStr: valorServ.toFixed(2).replace('.', ','), valorServicoNum: valorServ,
             valorTransporteStr: valorTransp.toFixed(2).replace('.', ','), valorTransporteNum: valorTransp,
             meioPagamento: vagaLocal.meio_pagamento || 'pix',
-            enderecoCompleto: vagaLocal.endereco_completo || '', bairro: vagaLocal.bairro || vagaLocal.endereco_bairro || 'Centro',
-            cidade: vagaLocal.cidade_nome || vagaLocal.endereco_cidade || 'Uberlândia', cidade_id: vagaLocal.cidade_id || 1,
-            estado: vagaLocal.estado || 'MG', cep: vagaLocal.cep || '', complemento: vagaLocal.complemento || '',
-            numero: vagaLocal.numero || '', lat: vagaLocal.lat || null, lng: vagaLocal.lng || null,
+            enderecoCompleto: vagaLocal.endereco_completo || '', 
+            bairro: vagaLocal.bairro || vagaLocal.endereco_bairro || 'Centro',
+            cidade: vagaLocal.cidade_nome || vagaLocal.endereco_cidade || 'Uberlândia', 
+            cidade_id: vagaLocal.cidade_id || 1,
+            estado: vagaLocal.estado || 'MG', 
+            cep: vagaLocal.cep || vagaLocal.endereco_cep || '', 
+            complemento: vagaLocal.complemento || vagaLocal.endereco_complemento || '',
+            numero: numeroExtraido || '', 
+            lat: vagaLocal.lat || null, lng: vagaLocal.lng || null,
           }));
         }
       } catch {}
@@ -295,18 +197,20 @@ export default function TelaCadastroVaga(props: any) {
       const dataInicioUTC0 = DateUtil.paraUTC0(form.dataHoraInicio, timezone);
       const dataFimUTC0 = DateUtil.paraUTC0(form.dataHoraFim, timezone);
       
-      const enderecoCompletoFinal = `${form.enderecoCompleto}${form.numero ? `, ${form.numero}` : ''}`.trim();
-      
+      // Modelo final: endereco VARCHAR(150), bairro, cidade_id, cep, numero, complemento, lat, lng
       const payload = {
         titulo: form.titulo, descricao: form.descricao, funcao: form.funcao,
         valor_servico: form.valorServicoNum, valor_transporte: form.valorTransporteNum,
         valor_hora: valorHoraBruto,
         data_inicio: dataInicioUTC0, data_fim: dataFimUTC0,
-        endereco_completo: enderecoCompletoFinal,
+        endereco: form.endereco || form.enderecoCompleto || form.endereco_completo,
         bairro: form.bairro,
-        cidade_id: form.cidade_id, cidade_nome: form.cidade, estado: form.estado,
-        cep: form.cep, complemento: form.complemento, numero: form.numero,
-        lat: form.lat, lng: form.lng, meio_pagamento: form.meioPagamento,
+        cidade_id: form.cidade_id,
+        cep: form.cep,
+        numero: form.numero,
+        complemento: form.complemento,
+        lat: form.lat, lng: form.lng, 
+        meio_pagamento: form.meioPagamento,
       };
       
       const url = isEditando && vagaEdicao?.id ? `${API}/vagas/${vagaEdicao.id}` : `${API}/vagas/criar`;
@@ -357,8 +261,8 @@ export default function TelaCadastroVaga(props: any) {
             </div>
           </div>
 
-          {/* BLOCO ENDEREÇO */}
-          <BlocoEndereco form={form} setForm={setForm} cidades={cidades} buscandoCep={buscandoCep} setBuscandoCep={setBuscandoCep} />
+          {/* BLOCO ENDEREÇO REUTILIZÁVEL */}
+          <BlocoEndereco form={form} setForm={setForm} cidades={cidades} buscandoCep={buscandoCep} setBuscandoCep={setBuscandoCep} titulo="📍 Endereço da Vaga" subtitulo="Preencha o CEP para autocompletar o endereço" />
 
           <div className={styles.grid2Cols}>
             <div>

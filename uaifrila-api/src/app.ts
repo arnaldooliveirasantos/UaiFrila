@@ -70,7 +70,16 @@ export class App {
     this.expressApp.post('/api/auth/cancelar-cadastro', (req,res)=>authCtrl.cancelarCadastro(req,res));
 
     this.expressApp.get('/api/cidades', (req,res)=>cidadeCtrl.listar(req,res));
+    this.expressApp.get('/api/cidades/ativas', (req,res)=>cidadeCtrl.listar(req,res));
+    this.expressApp.get('/api/cidades/listar', (req,res)=>cidadeCtrl.listar(req,res));
     this.expressApp.get('/api/variaveis', (req,res)=>variaveisCtrl.listar(req,res));
+
+    // Usuários - aliases para compatibilidade com frontend antigo
+    this.expressApp.get('/api/usuarios/me', auth, (req,res)=>authCtrl.me ? authCtrl.me(req,res) : res.json({ usuario: (req as any).usuario }));
+    this.expressApp.post('/api/usuarios/atualizar', auth, (req,res)=>authCtrl.atualizarPerfil ? authCtrl.atualizarPerfil(req,res) : authCtrl.cadastro(req,res));
+    this.expressApp.put('/api/usuarios/atualizar', auth, (req,res)=>authCtrl.atualizarPerfil ? authCtrl.atualizarPerfil(req,res) : authCtrl.cadastro(req,res));
+    this.expressApp.post('/api/usuarios/me', auth, (req,res)=>authCtrl.me ? authCtrl.me(req,res) : res.json({ usuario: (req as any).usuario }));
+
 
     this.expressApp.get('/api/tipos-usuario', (req,res)=>tiposUsuarioCtrl.listar(req,res));
     this.expressApp.get('/api/tipos-usuario/:id', (req,res)=>tiposUsuarioCtrl.buscarPorId(req,res));

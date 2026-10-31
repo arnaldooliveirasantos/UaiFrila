@@ -28,12 +28,14 @@ export class EmailService {
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
       const linkValidar = `${frontendUrl}/?email=${encodeURIComponent(params.email)}&codigo=${params.codigo}&tipo=${params.tipo === 'CONFIRMACAO_CADASTRO' ? 'cadastro' : 'login'}`;
       conteudo = conteudo.replace('{{LINK_VALIDAR}}', linkValidar);
-      const expiraEm = new Date(Date.now() + 5*60*1000);
+      
+      // CORREÇÃO: Usa NOW() do banco + 10 minutos, não JS Date, para evitar diferença de relógio
       const historicoRows = await pool.query(
         `INSERT INTO email_historico_disparos (template_id, usuario_id, email_destinatario, titulo_final, conteudo_final, codigo_verificacao, status_id, expira_em, criado_em)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW()) RETURNING *`,
-        [template.id, params.usuario_id || null, params.email, titulo, conteudo, params.codigo, statusId, expiraEm]
+         VALUES ($1,$2,$3,$4,$5,$6,$7,NOW() + INTERVAL '10 minutes',NOW()) RETURNING *`,
+        [template.id, params.usuario_id || null, params.email, titulo, conteudo, params.codigo, statusId]
       );
+      console.log(`[EmailService] Código ${params.codigo} criado para ${params.email} expira em 10min (DB time) ID ${historicoRows.rows[0].id}`);
       return { sucesso:true, historicoId: historicoRows.rows[0].id, codigo: params.codigo };
     } catch (e:any) {
       console.error('[EmailService] Erro:', e.message);

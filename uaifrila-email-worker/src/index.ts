@@ -57,14 +57,16 @@ async function tick() {
       try {
         // Verifica se ainda é válido antes de enviar (expira_em > NOW())
         const valido = await client.query(`SELECT $1::timestamp > NOW() as valido, EXTRACT(EPOCH FROM ($1::timestamp - NOW()))/60 as minutos`, [linha.expira_em]);
-        const minutos = valido.rows[0].minutos;
+        const minutosRaw = valido.rows[0].minutos;
+        const minutos = minutosRaw != null ? Number(minutosRaw) : null;
+        const minutosStr = minutos != null && !isNaN(minutos) ? Number(minutos).toFixed(1) : 'NULL';
         
         if (!valido.rows[0].valido) {
-          console.log(`   [${linha.id}] Código ${linha.codigo_verificacao} já expirou (expira:${linha.expira_em} rest:${minutos ? minutos.toFixed(1) : 'NULL'}min) - não envia, vai expirar no PASSO 2`);
+          console.log(`   [${linha.id}] Código ${linha.codigo_verificacao} já expirou (expira:${linha.expira_em} rest:${minutosStr}min) - não envia, vai expirar no PASSO 2`);
           continue;
         }
 
-        console.log(`   [${linha.id}] Enviando para ${linha.email_destinatario} cod:${linha.codigo_verificacao} rest:${minutos ? minutos.toFixed(1) : 'NULL'}min`);
+        console.log(`   [${linha.id}] Enviando para ${linha.email_destinatario} cod:${linha.codigo_verificacao} rest:${minutosStr}min`);
         await transportador.sendMail({
           from: `"${linha.nome_remetente}" <${linha.email_remetente}>`,
           to: linha.email_destinatario,
@@ -86,17 +88,16 @@ async function tick() {
       }
     }
 
-    // PASSO 2: Expira só quem realmente passou do tempo COM MARGEM DE 1 MINUTO
+    // PASSO 2: Expira só quem realmente passou do tempo COM MARGEM DE 5 MINUTOS + verifica criado_em
     // Isso evita expirar "sem passar o tempo" por causa de diferença de relógio
     const expirados = await client.query(`
       UPDATE email_historico_disparos 
       SET status_id = (SELECT id FROM email_status WHERE chave='EXPIRADO'),
           atualizado_em = NOW(),
-          ultimo_erro = 'Expirado: expira_em < NOW() - grace 1min'
+          ultimo_erro = 'Expirado: criado_em < NOW() - 15min'
       WHERE status_id = (SELECT id FROM email_status WHERE chave='EM_ESPERA')
-        AND expira_em IS NOT NULL
-        AND expira_em < NOW() - INTERVAL '1 minute'
-      RETURNING id, email_destinatario, codigo_verificacao, expira_em
+        AND criado_em < NOW() - INTERVAL '15 minutes'
+      RETURNING id, email_destinatario, codigo_verificacao, expira_em, criado_em
     `);
 
     if (expirados.rows.length > 0) {

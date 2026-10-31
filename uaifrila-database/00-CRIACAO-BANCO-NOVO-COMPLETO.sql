@@ -137,12 +137,6 @@ CREATE TABLE usuarios (
   nome_fantasia VARCHAR(150),
   status_usuario_id INT REFERENCES status_usuario(id) DEFAULT 1,
   tipo_usuario_id INT REFERENCES tipos_usuario(id) NOT NULL DEFAULT 1,
-  bairro VARCHAR(100),
-  endereco_completo TEXT,
-  endereco_lat DOUBLE PRECISION,
-  endereco_lng DOUBLE PRECISION,
-  cidade_id INT REFERENCES cidades(id),
-  cidade_nome VARCHAR(100),
   funcao_principal VARCHAR(50) DEFAULT 'Garçom',
   valor_hora_base NUMERIC(10,2) DEFAULT 20,
   bio TEXT,
@@ -166,11 +160,12 @@ CREATE INDEX idx_usuarios_tipo ON usuarios(tipo_usuario_id);
 CREATE TABLE enderecos_usuario (
   id SERIAL PRIMARY KEY,
   usuario_id INT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
-  endereco_completo TEXT NOT NULL,
+  endereco VARCHAR(150),
   bairro VARCHAR(150),
+  cep VARCHAR(20) ,
+  numero VARCHAR(20) ,
+  complemento VARCHAR(100) ,
   cidade_id INT REFERENCES cidades(id),
-  cidade_nome VARCHAR(100) NOT NULL,
-  estado VARCHAR(2) DEFAULT 'MG',
   lat DOUBLE PRECISION,
   lng DOUBLE PRECISION,
   is_ativo BOOLEAN DEFAULT true NOT NULL,
@@ -207,11 +202,12 @@ CREATE TABLE vagas (
 CREATE TABLE enderecos_Vaga (
   id SERIAL PRIMARY KEY,
   vaga_id INT NOT NULL REFERENCES vagas(id) ON DELETE CASCADE,
-  endereco_completo TEXT NOT NULL,
+  endereco VARCHAR(150),
   bairro VARCHAR(150),
   cidade_id INT REFERENCES cidades(id),
-  cidade_nome VARCHAR(100) NOT NULL,
-  estado VARCHAR(2) DEFAULT 'MG',
+  cep VARCHAR(20) ,
+  numero VARCHAR(20) ,
+  complemento VARCHAR(100) ,
   lat DOUBLE PRECISION,
   lng DOUBLE PRECISION,
   is_ativo BOOLEAN DEFAULT true NOT NULL,
@@ -219,6 +215,7 @@ CREATE TABLE enderecos_Vaga (
   atualizado_em TIMESTAMP DEFAULT NOW()
 );
 
+CREATE UNIQUE INDEX uniq_endereco_ativo_por_vaga ON enderecos_Vaga(vaga_id) WHERE is_ativo = true;
 
 CREATE TABLE candidaturas (
   id SERIAL PRIMARY KEY,
@@ -348,6 +345,17 @@ CREATE TABLE variaveis_sistema (
 -- =====================================================================
 -- 8. FUNÇÕES E VIEWS
 -- =====================================================================
+CREATE OR REPLACE FUNCTION fn_garantir_um_endereco_vaga_ativo()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.is_ativo = true THEN
+    UPDATE enderecos_Vaga SET is_ativo = false, atualizado_em = NOW()
+    WHERE vaga_id = NEW.vaga_id AND id != NEW.id AND is_ativo = true;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE OR REPLACE FUNCTION fn_garantir_um_endereco_ativo()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -363,6 +371,13 @@ CREATE TRIGGER trg_garantir_um_ativo
   BEFORE INSERT OR UPDATE OF is_ativo ON enderecos_usuario
   FOR EACH ROW WHEN (NEW.is_ativo = true)
   EXECUTE FUNCTION fn_garantir_um_endereco_ativo();
+
+
+
+CREATE TRIGGER trg_garantir_enderecos_vaga_um_ativo
+  BEFORE INSERT OR UPDATE OF is_ativo ON enderecos_vaga
+  FOR EACH ROW WHEN (NEW.is_ativo = true)
+  EXECUTE function fn_garantir_um_endereco_vaga_ativo();
 
 CREATE OR REPLACE FUNCTION fn_gerar_codigo_transacao()
 RETURNS TRIGGER AS $$
@@ -398,37 +413,6 @@ BEGIN
 END;
 $$;
 
-CREATE VIEW vw_usuarios_com_endereco_ativo AS
-SELECT u.*, tu.chave as tipo_chave, tu.nome_exibicao as tipo_nome, tu.nivel_permissao,
-  eu.id as endereco_ativo_id, eu.endereco_completo as endereco_ativo_completo,
-  eu.bairro as endereco_ativo_bairro, eu.lat as endereco_ativo_lat, eu.lng as endereco_ativo_lng,
-  eu.cidade_nome as endereco_ativo_cidade, c.nome as cidade_real, c.ativa as cidade_ativa, c.raio_km as cidade_raio_km
-FROM usuarios u
-LEFT JOIN tipos_usuario tu ON tu.id = u.tipo_usuario_id
-LEFT JOIN enderecos_usuario eu ON eu.usuario_id = u.id AND eu.is_ativo = true
-LEFT JOIN cidades c ON c.id = eu.cidade_id;
-
-CREATE VIEW vw_enderecos_completo AS
-SELECT eu.id, eu.usuario_id, eu.endereco_completo, eu.bairro, eu.cidade_id, eu.cidade_nome,
-  eu.estado as endereco_estado, eu.lat, eu.lng, eu.is_ativo, eu.criado_em, eu.atualizado_em,
-  u.nome_completo, u.email, tu.chave as tipo_chave, tu.nivel_permissao,
-  c.nome as cidade_nome_real, c.estado as cidade_estado, c.ativa as cidade_ativa,
-  c.lat as cidade_lat, c.lng as cidade_lng, c.raio_km as cidade_raio_km
-FROM enderecos_usuario eu
-JOIN usuarios u ON u.id = eu.usuario_id
-LEFT JOIN tipos_usuario tu ON tu.id = u.tipo_usuario_id
-LEFT JOIN cidades c ON c.id = eu.cidade_id;
-
-CREATE VIEW vw_mural_vagas AS
-SELECT v.*, u.nome_completo as contratante_nome, u.email as contratante_email,
-  c.nome as cidade_nome_real, c.ativa as cidade_ativa, ev.endereco_completo as endereco_referencia,
-  (SELECT COUNT(*) FROM candidaturas cand WHERE cand.vaga_id = v.id) as total_candidaturas
-FROM vagas v
-JOIN usuarios u ON u.id = v.contratante_id
-LEFT JOIN Enderecos_vaga ev ON v.id = ev.vaga_id
-LEFT JOIN cidades c ON c.id = ev.cidade_id
-WHERE v.status = 'PENDENTE';
-
 CREATE VIEW cidades_ativas AS SELECT * FROM cidades WHERE ativa = true;
 
 CREATE VIEW vw_transacoes_periodo AS
@@ -448,13 +432,39 @@ LEFT JOIN usuarios u2 ON u2.id = t.contratante_id;
 INSERT INTO paises (nome, sigla, codigo_ibge) VALUES
 ('Brasil', 'BRA', 76);
 
-INSERT INTO estados (pais_id, nome, sigla, codigo_ibge, regiao) VALUES
-(1, 'Minas Gerais', 'MG', 31, 'Sudeste'),
-(1, 'São Paulo', 'SP', 35, 'Sudeste'),
-(1, 'Goiás', 'GO', 52, 'Centro-Oeste'),
-(1, 'Distrito Federal', 'DF', 53, 'Centro-Oeste'),
-(1, 'Rio de Janeiro', 'RJ', 33, 'Sudeste'),
-(1, 'Bahia', 'BA', 29, 'Nordeste');
+INSERT INTO estados (pais_id, nome, sigla, codigo_ibge, regiao, ativo) VALUES
+((SELECT id FROM paises WHERE sigla='BRA'), 'Acre', 'AC', 12, 'Norte', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Alagoas', 'AL', 27, 'Nordeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Amapá', 'AP', 16, 'Norte', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Amazonas', 'AM', 13, 'Norte', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Bahia', 'BA', 29, 'Nordeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Ceará', 'CE', 23, 'Nordeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Distrito Federal', 'DF', 53, 'Centro-Oeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Espírito Santo', 'ES', 32, 'Sudeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Goiás', 'GO', 52, 'Centro-Oeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Maranhão', 'MA', 21, 'Nordeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Mato Grosso', 'MT', 51, 'Centro-Oeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Mato Grosso do Sul', 'MS', 50, 'Centro-Oeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Minas Gerais', 'MG', 31, 'Sudeste', true),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Pará', 'PA', 15, 'Norte', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Paraíba', 'PB', 25, 'Nordeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Paraná', 'PR', 41, 'Sul', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Pernambuco', 'PE', 26, 'Nordeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Piauí', 'PI', 22, 'Nordeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Rio de Janeiro', 'RJ', 33, 'Sudeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Rio Grande do Norte', 'RN', 24, 'Nordeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Rio Grande do Sul', 'RS', 43, 'Sul', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Rondônia', 'RO', 11, 'Norte', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Roraima', 'RR', 14, 'Norte', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Santa Catarina', 'SC', 42, 'Sul', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'São Paulo', 'SP', 35, 'Sudeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Sergipe', 'SE', 28, 'Nordeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Tocantins', 'TO', 17, 'Norte', false)
+ON CONFLICT (sigla, pais_id) DO UPDATE SET
+  nome = EXCLUDED.nome,
+  codigo_ibge = EXCLUDED.codigo_ibge,
+  regiao = EXCLUDED.regiao,
+  ativo = CASE WHEN EXCLUDED.sigla = 'MG' THEN true ELSE false END;
 
 INSERT INTO cidades (nome, estado, ativa, lat, lng, raio_km, regiao, codigo_ibge, populacao, status_expansao, demanda_score) VALUES
 ('Uberlândia', 'MG', true, -18.9186, -48.2772, 25, 'Triângulo Mineiro', '3170206', 713232, 'ATIVA', 100),
@@ -661,7 +671,7 @@ DO UPDATE SET
 INSERT INTO usuarios (
   nome_completo, cpf, email, senha_hash, cnpj, nome_fantasia,
   status_usuario_id, tipo_usuario_id, role, permissoes,
-  bairro, endereco_completo, cidade_id, cidade_nome,
+ 
   funcao_principal, valor_hora_base, bio
 ) VALUES (
   'Uai Frila',
@@ -674,17 +684,13 @@ INSERT INTO usuarios (
   8,
   'SUPER_ADMIN',
   '["dashboard","transacoes","expansao","cidades","variaveis","vagas","candidaturas","usuarios","permissoes","custos","financeiro","admin","moderador","suporte","all"]'::jsonb,
-  'Centro',
-  'Av. Floriano Peixoto, 1000 - Centro, Uberlândia - MG',
-  1,
-  'Uberlândia',
   'Super Admin',
   100,
   'Super administrador da plataforma Uai Frila. Acesso total - tipo SUPER_ADMIN nivel 100.'
 );
 
-INSERT INTO enderecos_usuario (usuario_id, endereco_completo, bairro, cidade_id, cidade_nome, lat, lng, is_ativo) VALUES
-(1, 'Av. Floriano Peixoto, 1000 - Centro, Uberlândia - MG', 'Centro', 1, 'Uberlândia', -18.9186, -48.2772, true);
+INSERT INTO enderecos_usuario (usuario_id, endereco, bairro, cidade_id,  lat, lng, is_ativo) VALUES
+(1, 'Av. Floriano Peixoto, 1000 - Centro, Uberlândia - MG', 'Centro', 1, -18.9186, -48.2772, true);
 
 -- GRANTS - USUARIOS DE BANCO PARA APLICAÇÃO
 CREATE ROLE uaifrila_app_dev WITH LOGIN PASSWORD 'UaiFrila@pp2024!';

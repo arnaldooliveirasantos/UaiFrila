@@ -191,21 +191,35 @@ function TelaLogin({ onLogin, setTelaAtiva, emailInicial }: { onLogin: (d:any)=>
   }, [emailInicial]);
 
   const enviarEmail = async () => {
+    const emailTrim = email.trim().toLowerCase();
+    if (!emailTrim || !emailTrim.includes('@')) {
+      setErro('Digite um e-mail válido');
+      return;
+    }
     setCarregando(true); setErro('');
+    console.log('[TelaLogin] Enviando login para:', emailTrim);
     try {
-      const res = await fetch(`${API}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
+      const res = await fetch(`${API}/auth/login`, { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ email: emailTrim }) 
+      });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.erro);
+      console.log('[TelaLogin] Resposta:', res.status, data);
+      if (!res.ok) throw new Error(data.erro || `Erro ${res.status}`);
       if (data.sucesso) {
         onLogin(data);
       } else {
         // Salva pendência antes de ir pra validação - anti refresh mobile
         localStorage.setItem('uaifrila_validacao_pendente', JSON.stringify({
-          email, tipo: 'login', timestamp: Date.now(), tentativas: 0
+          email: emailTrim, tipo: 'login', timestamp: Date.now(), tentativas: 0
         }));
         setEtapa('codigo');
       }
-    } catch (e:any) { setErro(e.message); }
+    } catch (e:any) { 
+      console.error('[TelaLogin] Erro:', e.message);
+      setErro(e.message); 
+    }
     finally { setCarregando(false); }
   };
 
