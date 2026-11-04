@@ -4,6 +4,26 @@ import BlocoEndereco from './BlocoEndereco';
 
 type MeioPagamento = 'pix' | 'cartao';
 
+interface CalculoBackend {
+  valor_servico: number;
+  valor_transporte: number;
+  base_calculo: number;
+  horas_estimadas: number;
+  valor_hora_bruto: number;
+  taxa_pix_percentual: number;
+  taxa_cartao_percentual: number;
+  comissao_percentual: number;
+  taxa_pagamento: number;
+  comissao_app: number;
+  total_contratante: number;
+  freela_recebe_bruto: number;
+  freela_recebe_liquido: number;
+  valor_hora_liquido: number;
+  valor_hora_final: number;
+  valor_minimo_valido: boolean;
+  mensagem_validacao?: string;
+}
+
 const TAXAS_DEFAULT = {
   valor_minimo_vaga: 75.00,
   taxa_pix_percentual: 1.00,
@@ -22,13 +42,6 @@ function parseMoedaParaNumero(valor: string): number {
   const limpo = valor.replace(/\./g, '').replace(',', '.');
   return parseFloat(limpo) || 0;
 }
-function calcularHoras(inicio: string, fim: string): number {
-  if (!inicio || !fim) return 0;
-  const d1 = new Date(inicio); const d2 = new Date(fim);
-  const diff = d2.getTime() - d1.getTime();
-  if (diff <= 0) return 0;
-  return Math.round((diff / (1000 * 60 * 60)) * 100) / 100;
-}
 function getMinDateTimeLocal(minutos: number): string {
   const agora = new Date(); agora.setMinutes(agora.getMinutes() + minutos);
   const pad = (n: number) => n.toString().padStart(2, '0');
@@ -41,32 +54,6 @@ function utcParaInputLocal(utc: string): string {
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   } catch { return ''; }
 }
-const DateUtil = {
-  paraUTC0: (dataLocal: string, timezone: string): string => {
-    if (!dataLocal) throw new Error('Data local obrigatoria');
-    if (dataLocal.endsWith('Z')) return dataLocal;
-    try {
-      const [datePart, timePart] = dataLocal.split('T');
-      const [y, m, d] = datePart.split('-').map(Number);
-      const [h, min] = (timePart || '00:00').split(':').map(v => parseInt(v) || 0);
-      const desiredWallUTC = Date.UTC(y, m-1, d, h, min, 0);
-      let utcGuess = desiredWallUTC;
-      for (let i = 0; i < 10; i++) {
-        const formatter = new Intl.DateTimeFormat('en-US', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, hourCycle: 'h23' });
-        const parts = formatter.formatToParts(new Date(utcGuess));
-        const map: any = {}; for (const p of parts) map[p.type] = p.value;
-        const tzWallUTC = Date.UTC(Number(map.year), Number(map.month)-1, Number(map.day), Number(map.hour), Number(map.minute), Number(map.second));
-        const diff = desiredWallUTC - tzWallUTC; if (diff === 0) break; utcGuess += diff;
-      }
-      return new Date(utcGuess).toISOString();
-    } catch { return new Date(dataLocal).toISOString(); }
-  }
-};
-
-// ========================================================
-// Componente Endereço - Bloco reutilizável
-// ========================================================
-
 
 export default function TelaCadastroVaga(props: any) {
   const styles = useUaiFrilaStyles();
@@ -92,6 +79,8 @@ export default function TelaCadastroVaga(props: any) {
   const [erro, setErro] = useState('');
   const [sucesso, setSucesso] = useState('');
   const [cidades, setCidades] = useState<any[]>([]);
+  const [calculoBackend, setCalculoBackend] = useState<CalculoBackend | null>(null);
+  const [calculando, setCalculando] = useState(false);
 
   const carregarVariaveis = async () => {
     try {
@@ -115,6 +104,49 @@ export default function TelaCadastroVaga(props: any) {
     try { const res = await fetch(`${API}/cidades`); if (res.ok) { const data = await res.json(); setCidades(data.cidades || data.data || data || []); } } catch {}
   };
 
+  // NOVO: Calculo 100% backend - chama /api/vagas/calcular
+  const recalcularNoBackend = async () => {
+    if (!form.dataHoraInicio || !form.dataHoraFim || form.valorServicoNum <= 0) {
+      setCalculoBackend(null);
+      return;
+    }
+    setCalculando(true);
+    try {
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo';
+      const payload = {
+        valor_servico: form.valorServicoNum,
+        valor_transporte: form.valorTransporteNum,
+        data_inicio_local: form.dataHoraInicio,
+        data_fim_local: form.dataHoraFim,
+        timezone,
+        meio_pagamento: form.meioPagamento
+      };
+      const res = await fetch(`${API}/vagas/calcular`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (res.ok && data.calculo) {
+        setCalculoBackend(data.calculo);
+      } else {
+        console.warn('Erro calculo backend', data.erro);
+        setCalculoBackend(null);
+      }
+    } catch (e) {
+      console.error('Erro ao calcular', e);
+      setCalculoBackend(null);
+    } finally {
+      setCalculando(false);
+    }
+  };
+
+  // Recalcula sempre que mudar valores, datas ou meio pagamento
+  useEffect(() => {
+    const timer = setTimeout(() => recalcularNoBackend(), 500);
+    return () => clearTimeout(timer);
+  }, [form.valorServicoNum, form.valorTransporteNum, form.dataHoraInicio, form.dataHoraFim, form.meioPagamento]);
+
   useEffect(() => {
     carregarVariaveis(); carregarCidades();
     const vagaStr = localStorage.getItem('uaifrila_vaga_editar');
@@ -125,20 +157,10 @@ export default function TelaCadastroVaga(props: any) {
           setIsEditando(true); setVagaEdicao(vagaLocal);
           const inicioLocal = utcParaInputLocal(vagaLocal.data_inicio);
           const fimLocal = utcParaInputLocal(vagaLocal.data_fim);
-          const valorServ = Number(vagaLocal.valor_servico || vagaLocal.valor_hora || 75);
+          const valorServ = Number(vagaLocal.valor_servico || 75);
           const valorTransp = Number(vagaLocal.valor_transporte || 0);
-          // Tenta extrair numero do endereco_completo se estiver no formato "Rua, 123"
-          let enderecoSemNumero = vagaLocal.endereco_completo || '';
+          let enderecoSemNumero = vagaLocal.endereco || vagaLocal.endereco_completo || '';
           let numeroExtraido = vagaLocal.numero || '';
-          if (!numeroExtraido && enderecoSemNumero.includes(',')) {
-            const partes = enderecoSemNumero.split(',');
-            const ultima = partes[partes.length-1].trim();
-            if (/^\d+/.test(ultima)) {
-              numeroExtraido = ultima.split(' ')[0];
-              // Mantém endereco sem numero para não duplicar
-              // enderecoSemNumero = partes.slice(0,-1).join(',').trim();
-            }
-          }
           setForm(f => ({
             ...f,
             funcao: vagaLocal.funcao || 'Garçom',
@@ -147,13 +169,13 @@ export default function TelaCadastroVaga(props: any) {
             valorServicoStr: valorServ.toFixed(2).replace('.', ','), valorServicoNum: valorServ,
             valorTransporteStr: valorTransp.toFixed(2).replace('.', ','), valorTransporteNum: valorTransp,
             meioPagamento: vagaLocal.meio_pagamento || 'pix',
-            enderecoCompleto: vagaLocal.endereco_completo || '', 
-            bairro: vagaLocal.bairro || vagaLocal.endereco_bairro || 'Centro',
-            cidade: vagaLocal.cidade_nome || vagaLocal.endereco_cidade || 'Uberlândia', 
+            enderecoCompleto: enderecoSemNumero, 
+            bairro: vagaLocal.bairro || 'Centro',
+            cidade: vagaLocal.cidade_nome || 'Uberlândia', 
             cidade_id: vagaLocal.cidade_id || 1,
             estado: vagaLocal.estado || 'MG', 
-            cep: vagaLocal.cep || vagaLocal.endereco_cep || '', 
-            complemento: vagaLocal.complemento || vagaLocal.endereco_complemento || '',
+            cep: vagaLocal.cep || '', 
+            complemento: vagaLocal.complemento || '',
             numero: numeroExtraido || '', 
             lat: vagaLocal.lat || null, lng: vagaLocal.lng || null,
           }));
@@ -161,15 +183,6 @@ export default function TelaCadastroVaga(props: any) {
       } catch {}
     }
   }, []);
-
-  const horasCalculadas = calcularHoras(form.dataHoraInicio, form.dataHoraFim);
-  const baseCalculo = form.valorServicoNum + form.valorTransporteNum;
-  const taxaPercent = form.meioPagamento === 'pix' ? taxas.taxa_pix_percentual : taxas.taxa_cartao_percentual;
-  const taxaPagamento = baseCalculo * taxaPercent / 100;
-  const comissaoApp = baseCalculo * taxas.comissao_percentual / 100;
-  const totalContratantePaga = baseCalculo;
-  const freelaRecebe = baseCalculo - taxaPagamento - comissaoApp;
-  const valorHoraBruto = horasCalculadas > 0 ? freelaRecebe / horasCalculadas : 0;
 
   const validar = () => {
     if (!form.titulo || form.titulo.trim().length < 5) return 'Titulo minimo 5 caracteres';
@@ -180,11 +193,11 @@ export default function TelaCadastroVaga(props: any) {
     if (!isEditando) { const agora = new Date(); agora.setMinutes(agora.getMinutes() + antecedenciaMinutos); if (inicio < agora) return `Entrada deve ser > agora + ${antecedenciaMinutos}min`; }
     if (fim <= inicio) return 'Saida deve ser maior que entrada';
     const diffH = (fim.getTime() - inicio.getTime()) / (1000 * 60 * 60); if (diffH < 0.5) return 'Minimo 30 minutos'; if (diffH > 24) return 'Maximo 24 horas';
-    if (form.valorServicoNum < taxas.valor_minimo_vaga) return `Valor do Servico minimo R$ ${taxas.valor_minimo_vaga.toFixed(2).replace('.', ',')}`;
+    if (calculoBackend && !calculoBackend.valor_minimo_valido) return calculoBackend.mensagem_validacao || `Valor mínimo R$ ${taxas.valor_minimo_vaga.toFixed(2)}`;
     if (!form.enderecoCompleto || form.enderecoCompleto.trim().length < 3) return 'Rua/Avenida obrigatória';
     if (!form.bairro || form.bairro.trim().length < 2) return 'Bairro obrigatório';
     if (!form.cidade || !form.cidade_id) return 'Cidade obrigatória';
-    if (!form.cep || form.cep.replace(/\D/g,'').length !== 8) return 'CEP obrigatório com 8 dígitos (ex: 38400-000)';
+    if (!form.cep || form.cep.replace(/\D/g,'').length !== 8) return 'CEP obrigatório com 8 dígitos';
     return null;
   };
 
@@ -194,23 +207,23 @@ export default function TelaCadastroVaga(props: any) {
     try {
       const token = localStorage.getItem('uaifrila_token');
       const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo';
-      const dataInicioUTC0 = DateUtil.paraUTC0(form.dataHoraInicio, timezone);
-      const dataFimUTC0 = DateUtil.paraUTC0(form.dataHoraFim, timezone);
       
-      // Modelo final: endereco VARCHAR(150), bairro, cidade_id, cep, numero, complemento, lat, lng
+      // Payload novo: envia LOCAL + timezone, backend calcula tudo e salva campos existentes no banco
       const payload = {
         titulo: form.titulo, descricao: form.descricao, funcao: form.funcao,
-        valor_servico: form.valorServicoNum, valor_transporte: form.valorTransporteNum,
-        valor_hora: valorHoraBruto,
-        data_inicio: dataInicioUTC0, data_fim: dataFimUTC0,
-        endereco: form.endereco || form.enderecoCompleto || form.endereco_completo,
+        valor_servico: form.valorServicoNum, 
+        valor_transporte: form.valorTransporteNum,
+        data_inicio_local: form.dataHoraInicio,
+        data_fim_local: form.dataHoraFim,
+        timezone,
+        meio_pagamento: form.meioPagamento,
+        endereco: form.enderecoCompleto,
         bairro: form.bairro,
         cidade_id: form.cidade_id,
         cep: form.cep,
         numero: form.numero,
         complemento: form.complemento,
-        lat: form.lat, lng: form.lng, 
-        meio_pagamento: form.meioPagamento,
+        lat: form.lat, lng: form.lng,
       };
       
       const url = isEditando && vagaEdicao?.id ? `${API}/vagas/${vagaEdicao.id}` : `${API}/vagas/criar`;
@@ -219,17 +232,17 @@ export default function TelaCadastroVaga(props: any) {
       const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify(payload) });
       const data = await res.json(); if (!res.ok) throw new Error(data.erro || 'Erro ao publicar');
       
-      setSucesso(isEditando ? `Vaga #${vagaEdicao.id} atualizada com sucesso!` : `Vaga publicada! Valor por hora R$ ${valorHoraBruto.toFixed(2)}`);
+      setSucesso(isEditando ? `Vaga #${vagaEdicao.id} atualizada!` : `Vaga publicada! ${data.calculo ? `Freela recebe R$ ${data.calculo.freela_recebe_liquido.toFixed(2)} (R$ ${data.calculo.valor_hora_final.toFixed(2)}/h)` : ''}`);
       localStorage.removeItem('uaifrila_vaga_editar');
-      setTimeout(() => { if (propsSetTelaAtiva) propsSetTelaAtiva('trampos'); }, 1200);
+      setTimeout(() => { if (propsSetTelaAtiva) propsSetTelaAtiva('trampos'); }, 1500);
     } catch (e: any) { setErro(e.message || 'Erro ao publicar vaga'); } finally { setCarregando(false); }
   };
 
   return (
     <div className={styles.pageContainer + ' ' + styles.gridMainSide}>
       <div className={styles.card}>
-        <h1 className={styles.typography.h1}>⚡ {isEditando ? `Editando Vaga #${vagaEdicao?.id}` : 'Nova Vaga'}</h1>
-        <p className={styles.typography.caption + ' mt-1'}>Preencha os detalhes da vaga e o local de trabalho</p>
+        <h1 className={styles.typography.h1}>⚡ {isEditando ? `Editando Vaga #${vagaEdicao?.id}` : 'Nova Vaga'} {calculando ? '(calculando...)' : ''}</h1>
+        <p className={styles.typography.caption + ' mt-1'}>Cálculo feito no backend - taxas sempre atualizadas</p>
 
         <div className="space-y-5 mt-6">
           <div>
@@ -261,53 +274,41 @@ export default function TelaCadastroVaga(props: any) {
             </div>
           </div>
 
-          {/* BLOCO ENDEREÇO REUTILIZÁVEL */}
           <BlocoEndereco form={form} setForm={setForm} cidades={cidades} buscandoCep={buscandoCep} setBuscandoCep={setBuscandoCep} titulo="📍 Endereço da Vaga" subtitulo="Preencha o CEP para autocompletar o endereço" />
 
           <div className={styles.grid2Cols}>
             <div>
-              <label className={styles.label}>Valor do Serviço R$ * (min R$ {taxas.valor_minimo_vaga.toFixed(2).replace('.', ',')})</label>
-              <input value={form.valorServicoStr} onChange={e => { const formatted = formatarMoedaInput(e.target.value); const num = parseMoedaParaNumero(formatted); setForm(f => ({ ...f, valorServicoStr: formatted, valorServicoNum: num })); }} className={styles.input} />
+              <label className={styles.label}>Valor Serviço R$ *</label>
+              <input value={form.valorServicoStr} onChange={e => { const f = formatarMoedaInput(e.target.value); setForm({ ...form, valorServicoStr: f, valorServicoNum: parseMoedaParaNumero(f) }); }} className={styles.input} />
             </div>
             <div>
-              <label className={styles.label}>Valor Transporte R$ *</label>
-              <input value={form.valorTransporteStr} onChange={e => { const formatted = formatarMoedaInput(e.target.value); const num = parseMoedaParaNumero(formatted); setForm(f => ({ ...f, valorTransporteStr: formatted, valorTransporteNum: num })); }} className={styles.input} />
-              <p className={styles.typography.caption + ' mt-1'}>Base = Serviço + Transporte | Hora = Freela / Horas</p>
+              <label className={styles.label}>Ajuda Transporte R$</label>
+              <input value={form.valorTransporteStr} onChange={e => { const f = formatarMoedaInput(e.target.value); setForm({ ...form, valorTransporteStr: f, valorTransporteNum: parseMoedaParaNumero(f) }); }} className={styles.input} />
             </div>
           </div>
 
-          {erro && <div className={styles.errorBox}>{erro}</div>}
-          {sucesso && <div className={styles.successBox}>{sucesso}</div>}
+          {/* BLOCO DE CALCULO VINDO DO BACKEND */}
+          {calculoBackend && (
+            <div className="bg-yellow-50 border-4 border-black p-4 mt-4">
+              <h3 className="font-black text-sm uppercase">💰 Cálculo Backend (fonte da verdade)</h3>
+              <div className="grid grid-cols-2 gap-2 text-xs mt-2 font-bold">
+                <div>Base: R$ {calculoBackend.base_calculo.toFixed(2)}</div>
+                <div>Horas: {calculoBackend.horas_estimadas}h</div>
+                <div>Taxa {form.meioPagamento}: R$ {calculoBackend.taxa_pagamento.toFixed(2)} ({form.meioPagamento === 'pix' ? taxas.taxa_pix_percentual : taxas.taxa_cartao_percentual}%)</div>
+                <div>Comissão {taxas.comissao_percentual}%: R$ {calculoBackend.comissao_app.toFixed(2)}</div>
+                <div className="col-span-2 bg-black text-white p-2 mt-1">Freela recebe BRUTO: R$ {calculoBackend.freela_recebe_bruto.toFixed(2)} | LÍQUIDO: R$ {calculoBackend.freela_recebe_liquido.toFixed(2)} | R$ {calculoBackend.valor_hora_final.toFixed(2)}/h líquido</div>
+                <div className="col-span-2">Total contratante paga: R$ {calculoBackend.total_contratante.toFixed(2)}</div>
+              </div>
+              {!calculoBackend.valor_minimo_valido && <div className="bg-red-500 text-white p-2 text-xs font-black mt-2">{calculoBackend.mensagem_validacao}</div>}
+            </div>
+          )}
 
-          <button onClick={publicar} disabled={carregando} className={styles.buttonPrimary(carregando)}>
-            {carregando ? 'Publicando...' : isEditando ? 'Atualizar Vaga' : `Publicar - Hora R$ ${valorHoraBruto.toFixed(2).replace('.', ',')} | Total R$ ${totalContratantePaga.toFixed(2).replace('.', ',')} | Freela R$ ${freelaRecebe.toFixed(2).replace('.', ',')}`}
+          {erro && <div className="bg-red-100 border-2 border-red-500 p-3 text-xs font-bold text-red-800">{erro}</div>}
+          {sucesso && <div className="bg-green-100 border-2 border-green-500 p-3 text-xs font-bold text-green-800">{sucesso}</div>}
+
+          <button onClick={publicar} disabled={carregando} className={styles.buttonPrimary + ' w-full ' + (carregando ? 'opacity-50' : '')}>
+            {carregando ? 'Publicando...' : isEditando ? 'Atualizar Vaga' : 'Publicar Vaga - Cálculo Backend'}
           </button>
-          <button onClick={() => propsSetTelaAtiva && propsSetTelaAtiva('trampos')} className={styles.buttonGhost}>Cancelar</button>
-        </div>
-      </div>
-
-      <div className="space-y-6">
-        <div className={styles.cardHighlight}>
-          <h2 className={styles.typography.h2 + ' mb-4'}>💰 Resumo Financeiro</h2>
-          <div className="space-y-2 font-bold text-sm">
-            <div className="flex justify-between"><span>Horas:</span><span>{horasCalculadas.toFixed(2)}h</span></div>
-            <div className="flex justify-between"><span>Valor do Serviço:</span><span>R$ {form.valorServicoNum.toFixed(2).replace('.', ',')}</span></div>
-            <div className="flex justify-between"><span>+ Transporte:</span><span>R$ {form.valorTransporteNum.toFixed(2).replace('.', ',')}</span></div>
-            <div className="flex justify-between font-black border-t-2 border-black pt-2"><span>Base:</span><span>R$ {baseCalculo.toFixed(2).replace('.', ',')}</span></div>
-            <div className="flex justify-between text-[12px] opacity-80"><span>Taxa {form.meioPagamento.toUpperCase()} ({taxaPercent}%):</span><span>R$ {taxaPagamento.toFixed(2).replace('.', ',')}</span></div>
-            <div className="flex justify-between text-[12px] opacity-80"><span>Comissão ({taxas.comissao_percentual}%):</span><span>R$ {comissaoApp.toFixed(2).replace('.', ',')}</span></div>
-            <div className="border-t-4 border-black pt-3 flex justify-between text-lg bg-black text-white p-2"><span>TOTAL:</span><span>R$ {totalContratantePaga.toFixed(2).replace('.', ',')}</span></div>
-            <div className="flex justify-between items-center">
-              <span>Freela:</span>
-              <span className={styles.badge('success')}>R$ {freelaRecebe.toFixed(2).replace('.', ',')}</span>
-            </div>
-            <div className="flex justify-between bg-black text-white p-2"><span>Valor/hora:</span><span>R$ {valorHoraBruto.toFixed(2).replace('.', ',')}/h</span></div>
-            <div className="mt-3">
-              <div className={styles.typography.h3 + ' mb-1'}>Endereço:</div>
-              <div className={styles.typography.bodySmall}>{form.enderecoCompleto} {form.numero && `, ${form.numero}`} - {form.bairro}</div>
-              <div className={styles.typography.bodySmall}>{form.cidade} - {form.estado} | CEP {form.cep}</div>
-            </div>
-          </div>
         </div>
       </div>
     </div>

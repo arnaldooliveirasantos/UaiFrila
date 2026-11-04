@@ -22,25 +22,55 @@ let pool: Pool | null = null;
 export class App {
   public expressApp: express.Application;
   constructor() {
+    this.validarEnvObrigatorio();
     this.expressApp = express();
     this.configurarMiddleware();
     this.configurarBanco();
     this.configurarRotas();
   }
 
+  private validarEnvObrigatorio() {
+    const obrigatorias = ['JWT_SECRET'];
+    const faltando = obrigatorias.filter(k => !process.env[k]);
+    if (faltando.length > 0) {
+      throw new Error(`Variáveis obrigatórias ausentes: ${faltando.join(', ')} - configure no .env`);
+    }
+  }
+
   private configurarMiddleware() {
+    // CORS primeiro, mas sem rate limit no OPTIONS
     this.expressApp.use(cors({ origin: true, credentials: true, methods: ['GET','POST','PUT','DELETE','OPTIONS','PATCH'], allowedHeaders: ['Content-Type','Authorization'] }));
-    const limiter = rateLimit({ windowMs: 60*1000, max: 200 });
-    const authLimiter = rateLimit({ windowMs: 15*60*1000, max: 50 });
+    this.expressApp.use(express.json({ limit: '2mb' }));
+    this.expressApp.options('*', cors());
+
+    // Rate limit só depois do json, e ignora OPTIONS
+    const limiter = rateLimit({ 
+      windowMs: 60*1000, 
+      max: 200,
+      skip: (req) => req.method === 'OPTIONS',
+      standardHeaders: true
+    });
+    const authLimiter = rateLimit({ 
+      windowMs: 15*60*1000, 
+      max: 50,
+      skip: (req) => req.method === 'OPTIONS',
+      message: { erro: 'Muitas tentativas, aguarde 15 minutos' }
+    });
+    
     this.expressApp.use('/api/', limiter);
     this.expressApp.use('/api/auth/', authLimiter);
-    this.expressApp.use(express.json({ limit: '2mb' }));
   }
 
   private configurarBanco() {
     const conn = process.env.DATABASE_URL;
     if (conn) pool = new Pool({ connectionString: conn });
-    else pool = new Pool({ user: process.env.DB_USER||'postgres', password: process.env.DB_PASSWORD||'postgres', host: process.env.DB_HOST||'localhost', port: parseInt(process.env.DB_PORT||'5432'), database: process.env.DB_NAME||'uaifrila' });
+    else pool = new Pool({ 
+      user: process.env.DB_USER||'postgres', 
+      password: process.env.DB_PASSWORD||'postgres', 
+      host: process.env.DB_HOST||'localhost', 
+      port: parseInt(process.env.DB_PORT||'5432'), 
+      database: process.env.DB_NAME||'uaifrila' 
+    });
     if (pool) pool.on('connect', (c:any)=>{ c.query("SET TIME ZONE 'UTC'"); });
     BaseRepository.setPool(pool as any);
   }
@@ -58,8 +88,9 @@ export class App {
     const enderecoVagaCtrl = new EnderecoVagaController();
     const tiposUsuarioCtrl = new TiposUsuarioController();
 
-    this.expressApp.get('/api/health', (req,res)=>res.json({ status:'ok', version:'20-FIXED-ALL', time:new Date().toISOString() }));
+    this.expressApp.get('/api/health', (req,res)=>res.json({ status:'ok', version:'21-FIXED-CRITICOS', time:new Date().toISOString() }));
 
+    // Auth - sem auth
     this.expressApp.post('/api/auth/cadastro', (req,res)=>authCtrl.cadastro(req,res));
     this.expressApp.post('/api/auth/cadastrar', (req,res)=>authCtrl.cadastro(req,res));
     this.expressApp.post('/api/auth/login', (req,res)=>authCtrl.login(req,res));
@@ -74,16 +105,17 @@ export class App {
     this.expressApp.get('/api/cidades/listar', (req,res)=>cidadeCtrl.listar(req,res));
     this.expressApp.get('/api/variaveis', (req,res)=>variaveisCtrl.listar(req,res));
 
-    // Usuários - aliases para compatibilidade com frontend antigo
-    this.expressApp.get('/api/usuarios/me', auth, (req,res)=>authCtrl.me ? authCtrl.me(req,res) : res.json({ usuario: (req as any).usuario }));
-    this.expressApp.post('/api/usuarios/atualizar', auth, (req,res)=>authCtrl.atualizarPerfil ? authCtrl.atualizarPerfil(req,res) : authCtrl.cadastro(req,res));
-    this.expressApp.put('/api/usuarios/atualizar', auth, (req,res)=>authCtrl.atualizarPerfil ? authCtrl.atualizarPerfil(req,res) : authCtrl.cadastro(req,res));
-    this.expressApp.post('/api/usuarios/me', auth, (req,res)=>authCtrl.me ? authCtrl.me(req,res) : res.json({ usuario: (req as any).usuario }));
-
+    this.expressApp.get('/api/usuarios/me', auth, (req,res)=>authCtrl.me(req,res));
+    this.expressApp.post('/api/usuarios/atualizar', auth, (req,res)=>authCtrl.atualizarPerfil(req,res));
+    this.expressApp.put('/api/usuarios/atualizar', auth, (req,res)=>authCtrl.atualizarPerfil(req,res));
 
     this.expressApp.get('/api/tipos-usuario', (req,res)=>tiposUsuarioCtrl.listar(req,res));
     this.expressApp.get('/api/tipos-usuario/:id', (req,res)=>tiposUsuarioCtrl.buscarPorId(req,res));
     this.expressApp.get('/api/tipos-usuario/chave/:chave', (req,res)=>tiposUsuarioCtrl.buscarPorChave(req,res));
+
+    // Vagas - NOVO: calculo endpoint publico para preview sem auth + protegido
+    this.expressApp.post('/api/vagas/calcular', (req,res)=>vagaCtrl.calcularPreview(req,res));
+    this.expressApp.post('/api/vagas/calcular-preview', (req,res)=>vagaCtrl.calcularPreview(req,res));
 
     this.expressApp.get('/api/vagas/mural', auth, (req,res)=>muralCtrl.obterMural(req,res));
     this.expressApp.post('/api/vagas/mural', auth, (req,res)=>muralCtrl.obterMural(req,res));

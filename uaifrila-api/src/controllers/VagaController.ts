@@ -1,4 +1,3 @@
-
 import { Request, Response } from 'express';
 import { VagaService } from '../services/VagaService';
 
@@ -7,12 +6,66 @@ export class VagaController {
   private vagaService: VagaService;
   constructor() { this.service = new VagaService(); this.vagaService = this.service; }
 
+  // NOVO: Calculo 100% backend - usado pelo frontend para preview em tempo real
+  calcularPreview = async (req: Request, res: Response) => {
+    try {
+      const { valor_servico, valor_transporte, data_inicio_local, data_fim_local, timezone, meio_pagamento } = req.body;
+      
+      if (!data_inicio_local || !data_fim_local) {
+        res.status(400).json({ erro: 'data_inicio_local e data_fim_local obrigatórios (formato YYYY-MM-DDTHH:mm)' });
+        return;
+      }
+
+      const repo = (this.service as any).repo || new (require('../repositories/VagaRepository').VagaRepository)();
+      const calculo = await repo.calcularVaga({
+        valor_servico: Number(valor_servico) || 0,
+        valor_transporte: Number(valor_transporte) || 0,
+        data_inicio_local,
+        data_fim_local,
+        timezone: timezone || 'America/Sao_Paulo',
+        meio_pagamento: meio_pagamento || 'pix'
+      });
+
+      res.json({ sucesso: true, calculo });
+    } catch (e:any) {
+      console.error('[VagaController.calcularPreview] Erro:', e.message);
+      res.status(400).json({ erro: e.message });
+    }
+  };
+
   criarVaga = async (req: Request, res: Response) => {
     try {
       const usuarioId = (req as any).usuario?.id;
-      const payload = { ...req.body, contratante_id: usuarioId };
+      if (!usuarioId) {
+        res.status(401).json({ erro: 'Não autenticado' });
+        return;
+      }
+
+      // Frontend deve enviar data_inicio_local + timezone, não data_inicio em UTC
+      // Compatibilidade: se enviou data_inicio (antigo), converte para local
+      let payload = { ...req.body, contratante_id: usuarioId };
+
+      // Compatibilidade com frontend antigo que mandava data_inicio em UTC
+      if (payload.data_inicio && !payload.data_inicio_local) {
+        // Tenta extrair local do campo
+        try {
+          const d = new Date(payload.data_inicio);
+          payload.data_inicio_local = d.toISOString().slice(0,16);
+          payload.timezone = payload.timezone || 'America/Sao_Paulo';
+        } catch {}
+      }
+
+      // Valida campos obrigatórios que existem no banco vagas
+      const obrigatorios = ['titulo','descricao','data_inicio_local','data_fim_local'];
+      for (const campo of obrigatorios) {
+        if (!payload[campo]) {
+          res.status(400).json({ erro: `Campo obrigatório: ${campo}` });
+          return;
+        }
+      }
+
       const vaga = await this.service.criarVaga(payload);
-      res.json({ sucesso:true, vaga });
+      res.json({ sucesso:true, vaga, calculo: (vaga as any)._calculo });
     } catch (e:any) { 
       console.error('[VagaController.criarVaga] Erro:', e.message, e.stack);
       res.status(400).json({ erro:e.message }); 
