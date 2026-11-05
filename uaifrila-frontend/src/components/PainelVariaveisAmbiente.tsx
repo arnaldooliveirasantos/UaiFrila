@@ -1,35 +1,77 @@
-import React, { useState } from 'react';
-import { useTheme } from '../context/ThemeContext';
+import React, { useEffect, useState } from 'react';
+import { VariavelService, VariavelSistema } from '../services/VariavelService';
+import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 
 export default function PainelVariaveisAmbiente() {
-  const { styles } = useTheme();
-  const [variaveis, setVariaveis] = useState([
-    { chave: 'EMAIL_EXPIRACAO_MINUTOS', valor: '5', descricao: 'Expiração código e-mail' },
-    { chave: 'TEMPO_PAGAMENTO_ANTECEDENCIA_MINUTOS', valor: '60', descricao: 'Pix 1h antes' },
-    { chave: 'TAXA_INTERMEDIACAO_PERCENTUAL', valor: '10', descricao: 'Taxa 10%' },
-    { chave: 'TAXA_CARTAO_PERCENTUAL', valor: '14', descricao: 'Taxa cartão 14%' },
-  ]);
+  const styles = useUaiFrilaStyles();
+  const [variaveis, setVariaveis] = useState<VariavelSistema[]>([]);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState('');
+  const [editando, setEditando] = useState<Record<string,string>>({});
 
-  const salvar = async (chave: string, valor: string) => {
-    const API = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
-    const token = localStorage.getItem('@UaiFrila:token');
-    await fetch(`${API}/admin/variaveis`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ chave, valor }) });
-    alert('Variável atualizada!');
+  const carregar = async () => {
+    setCarregando(true);
+    try {
+      // Tenta instancia primeiro, depois static
+      let lista: any[] = [];
+      try {
+        const service = new VariavelService();
+        lista = await service.listar();
+      } catch {
+        lista = await VariavelService.listar();
+      }
+      setVariaveis(lista);
+    } catch (e: any) { 
+      console.warn('[Variaveis] erro', e.message);
+      setErro(e.message); 
+    } finally { setCarregando(false); }
   };
 
+  useEffect(()=>{ carregar(); }, []);
+
+  const salvar = async (chave: string) => {
+    try {
+      const valor = editando[chave];
+      if (!valor) return;
+      const service = new VariavelService();
+      await service.atualizar(chave, valor);
+      await carregar();
+      setEditando(prev => { const n = {...prev}; delete n[chave]; return n; });
+    } catch (e: any) { setErro(e.message); }
+  };
+
+  if (carregando) return <div className={styles.pageContainer}><div className={styles.card}>Carregando variáveis...</div></div>;
+
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      <div className={`p-8 ${styles.bgQuadros}`}>
-        <h2 className="text-2xl font-black uppercase">Variáveis de Ambiente - Só Admin</h2>
-        <p className="text-xs mt-1">Exibe e altera variáveis de ambiente: EMAIL_EXPIRACAO_MINUTOS, TEMPO_PAGAMENTO_ANTECEDENCIA, TAXAS</p>
+    <div className={styles.pageContainer}>
+      <div className={styles.card}>
+        <div className="flex justify-between items-center mb-4">
+          <h2 className={styles.typography.h1}>Variáveis - variaveis_sistema</h2>
+          <button onClick={carregar} className={styles.buttonSecondary}>Recarregar</button>
+        </div>
+        {erro && <div className={styles.errorBox}>{erro}</div>}
+        <p className={`${styles.typography.caption} mt-2`}>Total: {variaveis.length} variáveis • Edite e salve</p>
+        
         <div className="mt-6 space-y-3">
           {variaveis.map(v => (
-            <div key={v.chave} className="flex flex-col md:flex-row gap-2 p-3 border-2 border-black/10">
-              <div className="flex-1"><p className="font-black text-xs">{v.chave}</p><p className="text-[10px] opacity-70">{v.descricao}</p></div>
-              <input value={v.valor} onChange={e=>setVariaveis(prev=>prev.map(x=>x.chave===v.chave?{...x, valor: e.target.value}:x))} className={`px-3 py-2 text-xs w-24 ${styles.input}`} />
-              <button onClick={()=>salvar(v.chave, v.valor)} className={`px-4 py-2 text-xs font-black uppercase ${styles.btnPrimary}`}>Salvar</button>
+            <div key={v.chave} className={`${styles.cardSmall} flex justify-between items-center`}>
+              <div className="flex-1">
+                <p className={styles.typography.h3}>{v.chave}</p>
+                <p className={styles.typography.caption}>{v.descricao || ''} • Cat: {v.categoria || 'geral'} • Num: {v.valor_numerico ?? '-'}</p>
+                <p className={`${styles.typography.bodySmall} mt-1 font-mono`}>Atual: {v.valor}</p>
+              </div>
+              <div className="flex gap-2 items-center ml-4">
+                <input value={editando[v.chave] ?? v.valor} onChange={e=>setEditando(p=>({...p,[v.chave]:e.target.value}))} className={styles.input + ' w-32'} />
+                <button onClick={()=>salvar(v.chave)} className={styles.buttonPrimary()}>Salvar</button>
+              </div>
             </div>
           ))}
+          {variaveis.length === 0 && (
+            <div className={styles.cardSmall + ' text-center'}>
+              <p className={styles.typography.body}>Nenhuma variável encontrada. Verifique se o backend está rodando e se a tabela variaveis_sistema existe.</p>
+              <p className={styles.typography.caption}>SELECT * FROM variaveis_sistema;</p>
+            </div>
+          )}
         </div>
       </div>
     </div>

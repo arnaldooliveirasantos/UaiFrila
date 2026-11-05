@@ -1,45 +1,35 @@
 
 import { TransacaoRepository } from '../repositories/TransacaoRepository';
+import { TransacaoModel } from '../models/TransacaoModel';
+import { BaseService } from './BaseService';
 
-export class TransacaoService {
-  private repository: TransacaoRepository;
+export class TransacaoService extends BaseService<TransacaoModel> {
+  protected repository: TransacaoRepository;
 
   constructor() {
+    super();
     this.repository = new TransacaoRepository();
   }
 
-  async listarPorUsuario(usuarioId: number, nivelPermissao: number = 0) {
-    if (nivelPermissao >= 50) {
-      return await this.repository.listarTodas();
+  async listarPorUsuario(usuarioId: number): Promise<TransacaoModel[]> {
+    try {
+      if (!usuarioId) throw new Error('Usuário ID obrigatório');
+      return await this.repository.listarPorUsuario(usuarioId);
+    } catch (e: any) {
+      this.handleError(e, 'TransacaoService.listarPorUsuario');
     }
-    return await this.repository.listarPorUsuario(usuarioId);
   }
 
-  async criarTransacaoAPartirDaVaga(vaga: any, trampoId: number) {
-    // Calcula baseado em variaveis_sistema e campos da vaga
-    const base = Number(vaga.valor_servico || 0) + Number(vaga.valor_transporte || 0);
-    const taxaPercent = 15; // padrão, buscar de variaveis_sistema se existir
-    const taxaValor = base * taxaPercent / 100;
-    const ajuda = Number(vaga.valor_transporte || 0);
-    const totalContratante = base;
-    const liquidoFreela = Number(vaga.total_freela || base - taxaValor);
+  async minhasTransacoes(usuarioId: number): Promise<TransacaoModel[]> {
+    return this.listarPorUsuario(usuarioId);
+  }
 
-    return await this.repository.criar({
-      vaga_id: vaga.id,
-      trampo_id: trampoId,
-      freela_id: vaga.freela_id || trampoId,
-      contratante_id: vaga.contratante_id,
-      cidade_id: vaga.cidade_id,
-      cidade_nome: vaga.cidade_nome,
-      valor_base: base,
-      taxa_percentual: taxaPercent,
-      taxa_valor: taxaValor,
-      ajuda_custo: ajuda,
-      valor_total_contratante: totalContratante,
-      valor_liquido_freela: liquidoFreela,
-      metodo_pagamento: 'PIX',
-      data_inicio: vaga.data_inicio,
-      usuario_id: vaga.contratante_id
-    });
+  async atualizarStatus(id: number, status: string): Promise<TransacaoModel | null> {
+    try {
+      this.validateRequired({ status }, ['status']);
+      return await this.atualizar(id, { status });
+    } catch (e: any) {
+      this.handleError(e, 'TransacaoService.atualizarStatus');
+    }
   }
 }

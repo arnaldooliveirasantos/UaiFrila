@@ -1,18 +1,21 @@
-
 import { BaseRepository } from './BaseRepository';
-
-export class EnderecoVagaRepository extends BaseRepository {
-  async criar(dados: { vaga_id: number; endereco_completo: string; bairro?: string; cidade_id?: number; cidade_nome: string; estado?: string; lat?: number; lng?: number; }) {
-    await this.query(`UPDATE enderecos_Vaga SET is_ativo=false WHERE vaga_id=$1 AND is_ativo=true`, [dados.vaga_id]);
-    const rows = await this.query(`INSERT INTO enderecos_Vaga (vaga_id, endereco_completo, bairro, cidade_id, cidade_nome, estado, lat, lng, is_ativo) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true) RETURNING *`, [dados.vaga_id, dados.endereco_completo, dados.bairro||'Centro', dados.cidade_id||1, dados.cidade_nome||'Uberlândia', dados.estado||'MG', dados.lat||null, dados.lng||null]);
-    return rows[0];
+import { EnderecoVagaModel } from '../models/EnderecoVagaModel';
+export class EnderecoVagaRepository extends BaseRepository<EnderecoVagaModel> {
+  constructor() { super('enderecos_vaga', EnderecoVagaModel); }
+  async listarPorVaga(vagaId: number): Promise<EnderecoVagaModel[]> {
+    const result = await this.query(`SELECT * FROM enderecos_vaga WHERE vaga_id = $1 AND ativo = true`, [vagaId]);
+    return this.mapRows(result.rows || result);
   }
-
-  async listarPorVaga(vagaId: number) {
-    return await this.query(`SELECT * FROM enderecos_Vaga WHERE vaga_id=$1 ORDER BY is_ativo DESC, criado_em DESC`, [vagaId]);
+  async listarPorEndereco(enderecoId: number): Promise<EnderecoVagaModel[]> {
+    const result = await this.query(`SELECT * FROM enderecos_vaga WHERE endereco_id = $1`, [enderecoId]);
+    return this.mapRows(result.rows || result);
   }
-
-  async buscarAtivo(vagaId: number) {
-    return await this.queryOne(`SELECT * FROM enderecos_Vaga WHERE vaga_id=$1 AND is_ativo=true`, [vagaId]);
+  async vincular(vagaId: number, enderecoId: number): Promise<EnderecoVagaModel> {
+    const result = await this.query(`INSERT INTO enderecos_vaga (vaga_id, endereco_id, ativo) VALUES ($1,$2,true) ON CONFLICT (vaga_id, endereco_id) DO UPDATE SET ativo = true RETURNING *`, [vagaId, enderecoId]);
+    return this.mapRow((result.rows||result)[0]);
+  }
+  async desvincular(vagaId: number, enderecoId: number): Promise<boolean> {
+    const result = await this.query(`UPDATE enderecos_vaga SET ativo = false WHERE vaga_id = $1 AND endereco_id = $2`, [vagaId, enderecoId]);
+    return (result.rowCount||0) > 0;
   }
 }

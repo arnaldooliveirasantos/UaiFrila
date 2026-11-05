@@ -63,16 +63,6 @@ unique(nome, estado)
 CREATE INDEX idx_cidades_nome ON cidades(nome);
 CREATE INDEX idx_cidades_ativa ON cidades(ativa);
 
-CREATE TABLE bairros (
-  id SERIAL PRIMARY KEY,
-  cidade_id INT NOT NULL REFERENCES cidades(id),
-  nome VARCHAR(150) NOT NULL,
-  zona VARCHAR(50),
-  demanda INT DEFAULT 0,
-  ativo BOOLEAN DEFAULT true,
-  criado_em TIMESTAMP DEFAULT NOW(),
-  UNIQUE(nome, cidade_id)
-);
 
 CREATE TABLE expansao_cidades (
   id SERIAL PRIMARY KEY,
@@ -157,23 +147,38 @@ CREATE INDEX idx_usuarios_tipo ON usuarios(tipo_usuario_id);
 -- =====================================================================
 -- 4. ENDERECOS_USUARIO
 -- =====================================================================
-CREATE TABLE enderecos_usuario (
+CREATE TABLE IF NOT EXISTS tipos_endereco (
   id SERIAL PRIMARY KEY,
-  usuario_id INT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
-  endereco VARCHAR(150),
-  bairro VARCHAR(150),
-  cep VARCHAR(20) ,
-  numero VARCHAR(20) ,
-  complemento VARCHAR(100) ,
-  cidade_id INT REFERENCES cidades(id),
-  lat DOUBLE PRECISION,
-  lng DOUBLE PRECISION,
-  is_ativo BOOLEAN DEFAULT true NOT NULL,
+  chave VARCHAR(50) UNIQUE NOT NULL,
+  nome VARCHAR(100) NOT NULL,
+  descricao TEXT,
+  icone VARCHAR(50),
+  ativo BOOLEAN DEFAULT true,
+  criado_em TIMESTAMP DEFAULT NOW()
+);
+
+
+
+
+CREATE TABLE IF NOT EXISTS enderecos (
+  id SERIAL PRIMARY KEY,
+  usuario_id INTEGER REFERENCES usuarios(id) ON DELETE CASCADE,
+  cep VARCHAR(20),
+  logradouro VARCHAR(255) NOT NULL,
+  numero VARCHAR(20),
+  complemento VARCHAR(255),
+  bairro VARCHAR(255),
+  cidade_id INTEGER NOT NULL REFERENCES cidades(id),
+  tipo_endereco_id INTEGER REFERENCES tipos_endereco(id) DEFAULT 1,
+  latitude DECIMAL(10,8),
+  longitude DECIMAL(11,8),
+  apelido VARCHAR(100),
+  ativo BOOLEAN DEFAULT false,
   criado_em TIMESTAMP DEFAULT NOW(),
   atualizado_em TIMESTAMP DEFAULT NOW()
 );
 
-CREATE UNIQUE INDEX uniq_endereco_ativo_por_usuario ON enderecos_usuario(usuario_id) WHERE is_ativo = true;
+
 
 -- =====================================================================
 -- 5. VAGAS, CANDIDATURAS, TRAMPOS, TRANSACOES, AVALIACOES
@@ -199,23 +204,22 @@ CREATE TABLE vagas (
 -- =====================================================================
 --  5.1  ENDERECOS_VAGA
 -- =====================================================================
-CREATE TABLE enderecos_Vaga (
+CREATE TABLE enderecos_vaga (
   id SERIAL PRIMARY KEY,
-  vaga_id INT NOT NULL REFERENCES vagas(id) ON DELETE CASCADE,
-  endereco VARCHAR(150),
-  bairro VARCHAR(150),
-  cidade_id INT REFERENCES cidades(id),
-  cep VARCHAR(20) ,
-  numero VARCHAR(20) ,
-  complemento VARCHAR(100) ,
-  lat DOUBLE PRECISION,
-  lng DOUBLE PRECISION,
-  is_ativo BOOLEAN DEFAULT true NOT NULL,
+  endereco_id INTEGER NOT NULL REFERENCES enderecos(id) ON DELETE CASCADE,
+  vaga_id INTEGER NOT NULL REFERENCES vagas(id) ON DELETE CASCADE,
+  ativo BOOLEAN DEFAULT true,
   criado_em TIMESTAMP DEFAULT NOW(),
-  atualizado_em TIMESTAMP DEFAULT NOW()
+  UNIQUE(vaga_id, endereco_id)
 );
 
-CREATE UNIQUE INDEX uniq_endereco_ativo_por_vaga ON enderecos_Vaga(vaga_id) WHERE is_ativo = true;
+CREATE INDEX IF NOT EXISTS idx_enderecos_usuario_id ON enderecos(usuario_id);
+CREATE INDEX IF NOT EXISTS idx_enderecos_cidade_id ON enderecos(cidade_id);
+CREATE INDEX IF NOT EXISTS idx_enderecos_tipo ON enderecos(tipo_endereco_id);
+CREATE INDEX IF NOT EXISTS idx_enderecos_ativo ON enderecos(usuario_id, ativo) WHERE ativo = true;
+CREATE INDEX IF NOT EXISTS idx_enderecos_vaga_vaga_id ON enderecos_vaga(vaga_id);
+CREATE INDEX IF NOT EXISTS idx_enderecos_vaga_endereco_id ON enderecos_vaga(endereco_id);
+
 
 CREATE TABLE candidaturas (
   id SERIAL PRIMARY KEY,
@@ -345,39 +349,46 @@ CREATE TABLE variaveis_sistema (
 -- =====================================================================
 -- 8. FUNÇÕES E VIEWS
 -- =====================================================================
-CREATE OR REPLACE FUNCTION fn_garantir_um_endereco_vaga_ativo()
+
+-- 3. Trigger para garantir só 1 ativo por usuário
+CREATE OR REPLACE FUNCTION fn_endereco_ativo_unico()
 RETURNS TRIGGER AS $$
 BEGIN
-  IF NEW.is_ativo = true THEN
-    UPDATE enderecos_Vaga SET is_ativo = false, atualizado_em = NOW()
-    WHERE vaga_id = NEW.vaga_id AND id != NEW.id AND is_ativo = true;
+  IF NEW.ativo = TRUE AND NEW.usuario_id IS NOT NULL THEN
+    UPDATE enderecos SET ativo = FALSE WHERE usuario_id = NEW.usuario_id AND id != NEW.id AND ativo = TRUE;
   END IF;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION fn_garantir_um_endereco_ativo()
-RETURNS TRIGGER AS $$
-BEGIN
-  IF NEW.is_ativo = true THEN
-    UPDATE enderecos_usuario SET is_ativo = false, atualizado_em = NOW()
-    WHERE usuario_id = NEW.usuario_id AND id != NEW.id AND is_ativo = true;
-  END IF;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trg_garantir_um_ativo
-  BEFORE INSERT OR UPDATE OF is_ativo ON enderecos_usuario
-  FOR EACH ROW WHEN (NEW.is_ativo = true)
-  EXECUTE FUNCTION fn_garantir_um_endereco_ativo();
+DROP TRIGGER IF EXISTS trg_endereco_ativo_unico ON enderecos;
+CREATE TRIGGER trg_endereco_ativo_unico
+  BEFORE INSERT OR UPDATE ON enderecos
+  FOR EACH ROW EXECUTE FUNCTION fn_endereco_ativo_unico();
 
 
 
-CREATE TRIGGER trg_garantir_enderecos_vaga_um_ativo
-  BEFORE INSERT OR UPDATE OF is_ativo ON enderecos_vaga
-  FOR EACH ROW WHEN (NEW.is_ativo = true)
-  EXECUTE function fn_garantir_um_endereco_vaga_ativo();
+
+
+-- 5. View completa com cidade e estado
+CREATE OR REPLACE VIEW vw_enderecos_completos AS
+SELECT 
+  e.*,
+  c.nome as cidade_nome,
+  c.estado_id,
+  es.nome as estado_nome,
+  es.sigla as estado_sigla,
+  te.chave as tipo_chave,
+  te.nome as tipo_nome,
+  (e.logradouro || ', ' || COALESCE(e.numero,'S/N') || ' - ' || e.bairro || ', ' || c.nome || '/' || es.sigla) as endereco_formatado
+FROM enderecos e
+JOIN cidades c ON c.id = e.cidade_id
+JOIN estados es ON es.id = c.estado_id
+LEFT JOIN tipos_endereco te ON te.id = e.tipo_endereco_id;
+
+-- Teste: verificar se view funciona
+-- SELECT * FROM vw_enderecos_completos LIMIT 1;
+
 
 CREATE OR REPLACE FUNCTION fn_gerar_codigo_transacao()
 RETURNS TRIGGER AS $$
@@ -466,27 +477,15 @@ ON CONFLICT (sigla, pais_id) DO UPDATE SET
   regiao = EXCLUDED.regiao,
   ativo = CASE WHEN EXCLUDED.sigla = 'MG' THEN true ELSE false END;
 
-INSERT INTO cidades (nome, estado, ativa, lat, lng, raio_km, regiao, codigo_ibge, populacao, status_expansao, demanda_score) VALUES
-('Uberlândia', 'MG', true, -18.9186, -48.2772, 25, 'Triângulo Mineiro', '3170206', 713232, 'ATIVA', 100),
-('Uberaba', 'MG', true, -19.7476, -47.9381, 20, 'Triângulo Mineiro', '3170107', 337836, 'ATIVA', 80),
-('Araguari', 'MG', true, -18.6455, -48.1873, 15, 'Triângulo Mineiro', '3103504', 117825, 'ATIVA', 60),
-('Ituiutaba', 'MG', false, -18.9689, -49.4656, 15, 'Triângulo Mineiro', '3134202', 105818, 'INATIVA', 20),
-('Patrocínio', 'MG', false, -18.9443, -46.9936, 15, 'Triângulo Mineiro', '3144607', 91995, 'INATIVA', 15);
+INSERT INTO cidades (nome, estado,estado_id, ativa, lat, lng, raio_km, regiao, codigo_ibge, populacao, status_expansao, demanda_score) VALUES
+('Uberlândia', 'MG',(SELECT id FROM estados WHERE sigla='MG'),  true, -18.9186, -48.2772, 25, 'Triângulo Mineiro', '3170206', 713232, 'ATIVA', 100),
+('Uberaba', 'MG',(SELECT id FROM estados WHERE sigla='MG'),  false, -19.7476, -47.9381, 20, 'Triângulo Mineiro', '3170107', 337836, 'ATIVA', 80),
+('Araguari', 'MG',(SELECT id FROM estados WHERE sigla='MG'),  false, -18.6455, -48.1873, 15, 'Triângulo Mineiro', '3103504', 117825, 'ATIVA', 60),
+('Ituiutaba', 'MG',(SELECT id FROM estados WHERE sigla='MG'),  false, -18.9689, -49.4656, 15, 'Triângulo Mineiro', '3134202', 105818, 'INATIVA', 20),
+('Patrocínio', 'MG',(SELECT id FROM estados WHERE sigla='MG'),  false, -18.9443, -46.9936, 15, 'Triângulo Mineiro', '3144607', 91995, 'INATIVA', 15);
 
-INSERT INTO bairros (cidade_id, nome, zona, demanda) VALUES
-(1, 'Centro', 'Central', 45),
-(1, 'Santa Mônica', 'Leste', 38),
-(1, 'Granja Marileusa', 'Sul', 25),
-(1, 'Patrimônio', 'Central', 22),
-(1, 'Laranjeiras', 'Sul', 20),
-(1, 'Karaíba', 'Sul', 15),
-(1, 'Morada da Colina', 'Sul', 12),
-(1, 'Jardim Karaíba', 'Sul', 18),
-(1, 'Tibery', 'Leste', 30),
-(1, 'Martins', 'Central', 35),
-(1, 'Umuarama', 'Leste', 28),
-(1, 'Jardim Brasília', 'Norte', 20);
 
+--'Em dev'
 INSERT INTO expansao_cidades (cidade_nome, estado_sigla, populacao, demanda_solicitacoes, demanda_vagas, status, prioridade, motivo) VALUES
 ('Araguari', 'MG', 117825, 23, 15, 'SOLICITADA', 2, 'Cidade vizinha com alta demanda de garçons'),
 ('Uberaba', 'MG', 337836, 45, 32, 'EM_ANALISE', 3, 'Polo regional com muitos eventos'),
@@ -514,6 +513,15 @@ INSERT INTO funcoes (nome, categoria) VALUES
 ('Segurança', 'Segurança'),
 ('Limpeza', 'Limpeza'),
 ('Outros', 'Outros');
+
+INSERT INTO tipos_endereco (chave, nome, descricao, icone) VALUES
+('RESIDENCIAL', 'Residencial', 'Endereço de residência', 'home'),
+('COMERCIAL', 'Comercial', 'Endereço comercial / trabalho', 'building'),
+('VAGA', 'Local da Vaga', 'Endereço onde a vaga será executada', 'briefcase'),
+('COBRANCA', 'Cobrança', 'Endereço de cobrança', 'credit-card'),
+('EVENTO', 'Evento', 'Local onde a vaga será realizada','briefcase'),
+('OUTRO', 'Outro', 'Outro tipo de endereço', 'map-pin')
+ON CONFLICT (chave) DO NOTHING;
 
 INSERT INTO status_usuario (chave, nome_exibicao, descricao, cor_hex, ordem) VALUES
 ('AGUARDANDO_VALIDACAO', 'Aguardando Validação', 'Usuário cadastrado mas ainda não validou e-mail', '#FFC700', 1),
@@ -689,11 +697,11 @@ INSERT INTO usuarios (
   'Super administrador da plataforma Uai Frila. Acesso total - tipo SUPER_ADMIN nivel 100.'
 );
 
-INSERT INTO enderecos_usuario (usuario_id, endereco, bairro, cidade_id,  lat, lng, is_ativo) VALUES
-(1, 'Av. Floriano Peixoto, 1000 - Centro, Uberlândia - MG', 'Centro', 1, -18.9186, -48.2772, true);
+INSERT INTO enderecos (usuario_id,cep, logradouro,numero, bairro, cidade_id,  latitude, longitude, ativo) VALUES
+(1,'38400-698', 'Av. Floriano Peixoto', 1000, 'Centro', 1, -18.9186, -48.2772, true);
 
 -- GRANTS - USUARIOS DE BANCO PARA APLICAÇÃO
-CREATE ROLE uaifrila_app_dev WITH LOGIN PASSWORD 'UaiFrila@pp2024!';
+CREATE ROLE uaifrila_app_dev WITH LOGIN PASSWORD 'UaiFrila@App2024!';
 CREATE ROLE uaifrila_readonly_dev WITH LOGIN PASSWORD 'UaiFrila@ead2024!';
 CREATE ROLE uaifrila_worker_dev WITH LOGIN PASSWORD 'UaiFrila@Worker2024!';
 

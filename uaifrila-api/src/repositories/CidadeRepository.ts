@@ -1,32 +1,54 @@
 import { BaseRepository } from './BaseRepository';
+import { CidadeModel } from '../models/CidadeModel';
 
-export class CidadeRepository extends BaseRepository {
-  async listarTodas() {
-    return await this.query(`SELECT * FROM cidades ORDER BY ativa DESC, nome ASC`);
+export class CidadeRepository extends BaseRepository<CidadeModel> {
+  constructor() { super('cidades', CidadeModel); }
+
+  async listarAtivas(): Promise<CidadeModel[]> {
+    try {
+      const result = await this.query(`SELECT * FROM cidades WHERE ativa = true ORDER BY nome`);
+      return this.mapRows(result.rows || result);
+    } catch {
+      // Fallback se coluna ativa não existir
+      const result = await this.query(`SELECT * FROM cidades ORDER BY nome`);
+      return this.mapRows(result.rows || result);
+    }
   }
 
-  async listarAtivas() {
-    return await this.query(`SELECT * FROM cidades WHERE ativa=true ORDER BY nome ASC`);
+  async listarPorEstado(estadoId: number): Promise<CidadeModel[]> {
+    const result = await this.query(`SELECT * FROM cidades WHERE estado_id = $1 ORDER BY nome`, [estadoId]);
+    return this.mapRows(result.rows || result);
   }
 
-  async buscarPorId(id: number) {
-    return await this.queryOne(`SELECT * FROM cidades WHERE id=$1`, [id]);
+  async listarPorEstadoSigla(sigla: string): Promise<CidadeModel[]> {
+    const result = await this.query(`SELECT * FROM cidades WHERE estado = $1 ORDER BY nome`, [sigla]);
+    return this.mapRows(result.rows || result);
   }
 
-  async criar(dados: any) {
-    const res = await this.query(
-      `INSERT INTO cidades (nome, estado, codigo_ibge, ativa, lat, lng, raio_km, populacao, regiao, status_expansao) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [dados.nome, dados.estado, dados.codigo_ibge, true, dados.lat, dados.lng, dados.raio_km||20, dados.populacao, dados.regiao, 'ATIVA']
-    );
-    return res[0];
+  async buscarPorNomeEstado(nome: string, estado: string): Promise<CidadeModel | null> {
+    const result = await this.query(`SELECT * FROM cidades WHERE LOWER(nome) = LOWER($1) AND estado = $2 LIMIT 1`, [nome, estado]);
+    const rows = result.rows || result;
+    return rows[0] ? this.mapRow(rows[0]) : null;
   }
 
-  async buscarTodasComHierarquia() {
-    return await this.query('SELECT * FROM cidades ORDER BY nome');
+  // Alias para compatibilidade
+  async buscarPorNome(nome: string, estadoId?: number): Promise<CidadeModel | null> {
+    try {
+      if (estadoId) {
+        const result = await this.query(`SELECT * FROM cidades WHERE LOWER(nome) = LOWER($1) AND estado_id = $2 LIMIT 1`, [nome, estadoId]);
+        const rows = result.rows || result;
+        return rows[0] ? this.mapRow(rows[0]) : null;
+      } else {
+        const result = await this.query(`SELECT * FROM cidades WHERE LOWER(nome) = LOWER($1) LIMIT 1`, [nome]);
+        const rows = result.rows || result;
+        return rows[0] ? this.mapRow(rows[0]) : null;
+      }
+    } catch {
+      return null;
+    }
   }
 
-  async atualizarStatus(id: number, ativo: boolean) {
-    const rows = await this.query('UPDATE cidades SET ativa=$2, atualizado_em=NOW() WHERE id=$1 RETURNING *', [id, ativo]);
-    return rows[0] || null;
+  async buscarPorNomeComEstado(nome: string, estadoId?: number): Promise<CidadeModel | null> {
+    return this.buscarPorNome(nome, estadoId);
   }
 }

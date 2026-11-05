@@ -1,43 +1,54 @@
-import { Request, Response } from 'express';
-import { Client } from 'pg';
 
-export class AvaliacaoController {
-    public registrarAvaliacao = async (req: Request, res: Response): Promise<void> => {
-        const client = new Client({
-            user: process.env.DB_USER,
-            password: process.env.DB_PASSWORD,
-            host: process.env.DB_HOST,
-            port: Number(process.env.DB_PORT),
-            database: process.env.DB_NAME
-        });
+import { Response } from 'express';
+import { AvaliacaoService } from '../services/AvaliacaoService';
+import { BaseController, AuthRequest } from './BaseController';
 
-        try {
-            const { avaliadorId, avaliadoId, vagaId, nota, comentario } = req.body;
+export class AvaliacaoController extends BaseController {
+  private service: AvaliacaoService;
 
-            if (!nota || nota < 1 || nota > 5) {
-                res.status(400).json({ erro: 'A nota deve ser um valor inteiro entre 1 e 5 estrelas.' });
-                return;
-            }
+  constructor() {
+    super();
+    this.service = new AvaliacaoService();
+  }
 
-            await client.connect();
+  minhasAvaliacoes = async (req: AuthRequest, res: Response) => {
+    try {
+      const avaliacoes = await this.service.minhasAvaliacoes(req.usuario!.id);
+      return res.json({ success: true, data: this.mapListToPublic(avaliacoes, req), avaliacoes: this.mapListToPublic(avaliacoes, req) });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
 
-            // Grava o registro da avaliação na tabela relacional
-            const queryInsert = `
-                INSERT INTO avaliacoes (avaliador_id, avaliado_id, vaga_id, nota, comentario, criado_em)
-                VALUES ($1, $2, $3, $4, $5, NOW())
-                RETURNING id
-            `;
-            const resultado = await client.query(queryInsert, [Number(avaliadorId), Number(avaliadoId), Number(vagaId), Number(nota), comentario]);
+  listarPorAvaliado = async (req: AuthRequest, res: Response) => {
+    try {
+      const avaliacoes = await this.service.listarPorAvaliado(Number(req.params.avaliadoId));
+      return res.json({ success: true, data: this.mapListToPublic(avaliacoes, req) });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
 
-            res.status(201).json({ 
-                sucesso: true, 
-                mensagem: 'Avaliação consolidada no barramento reputacional!',
-                id: resultado.rows[0].id 
-            });
-        } catch (error: any) {
-            res.status(500).json({ erro: error.message });
-        } finally {
-            await client.end();
-        }
-    };
+  criar = async (req: AuthRequest, res: Response) => {
+    try {
+      const avaliacao = await this.service.criarAvaliacao({
+        avaliadorId: req.usuario!.id,
+        avaliadoId: Number(req.body.avaliadoId),
+        nota: Number(req.body.nota),
+        comentario: req.body.comentario,
+        trampoId: req.body.trampoId ? Number(req.body.trampoId) : undefined
+      });
+      return res.status(201).json({ success: true, data: this.mapToPublic(avaliacao, req) });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
+
+  atualizar = async (req: AuthRequest, res: Response) => {
+    try {
+      const avaliacao = await this.service.atualizar(Number(req.params.id), req.body);
+      return res.json({ success: true, data: avaliacao ? this.mapToPublic(avaliacao, req) : null });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
+
+  deletar = async (req: AuthRequest, res: Response) => {
+    try {
+      await this.service.deletar(Number(req.params.id));
+      return res.json({ success: true, message: 'Avaliação deletada' });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
 }

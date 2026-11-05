@@ -1,119 +1,163 @@
-
 import React, { useState } from 'react';
 import { useTheme } from '../context/ThemeContext';
-import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 import LogoIcone from './LogoIcone';
-import { useTiposUsuario } from './useTiposUsuario';
 
 export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: any) {
-  const { toggleTheme } = useTheme();
-  const styles = useUaiFrilaStyles();
+  const { toggleTheme, isDark } = useTheme();
   const [menuAberto, setMenuAberto] = useState(false);
-  const { getTipoUsuario, getBadgeVariant: getBadgeFromHook } = useTiposUsuario();
-  
-  const tipoUsuario = getTipoUsuario(usuario);
-  const getTipo = () => tipoUsuario?.chave?.toUpperCase() || (usuario?.tipo_chave || usuario?.role || 'FREELA').toUpperCase();
-  const getNomeExibicao = () => tipoUsuario?.nome_exibicao || getTipo();
-  const getNivel = () => tipoUsuario?.nivel_permissao ?? usuario?.nivel_permissao ?? 0;
-  const getDescricao = () => tipoUsuario?.descricao || '';
-  
-  const isFreela = () => {
-    const chave = getTipo();
-    return ['FREELA','DUAL'].includes(chave) || getNivel() === 0;
-  };
-  const isContratante = () => {
-    const chave = getTipo();
-    return ['CONTRATANTE','DUAL'].includes(chave) || getNivel() >= 10;
-  };
-  const isAdmin = () => getNivel() >= 90 || ['ADMIN','SUPER_ADMIN'].includes(getTipo());
-  const isSuperAdmin = () => getTipo() === 'SUPER_ADMIN' || getNivel() >= 100;
 
-  const menu = [
-    { id: 'mural', label: 'Mural', auth: true, show: () => !!usuario },
-    { id: 'perfil', label: 'Meu Perfil', auth: true, show: () => !!usuario },
-    { id: 'publicar', label: 'Publicar Vaga', auth: true, show: () => !!usuario && (isContratante() || isAdmin() || isSuperAdmin()) },
-    { id: 'trampos', label: 'Meus Trampos', auth: true, show: () => !!usuario },
-    { id: 'transacoes', label: 'Transações', auth: true, show: () => !!usuario },
-    { id: 'expansao', label: 'Expansão', auth: true, show: () => !!usuario },
-    { id: 'cidades', label: 'Cidades', auth: true, show: () => !!usuario && isAdmin() },
-    { id: 'variaveis', label: 'Variáveis', auth: true, show: () => !!usuario && isSuperAdmin() },
-    { id: 'codigoFreela', label: 'Código Freela', public: true, show: () => true },
+  // FIX: Não depende mais de useTiposUsuario - evita "getTipoUsuario is not a function"
+  const getTipo = (): string => {
+    if (!usuario) return 'VISITANTE';
+    if (usuario.tipo_chave) return String(usuario.tipo_chave).toUpperCase();
+    if (usuario.chave) return String(usuario.chave).toUpperCase();
+    if (usuario.tipo?.chave) return String(usuario.tipo.chave).toUpperCase();
+    if (usuario.tipo_usuario?.chave) return String(usuario.tipo_usuario.chave).toUpperCase();
+    if (usuario.role) return String(usuario.role).toUpperCase();
+    if (usuario.tipo && typeof usuario.tipo === 'string') return usuario.tipo.toUpperCase();
+    const nivel = usuario.nivel_permissao ?? 0;
+    if (nivel >= 100) return 'SUPER_ADMIN';
+    if (nivel >= 90) return 'ADMIN';
+    if (nivel >= 50) return 'FINANCEIRO';
+    // fallback por id
+    if (usuario.tipo_usuario_id === 1) return 'FREELA';
+    if (usuario.tipo_usuario_id === 2) return 'CONTRATANTE';
+    if (usuario.tipo_usuario_id === 3) return 'DUAL';
+    return 'FREELA';
+  };
+
+  const getNivel = (): number => usuario?.nivel_permissao ?? usuario?.nivel ?? 0;
+
+  const checkContratante = (): boolean => {
+    const t = getTipo();
+    return ['CONTRATANTE','DUAL','ADMIN','SUPER_ADMIN','FINANCEIRO'].includes(t);
+  };
+  const checkAdmin = (): boolean => {
+    const nivel = getNivel();
+    const chave = getTipo();
+    return nivel >= 90 || ['ADMIN','SUPER_ADMIN'].includes(chave);
+  };
+  const checkSuperAdmin = (): boolean => {
+    const nivel = getNivel();
+    const chave = getTipo();
+    return chave === 'SUPER_ADMIN' || nivel >= 100;
+  };
+
+  const menuBase = [
+    { id: 'mural', label: 'Mural', icon: '🏠', show: () => !!usuario },
+    { id: 'perfil', label: 'Meu Perfil', icon: '👤', show: () => !!usuario },
+    { id: 'publicar', label: 'Publicar Vaga', icon: '➕', show: () => !!usuario && checkContratante() },
+    { id: 'trampos', label: 'Meus Trampos', icon: '💼', show: () => !!usuario },
+    { id: 'transacoes', label: 'Transações', icon: '💰', show: () => !!usuario },
+    { id: 'codigoFreela', label: 'Código Freela', icon: '🔗', show: () => true },
   ];
 
-  const filtrado = menu.filter((m:any) => m.show());
+  const menuAdmin = [
+    { id: 'cidades', label: 'Cidades', icon: '🏙️', show: () => !!usuario && checkAdmin() },
+    { id: 'expansao', label: 'Expansão', icon: '🚀', show: () => !!usuario && checkAdmin() },
+  ];
 
-  const handleNav = (id: string) => { 
+  const menuSuperAdmin = [
+    { id: 'variaveis', label: 'Variáveis', icon: '⚙️', show: () => !!usuario && checkSuperAdmin() },
+    { id: 'financeiro', label: 'Financeiro', icon: '📊', show: () => !!usuario && checkSuperAdmin() },
+    { id: 'permissoes', label: 'Permissões', icon: '🔐', show: () => !!usuario && checkSuperAdmin() },
+  ];
+
+  const menuCompleto = [...menuBase, ...menuAdmin, ...menuSuperAdmin];
+  const filtrado = menuCompleto.filter((m: any) => m.show());
+
+  const handleNav = (id: string) => {
     if (id === 'publicar') localStorage.removeItem('uaifrila_vaga_editar');
-    setTelaAtiva(id); 
-    setMenuAberto(false); 
+    setTelaAtiva(id);
+    setMenuAberto(false);
   };
 
-  const badgeVariant = getBadgeFromHook(usuario);
+  const getBadgeColor = () => {
+    const tipo = getTipo();
+    if (tipo === 'SUPER_ADMIN') return 'bg-red-600 text-white border-red-800';
+    if (tipo === 'ADMIN') return 'bg-purple-600 text-white border-purple-800';
+    if (tipo === 'FINANCEIRO') return 'bg-yellow-500 text-black border-yellow-700';
+    if (tipo === 'CONTRATANTE') return 'bg-blue-600 text-white border-blue-800';
+    if (tipo === 'FREELA') return 'bg-green-600 text-white border-green-800';
+    if (tipo === 'DUAL') return 'bg-orange-500 text-white border-orange-700';
+    return 'bg-zinc-800 text-white border-zinc-600';
+  };
 
   return (
-    <nav className={`fixed top-0 left-0 right-0 z-50 backdrop-blur-md border-b-2 ${styles.isDark ? 'bg-zinc-900/95 border-zinc-700' : 'bg-white/95 border-black'}`}>
-      <div className="max-w-7xl mx-auto px-4 h-[56px] flex items-center justify-between">
-        <div className="flex items-center gap-2 cursor-pointer" onClick={() => handleNav(usuario ? 'mural' : 'home')}>
-          <LogoIcone size={32} />
-          <span className={`font-black text-lg tracking-tighter hidden sm:block ${styles.isDark ? 'text-white' : 'text-black'}`}>UAI FRILA</span>
+    <nav className={`fixed top-0 left-0 right-0 z-50 backdrop-blur-md border-b-2 ${isDark ? 'bg-zinc-900/95 border-zinc-700' : 'bg-black border-black'}`}>
+      <div className="max-w-7xl mx-auto px-2 md:px-4 h-[56px] flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 cursor-pointer shrink-0" onClick={() => handleNav(usuario ? 'mural' : 'home')}>
+          <div className="bg-white rounded-full p-1">
+            <LogoIcone size={28} />
+          </div>
+          <span className="font-black text-[14px] md:text-[18px] tracking-tighter text-white">UAI FRILA</span>
           {usuario && (
-            <span className={`${styles.badge(badgeVariant)} text-[10px] px-2 py-0.5`}>
+            <span className={`text-[9px] md:text-[10px] font-black px-1.5 md:px-2 py-0.5 border-2 ${getBadgeColor()}`}>
               {getTipo()}
             </span>
           )}
         </div>
 
-        <div className="hidden lg:flex items-center gap-1">
-          {filtrado.map((item:any) => {
+        <div className="hidden xl:flex items-center gap-1">
+          {filtrado.map((item: any) => {
             const ativo = telaAtiva === item.id;
             return (
-              <button 
-                key={item.id} 
-                onClick={() => handleNav(item.id)} 
-                className={`text-[11px] font-bold uppercase px-2.5 py-1 border-2 transition-all ${ativo ? 'bg-black text-white border-black' : styles.isDark ? 'bg-zinc-800 text-zinc-200 border-zinc-700 hover:border-white' : 'bg-white text-black border-black hover:bg-black hover:text-white'}`}
+              <button
+                key={item.id}
+                onClick={() => handleNav(item.id)}
+                className={`text-[10px] font-black uppercase px-2.5 py-1.5 border-2 transition-all ${ativo ? 'bg-white text-black border-white' : 'bg-transparent text-white border-white hover:bg-white hover:text-black'}`}
               >
-                {item.label}
+                {item.icon} {item.label}
               </button>
             );
           })}
         </div>
 
-        <div className="flex items-center gap-1.5">
-          <button onClick={toggleTheme} className={`text-[11px] px-2 py-1 border-2 ${styles.isDark ? 'bg-zinc-800 text-white border-zinc-700' : 'bg-white text-black border-black'}`}>
-            {styles.isDark ? '☾' : '☀'}
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            onClick={toggleTheme}
+            className="w-8 h-8 flex items-center justify-center border-2 border-white bg-black text-white hover:bg-white hover:text-black text-[12px] font-bold"
+            title="Tema"
+          >
+            {isDark ? '☀️' : '🌙'}
           </button>
-          <div className="hidden md:flex items-center gap-2">
-            {usuario ? (
-              <>
-                <span className={`text-[11px] font-bold max-w-[100px] truncate ${styles.isDark ? 'text-white' : 'text-black'}`}>{usuario.nome_completo || usuario.nome}</span>
-                <button onClick={onLogout} className={`text-[11px] font-black uppercase px-2 py-1 bg-red-600 text-white border-2 border-black hover:bg-red-700`}>Sair</button>
-              </>
-            ) : (
-              <>
-                <button onClick={() => handleNav('login')} className={`text-[11px] font-bold uppercase px-2.5 py-1 border-2 ${styles.isDark ? 'bg-zinc-800 text-white border-zinc-700' : 'bg-white text-black border-black'}`}>Login</button>
-                <button onClick={() => handleNav('cadastro')} className={`text-[11px] font-black uppercase px-3 py-1 bg-black text-white border-2 border-black`}>Cadastro</button>
-              </>
-            )}
-          </div>
-          <button onClick={() => setMenuAberto(!menuAberto)} className={`lg:hidden p-1.5 border-2 text-[14px] ${styles.isDark ? 'bg-zinc-800 text-white border-zinc-700' : 'bg-white text-black border-black'}`}>☰</button>
+          <button
+            onClick={() => setMenuAberto(!menuAberto)}
+            className="xl:hidden w-8 h-8 flex items-center justify-center border-2 border-white bg-black text-white"
+          >
+            {menuAberto ? '✕' : '☰'}
+          </button>
+          {usuario ? (
+            <button onClick={onLogout} className="hidden md:block text-[10px] font-black uppercase bg-red-600 text-white border-2 border-white px-3 py-1.5 hover:bg-red-700">Sair</button>
+          ) : (
+            <div className="hidden md:flex gap-1">
+              <button onClick={() => handleNav('login')} className="text-[10px] font-black uppercase bg-white text-black border-2 border-white px-3 py-1.5">Login</button>
+              <button onClick={() => handleNav('cadastro')} className="text-[10px] font-black uppercase bg-[#E53935] text-white border-2 border-white px-3 py-1.5">Cadastro</button>
+            </div>
+          )}
         </div>
       </div>
 
       {menuAberto && (
-        <div className={`lg:hidden border-t-2 p-3 space-y-1.5 ${styles.isDark ? 'bg-zinc-900 border-zinc-700' : 'bg-white border-black'}`}>
-          {filtrado.map((item:any) => (
-            <button key={item.id} onClick={() => handleNav(item.id)} className={`w-full text-left px-3 py-2 border-2 font-black text-[11px] uppercase ${telaAtiva===item.id ? 'bg-black text-white border-black' : styles.isDark ? 'bg-zinc-800 text-white border-zinc-700' : 'bg-white text-black border-black'}`}>
-              {item.label}
-            </button>
-          ))}
-          {usuario ? (
-            <button onClick={() => { onLogout(); setMenuAberto(false); }} className={`w-full text-left px-3 py-2 bg-red-600 text-white border-2 border-black font-black text-[11px] uppercase`}>Sair - {usuario.nome_completo || usuario.nome} - {getTipo()}</button>
-          ) : (
-            <>
-              <button onClick={() => handleNav('login')} className={`w-full text-left px-3 py-2 border-2 font-black text-[11px] uppercase ${styles.isDark ? 'bg-zinc-800 text-white border-zinc-700' : 'bg-white text-black border-black'}`}>Login</button>
-              <button onClick={() => handleNav('cadastro')} className={`w-full text-left px-3 py-2 bg-black text-white border-2 border-black font-black text-[11px] uppercase`}>Cadastro</button>
-            </>
-          )}
+        <div className={`xl:hidden border-t-2 ${isDark ? 'bg-zinc-900 border-zinc-700' : 'bg-black border-white'} p-2`}>
+          <div className="grid grid-cols-2 gap-2">
+            {filtrado.map((item: any) => {
+              const ativo = telaAtiva === item.id;
+              return (
+                <button key={item.id} onClick={() => handleNav(item.id)} className={`text-[11px] font-black uppercase px-3 py-3 border-2 text-left ${ativo ? 'bg-white text-black border-white' : 'bg-transparent text-white border-white'}`}>
+                  {item.icon} {item.label}
+                </button>
+              );
+            })}
+            {usuario ? (
+              <button onClick={() => { setMenuAberto(false); onLogout(); }} className="col-span-2 mt-2 text-[11px] font-black uppercase bg-red-600 text-white border-2 border-white px-3 py-3">🚪 Sair ({usuario.nome_completo?.split(' ')[0] || usuario.email})</button>
+            ) : (
+              <>
+                <button onClick={() => handleNav('login')} className="text-[11px] font-black uppercase bg-white text-black border-2 border-white px-3 py-3">Login</button>
+                <button onClick={() => handleNav('cadastro')} className="text-[11px] font-black uppercase bg-[#E53935] text-white border-2 border-white px-3 py-3">Cadastro</button>
+              </>
+            )}
+          </div>
         </div>
       )}
     </nav>

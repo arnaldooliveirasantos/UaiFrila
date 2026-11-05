@@ -1,25 +1,30 @@
 
 import { EstadoRepository } from '../repositories/EstadoRepository';
+import { EstadoModel } from '../models/EstadoModel';
+import { BaseService } from './BaseService';
 
-export class EstadoService {
-  private repo: EstadoRepository;
-  constructor() { this.repo = new EstadoRepository(); }
+export class EstadoService extends BaseService<EstadoModel> {
+  protected repository: EstadoRepository;
 
-  async listarTodos() {
-    return await this.repo.listarTodos();
+  constructor() {
+    super();
+    this.repository = new EstadoRepository();
   }
 
-  async listarAtivos() {
-    return await this.repo.listarAtivos();
+  async buscarPorSigla(sigla: string): Promise<EstadoModel | null> {
+    try {
+      this.validateRequired({ sigla }, ['sigla']);
+      return await this.repository.buscarPorSigla(sigla);
+    } catch (e: any) {
+      this.handleError(e, 'EstadoService.buscarPorSigla');
+    }
   }
 
-  async buscarPorId(id: number) {
-    const estado = await this.repo.buscarPorId(id);
-    if (!estado) throw new Error('Estado não encontrado');
-    return estado;
-  }
-
-  async buscarPorSigla(sigla: string) {
-    return await this.repo.buscarPorSigla(sigla);
+  async listarAtivos(): Promise<EstadoModel[]> {
+    try {
+      return await this.repository.listarAtivos();
+    } catch (e: any) {
+      return await this.listar();
+    }
   }
 }

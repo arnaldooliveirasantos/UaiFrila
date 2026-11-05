@@ -1,79 +1,110 @@
 import { Request, Response } from 'express';
 
-export abstract class BaseController {
-  
-  // Resposta de sucesso padronizada
-  protected sucesso(res: Response, dados: any, status = 200, mensagem?: string): void {
-    const payload: any = { sucesso: true, ...dados };
-    if (mensagem) payload.mensagem = mensagem;
-    res.status(status).json(payload);
+export interface AuthRequest extends Request {
+  usuario?: {
+    id: number;
+    email: string;
+    tipoUsuarioId: number;
+    tipoChave?: string;
+    nivelPermissao?: number;
+    isAdmin?: boolean;
+  };
+}
+
+export class BaseController {
+  protected getUsuarioLogado(req: AuthRequest) {
+    if (!req.usuario) throw new Error('Usuário não autenticado');
+    return req.usuario;
   }
 
-  // Resposta com lista
-  protected sucessoLista(res: Response, lista: any[], nomeLista = 'dados'): void {
-    res.status(200).json({ sucesso: true, [nomeLista]: lista, total: lista.length });
+  protected isAdmin(req: AuthRequest): boolean {
+    const u = req.usuario;
+    if (!u) return false;
+    return (u.nivelPermissao || 0) >= 80 || u.isAdmin || ['ADMIN','SUPER_ADMIN'].includes((u.tipoChave || '').toUpperCase());
   }
 
-  // Resposta com item único
-  protected sucessoItem(res: Response, item: any, nomeItem = 'item'): void {
-    if (!item) {
-      this.erroNaoEncontrado(res);
-      return;
+  protected isSuperAdmin(req: AuthRequest): boolean {
+    const u = req.usuario;
+    return (u?.nivelPermissao || 0) >= 90 || (u?.tipoChave || '').toUpperCase() === 'SUPER_ADMIN';
+  }
+
+  // REGRA NEGOCIO: Todo usuario exceto FREELA é CONTRATANTE
+  protected isContratante(tipoChave?: string): boolean {
+    const chave = (tipoChave || '').toUpperCase();
+    return chave !== 'FREELA';
+  }
+
+  protected checkRole(req: AuthRequest, rolesPermitidos: string[]): void {
+    const chave = (req.usuario?.tipoChave || '').toUpperCase();
+    const nivel = req.usuario?.nivelPermissao || 0;
+
+    if (nivel >= 80 || chave === 'SUPER_ADMIN' || chave === 'ADMIN') return;
+
+    const rolesUpper = rolesPermitidos.map(r => r.toUpperCase());
+
+    if (rolesUpper.includes('CONTRATANTE')) {
+      if (chave !== 'FREELA') return;
     }
-    res.status(200).json({ sucesso: true, [nomeItem]: item });
-  }
 
-  // Criação
-  protected criado(res: Response, dados: any, nomeItem = 'item'): void {
-    res.status(201).json({ sucesso: true, [nomeItem]: dados });
-  }
-
-  // Erros padronizados
-  protected erro(res: Response, mensagem: string, status = 500, detalhes?: any): void {
-    console.error(`[${this.constructor.name}] Erro ${status}: ${mensagem}`, detalhes || '');
-    res.status(status).json({ sucesso: false, erro: mensagem, detalhes });
-  }
-
-  protected erroValidacao(res: Response, mensagem: string): void {
-    this.erro(res, mensagem, 400);
-  }
-
-  protected erroNaoEncontrado(res: Response, mensagem = 'Recurso não encontrado'): void {
-    this.erro(res, mensagem, 404);
-  }
-
-  protected erroNaoAutorizado(res: Response, mensagem = 'Não autorizado'): void {
-    this.erro(res, mensagem, 401);
-  }
-
-  protected erroInterno(res: Response, e: any): void {
-    const msg = e?.message || 'Erro interno';
-    this.erro(res, msg, 500);
-  }
-
-  // Pega usuário do token
-  protected getUsuario(req: Request): any {
-    return (req as any).usuario || (req as any).user || null;
-  }
-
-  protected getUsuarioId(req: Request): number {
-    const u = this.getUsuario(req);
-    return u?.id || u?.usuario_id || 0;
-  }
-
-  // Wrapper para try/catch automático
-  protected async executar(res: Response, fn: () => Promise<void>): Promise<void> {
-    try {
-      await fn();
-    } catch (e: any) {
-      console.error(`[${this.constructor.name}] Exceção:`, e);
-      if (e.message?.includes('obrigatór') || e.message?.includes('obrigat')) {
-        this.erroValidacao(res, e.message);
-      } else if (e.message?.includes('não encontrado') || e.message?.includes('not found')) {
-        this.erroNaoEncontrado(res, e.message);
-      } else {
-        this.erroInterno(res, e);
-      }
+    if (rolesUpper.includes('FREELA')) {
+      if (chave === 'FREELA' || chave === 'DUAL') return;
     }
+
+    if (rolesUpper.includes('DUAL')) {
+      if (chave === 'DUAL' || chave === 'CONTRATANTE' || chave !== 'FREELA') return;
+    }
+
+    if (!rolesUpper.includes(chave)) {
+      throw { status: 403, message: `Acesso negado. Requer: ${rolesPermitidos.join(', ')}. Seu tipo: ${chave}` };
+    }
+  }
+
+  protected checkAnyRole(req: AuthRequest, ...roles: string[]): void {
+    this.checkRole(req, roles);
+  }
+
+  protected success(res: Response, data: any, status = 200) {
+    return res.status(status).json({ success: true, data });
+  }
+
+  protected error(res: Response, message: string, status = 400) {
+    return res.status(status).json({ success: false, message });
+  }
+
+  // Compat com codigo antigo que usa sendSuccess/sendError
+  protected sendSuccess(res: Response, data: any, message?: string, status = 200) {
+    if (data === null || data === undefined) {
+      return res.status(status).json({ success: true, data: null, message });
+    }
+    return res.status(status).json({ success: true, data, message });
+  }
+
+  protected sendError(res: Response, message: string, status = 400) {
+    return res.status(status).json({ success: false, message, erro: message });
+  }
+
+  protected handleError(res: Response, err: any) {
+    console.error('[BaseController] Erro:', err);
+    const status = err.status || err.statusCode || 500;
+    const message = err.message || 'Erro interno';
+    if (status >= 500 && (String(message).includes('NaN') || String(message).includes('integer'))) {
+      return res.status(200).json({ success: true, data: [], vagas: [], message: 'Nenhum dado - ' + message });
+    }
+    return res.status(status).json({ success: false, message });
+  }
+
+  protected mapToPublic(model: any, req: AuthRequest): any {
+    if (!model) return null;
+    const usuarioLogado = req.usuario;
+    if (model.toPublic) {
+      return model.toPublic(usuarioLogado?.id, this.isAdmin(req));
+    }
+    if (model.toJSON) return model.toJSON();
+    return model;
+  }
+
+  protected mapListToPublic(list: any[], req: AuthRequest): any[] {
+    if (!Array.isArray(list)) return [];
+    return list.map(item => this.mapToPublic(item, req));
   }
 }

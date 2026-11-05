@@ -1,37 +1,29 @@
-
 import { BaseRepository } from './BaseRepository';
+import { TransacaoModel } from '../models/TransacaoModel';
+export class TransacaoRepository extends BaseRepository<TransacaoModel> {
+  constructor() { super('transacoes', TransacaoModel); }
 
-export class TransacaoRepository extends BaseRepository {
-  // Segue tabela transacoes do 00-CRIACAO-BANCO-NOVO-COMPLETO.sql
-  async listarPorUsuario(usuarioId: number) {
-    return await this.query(
-      `SELECT t.*, v.titulo as vaga_titulo, c.nome as cidade_nome_real
-       FROM transacoes t
-       LEFT JOIN vagas v ON v.id=t.vaga_id
-       LEFT JOIN cidades c ON c.id=t.cidade_id
-       WHERE t.freela_id=$1 OR t.contratante_id=$1 OR t.usuario_id=$1
-       ORDER BY t.criado_em DESC LIMIT 100`,
-      [usuarioId]
-    );
+  async buscarPorCodigo(codigo: string): Promise<TransacaoModel | null> {
+    const result = await this.query(`SELECT * FROM transacoes WHERE codigo = $1 LIMIT 1`, [codigo]);
+    const rows = result.rows || result;
+    return rows[0] ? this.mapRow(rows[0]) : null;
   }
 
-  async listarTodas() {
-    return await this.query(
-      `SELECT t.*, v.titulo as vaga_titulo, c.nome as cidade_nome_real
-       FROM transacoes t
-       LEFT JOIN vagas v ON v.id=t.vaga_id
-       LEFT JOIN cidades c ON c.id=t.cidade_id
-       ORDER BY t.criado_em DESC LIMIT 100`
-    );
+  async listarPorUsuario(usuarioId: number): Promise<TransacaoModel[]> {
+    const result = await this.query(`SELECT * FROM transacoes WHERE freela_id = $1 OR contratante_id = $1 ORDER BY criado_em DESC`, [usuarioId]);
+    return this.mapRows(result.rows || result);
   }
 
-  async criar(dados: any) {
-    // Geração de código via trigger fn_gerar_codigo_transacao
-    const res = await this.query(
-      `INSERT INTO transacoes (vaga_id, trampo_id, freela_id, contratante_id, cidade_id, cidade_nome, valor_base, taxa_percentual, taxa_valor, ajuda_custo, valor_total_contratante, valor_liquido_freela, status, metodo_pagamento, data_inicio, usuario_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'AGUARDANDO_PAGAMENTO',$13,$14,$15) RETURNING *`,
-      [dados.vaga_id, dados.trampo_id, dados.freela_id, dados.contratante_id, dados.cidade_id, dados.cidade_nome, dados.valor_base, dados.taxa_percentual, dados.taxa_valor, dados.ajuda_custo, dados.valor_total_contratante, dados.valor_liquido_freela, dados.metodo_pagamento||'PIX', dados.data_inicio, dados.usuario_id]
-    );
-    return res[0];
+  async listarPorStatus(status: string): Promise<TransacaoModel[]> {
+    const result = await this.query(`SELECT * FROM transacoes WHERE status = $1 ORDER BY criado_em DESC`, [status]);
+    return this.mapRows(result.rows || result);
+  }
+
+  async relatorioPorCidade(cidadeId: number): Promise<any> {
+    const result = await this.query(`
+      SELECT COUNT(*) as total, SUM(valor_base) as total_base, SUM(taxa_valor) as total_taxa
+      FROM transacoes WHERE cidade_id = $1
+    `, [cidadeId]);
+    return (result.rows||result)[0];
   }
 }

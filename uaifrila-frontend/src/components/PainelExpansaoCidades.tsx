@@ -1,27 +1,21 @@
-import React from 'react';
-import { useTheme } from '../context/ThemeContext';
+
+import React, { useEffect, useState } from 'react';
+import { ExpansaoService } from '../services/ExpansaoService';
+import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 
 export default function PainelExpansaoCidades() {
-  const { styles } = useTheme();
-  const dados = [
-    { cidade: 'Uberlândia', usuarios: 1245, vagas: 342, crescimento: '+23% mês' },
-    { cidade: 'Uberaba', usuarios: 0, vagas: 0, crescimento: 'Inativa' },
-  ];
+  const styles = useUaiFrilaStyles();
+  const [cidades, setCidades] = useState<any[]>([]);
+  const service = new ExpansaoService();
+
+  useEffect(()=>{ service.listar().then(setCidades).catch(()=>{}); }, []);
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-8">
-      <div className={`p-8 ${styles.bgQuadros}`}>
-        <h2 className="text-2xl font-black uppercase">Expansão de Utilização - Crescimento por Cidade - Só Admin</h2>
-        <p className="text-xs mt-1">Tela de expansão de utilização das cidades que o aplicativo passou a ser utilizado, crescimento no período, acesso só administrador</p>
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-          {dados.map(d => (
-            <div key={d.cidade} className={`p-4 ${styles.boxInfo}`}>
-              <h3 className="font-black">{d.cidade}</h3>
-              <p className="text-xs mt-1">Usuários: {d.usuarios}</p>
-              <p className="text-xs">Vagas: {d.vagas}</p>
-              <p className="text-xs font-bold mt-2">{d.crescimento}</p>
-            </div>
-          ))}
+    <div className={styles.pageContainer}>
+      <div className={styles.card}>
+        <h2 className={styles.typography.h1}>Expansão</h2>
+        <div className="mt-6 grid grid-cols-3 gap-4">
+          {cidades.map((c:any)=><div key={c.id} className={styles.cardSmall}><p className="font-black">{c.cidade_nome}</p><p className="text-xs">Usuários: {c.usuarios} Vagas: {c.vagas}</p></div>)}
         </div>
       </div>
     </div>

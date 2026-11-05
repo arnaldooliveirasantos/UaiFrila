@@ -1,174 +1,71 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { apiGetPublic } from '../utils/Api';
 import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 
-interface Props {
-  usuario?: any;
-}
-
-export default function PainelMural({ usuario: usuarioProp }: Props) {
+export function PainelMural({ usuario }: { usuario?: any }) {
   const styles = useUaiFrilaStyles();
-  const [usuario, setUsuario] = useState<any>(usuarioProp);
   const [vagas, setVagas] = useState<any[]>([]);
-  const [carregando, setCarregando] = useState(true);
-  const [erro, setErro] = useState('');
-  const API = import.meta.env.VITE_API_URL;
-  if (!API) throw new Error('VITE_API_URL não definida no .env - configure no arquivo .env');
+  const [erro, setErro] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (usuarioProp) setUsuario(usuarioProp);
-    else {
-      const u = localStorage.getItem('uaifrila_usuario');
-      if (u) { try { setUsuario(JSON.parse(u)); } catch {} }
-    }
-  }, [usuarioProp]);
-
-  useEffect(() => {
+    let mounted = true;
     const carregar = async () => {
-      const token = localStorage.getItem('uaifrila_token');
-      if (!token) { setErro('SEM_TOKEN'); setCarregando(false); return; }
-      
-      let usuarioAtual = usuario;
-      if (!usuarioAtual) {
-        const ls = localStorage.getItem('uaifrila_usuario');
-        if (ls) { try { usuarioAtual = JSON.parse(ls); } catch {} }
-      }
-
       try {
-        const res = await fetch(`${API}/vagas/mural`, {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json', 
-            'Authorization': `Bearer ${token}` 
-          },
-          body: JSON.stringify({ 
-            tipo: usuarioAtual?.tipo_chave || 'FREELA',
-            usuarioId: usuarioAtual?.id 
-          })
-        });
-
-        if (res.status === 401) {
-          const data = await res.json().catch(() => ({}));
-          if (data.erro?.includes('Token inválido') || data.erro?.includes('expirado')) {
-            localStorage.removeItem('uaifrila_token');
-            localStorage.removeItem('uaifrila_usuario');
-            setErro('TOKEN_EXPIRADO');
-          } else {
-            setErro(data.precisa_validar ? 'AGUARDANDO_VALIDACAO' : 'TOKEN_EXPIRADO');
-          }
-          setCarregando(false);
-          return;
+        setLoading(true);
+        setErro(null);
+        let data;
+        try {
+          data = await apiGetPublic('/api/vagas/mural');
+        } catch {
+          data = await apiGetPublic('/api/vagas/abertas');
         }
-
-        if (!res.ok) {
-          const text = await res.text();
-          let data: any = {};
-          try { data = JSON.parse(text); } catch { data = { erro: text.slice(0,200) }; }
-          throw new Error(data.erro || `Erro ${res.status}`);
-        }
-
-        const data = await res.json();
-        setVagas(data.vagas || data.mural || data.data || []);
-      } catch (e:any) { 
-        console.error('Erro mural:', e);
-        setErro(e.message); 
-      } finally { 
-        setCarregando(false); 
+        const lista = data?.vagas || data?.data || data?.mural || data || [];
+        if (mounted) setVagas(Array.isArray(lista) ? lista : []);
+      } catch (e: any) {
+        if (mounted) setErro(e.message);
+      } finally {
+        if (mounted) setLoading(false);
       }
     };
     carregar();
-  }, [usuario]);
+    return () => { mounted = false; };
+  }, []);
 
-  if (!usuario && !localStorage.getItem('uaifrila_token')) {
-    return (
-      <div className={styles.pageContainerSmall + ' text-center py-16'}>
-        <div className={styles.card}>
-          <h2 className={styles.typography.h2}>Faça login para ver mural</h2>
-          <p className={`${styles.typography.bodySmall} mt-2`}>Você precisa estar logado para acessar o mural de vagas</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (carregando) {
-    return (
-      <div className={styles.pageContainer}>
-        <p className={styles.typography.body}>Carregando mural...</p>
-      </div>
-    );
-  }
-
-  if (erro === 'TOKEN_EXPIRADO') {
-    return (
-      <div className={styles.pageContainerSmall + ' text-center py-16'}>
-        <div className={styles.card}>
-          <h2 className={styles.typography.h2}>Sessão expirada</h2>
-          <p className={`${styles.typography.bodySmall} mt-2`}>Sua sessão expirou. Faça login novamente para continuar.</p>
-          <button 
-            onClick={() => { localStorage.clear(); window.location.href = '/'; }} 
-            className={styles.buttonPrimary() + ' mt-4'}
-          >
-            Ir para login
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (erro === 'AGUARDANDO_VALIDACAO') {
-    return (
-      <div className={styles.pageContainerSmall}>
-        <div className={styles.card}>
-          <h2 className={styles.typography.h2}>Valide seu e-mail</h2>
-          <p className={`${styles.typography.bodySmall} mt-2`}>Enviamos um código para seu e-mail. Insira-o para liberar o acesso.</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (erro && erro !== 'SEM_TOKEN') {
-    return (
-      <div className={styles.pageContainer}>
-        <div className={styles.errorBox}>
-          Não foi possível carregar o mural no momento. Tente novamente mais tarde.
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <div className={styles.pageContainer}><div className={styles.card}>Carregando mural...</div></div>;
+  if (erro) return <div className={styles.pageContainer}><div className={styles.errorBox}>ERRO MURAL: {erro}</div></div>;
 
   return (
     <div className={styles.pageContainer}>
-      <div className="flex justify-between items-center mb-6">
-        <h2 className={styles.typography.h1}>Mural de Vagas</h2>
-        <span className={styles.badge('default')}>
-          {usuario?.tipo_chave || 'FREELA'} • {vagas.length} vagas
-        </span>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className={styles.typography.h1}>Mural de Vagas ({vagas.length})</h1>
+        <span className={styles.badge('success')}>Público</span>
       </div>
       
-      {vagas.length === 0 ? (
-        <div className={styles.card + ' text-center'}>
-          <p className={styles.typography.body}>Nenhuma vaga disponível no momento</p>
-          <p className={styles.typography.caption + ' mt-2'}>Novas oportunidades aparecerão aqui assim que forem publicadas</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {vagas.map((v:any, i:number) => (
-            <div key={v.id || i} className={styles.cardSmall}>
-              <h3 className="font-black uppercase text-sm line-clamp-2">{v.titulo || v.funcao || v.nome || 'Vaga'}</h3>
-              <p className={`text-xs mt-2 line-clamp-3 ${styles.isDark ? 'text-zinc-300' : 'text-zinc-600'}`}>
-                {v.descricao || v.detalhes || v.bairro || ''}
-              </p>
-              <div className="mt-3">
-                <span className={styles.badge('success')}>
-                  R$ {v.valor || v.valor_hora || '20'}/h
-                </span>
-                <span className={`${styles.badge('default')} ml-2`}>
-                  {v.cidade_nome || v.bairro || 'Centro'}
-                </span>
-              </div>
+      <div className="grid gap-4">
+        {vagas.map((vaga: any) => (
+          <div key={vaga.id} className={styles.card}>
+            <div className="flex justify-between items-start">
+              <h3 className={styles.typography.h2}>{vaga.titulo || vaga.funcao}</h3>
+              <span className={styles.badge('warning')}>{vaga.status || 'ABERTA'}</span>
             </div>
-          ))}
-        </div>
-      )}
+            <p className={`${styles.typography.body} mt-2`}>{vaga.descricao}</p>
+            <div className={`${styles.valorBox} mt-3`}>
+              <span>R$ {vaga.valor_total || vaga.valor_servico || vaga.valor || 0}</span>
+              <span>{vaga.cidade_nome || vaga.cidade || ''} / {vaga.estado_sigla || vaga.estado || ''}</span>
+              <span>{vaga.data_inicio ? new Date(vaga.data_inicio).toLocaleDateString() : ''}</span>
+              <span>{vaga.funcao || ''}</span>
+            </div>
+          </div>
+        ))}
+        {vagas.length === 0 && (
+          <div className={styles.cardSmall}>
+            <p className={styles.typography.body}>Nenhuma vaga no mural - publique uma vaga!</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
+
+export default PainelMural;

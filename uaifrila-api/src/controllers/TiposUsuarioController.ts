@@ -1,49 +1,35 @@
 
 import { Request, Response } from 'express';
-import { TiposUsuarioService } from '../services/TiposUsuarioService';
+import { TipoUsuarioService } from '../services/TipoUsuarioService';
+import { BaseController } from './BaseController';
 
-export class TiposUsuarioController {
-  private service: TiposUsuarioService;
+export class TiposUsuarioController extends BaseController {
+  private service: TipoUsuarioService;
 
   constructor() {
-    this.service = new TiposUsuarioService();
+    super();
+    this.service = new TipoUsuarioService();
   }
 
-  public listar = async (req: Request, res: Response): Promise<void> => {
+  listar = async (req: Request, res: Response) => {
     try {
-      const tipos = await this.service.listarTodos();
-      res.json({ sucesso: true, tipos, total: tipos.length });
-    } catch (e: any) {
-      console.error('[TiposUsuarioController] Erro listar:', e.message);
-      res.status(500).json({ erro: e.message });
-    }
+      const tipos = await this.service.listar();
+      return res.json({ success: true, data: this.mapListToPublic(tipos, req), tipos: this.mapListToPublic(tipos, req), tipos_usuario: this.mapListToPublic(tipos, req) });
+    } catch (e: any) { return this.handleError(res, e); }
   };
 
-  public buscarPorId = async (req: Request, res: Response): Promise<void> => {
+  buscarPorId = async (req: Request, res: Response) => {
     try {
-      const id = parseInt(req.params.id);
-      const tipo = await this.service.buscarPorId(id);
-      if (!tipo) {
-        res.status(404).json({ erro: 'Tipo de usuário não encontrado' });
-        return;
-      }
-      res.json({ sucesso: true, tipo });
-    } catch (e: any) {
-      res.status(500).json({ erro: e.message });
-    }
+      const tipo = await this.service.buscarPorId(Number(req.params.id));
+      return res.json({ success: true, data: this.mapToPublic(tipo, req), tipo: this.mapToPublic(tipo, req) });
+    } catch (e: any) { return this.handleError(res, e); }
   };
 
-  public buscarPorChave = async (req: Request, res: Response): Promise<void> => {
+  buscarPorChave = async (req: Request, res: Response) => {
     try {
-      const chave = req.params.chave;
-      const tipo = await this.service.buscarPorChave(chave);
-      if (!tipo) {
-        res.status(404).json({ erro: 'Tipo não encontrado' });
-        return;
-      }
-      res.json({ sucesso: true, tipo });
-    } catch (e: any) {
-      res.status(500).json({ erro: e.message });
-    }
+      const tipo = await this.service.buscarPorChave(req.params.chave);
+      if (!tipo) return this.error(res, 'Tipo não encontrado', 404);
+      return res.json({ success: true, data: this.mapToPublic(tipo, req), tipo: this.mapToPublic(tipo, req) });
+    } catch (e: any) { return this.handleError(res, e); }
   };
 }

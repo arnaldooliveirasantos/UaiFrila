@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useTheme } from '../context/ThemeContext';
 import ValidacaoCodigo from './ValidacaoCodigo';
 import LogoIcone from './LogoIcone';
+import { apiFetch, setToken } from '../utils/Api';
 
 export default function Login({ onLogin }: { onLogin?: (usuario: any) => void }) {
   const { styles, isDark } = useTheme();
@@ -9,28 +10,24 @@ export default function Login({ onLogin }: { onLogin?: (usuario: any) => void })
   const [etapa, setEtapa] = useState<'email' | 'codigo'>('email');
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState('');
-  const API = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
   const solicitarCodigo = async () => {
     if (!email.includes('@')) { setErro('E-mail inválido'); return; }
     setCarregando(true);
     setErro('');
     try {
-      const res = await fetch(`${API}/auth/login`, {
+      // FIX: novo endpoint passwordless
+      const data = await apiFetch('/api/auth/solicitar-codigo', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
+        body: JSON.stringify({ email, tipo: 'login' })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.erro);
       
-      if (data.sucesso && data.token) {
-        // Login direto sem código (modo dev)
-        localStorage.setItem('uaifrila_token', data.token);
-        localStorage.setItem('uaifrila_usuario', JSON.stringify(data.usuario));
-        onLogin?.(data.usuario);
+      // Se backend retornar token direto (modo dev ou usuario sem codigo), loga direto
+      if (data.token) {
+        setToken(data.token);
+        localStorage.setItem('uaifrila_usuario', JSON.stringify(data.usuario || data.data?.usuario));
+        onLogin?.(data.usuario || data.data?.usuario);
       } else {
-        // Precisa validar código
         setEtapa('codigo');
       }
     } catch (e:any) {
@@ -45,7 +42,11 @@ export default function Login({ onLogin }: { onLogin?: (usuario: any) => void })
       <ValidacaoCodigo
         email={email}
         tipo="login"
-        onValidado={({ usuario }) => onLogin?.(usuario)}
+        onValidado={(data:any) => {
+          if(data.token) setToken(data.token);
+          if(data.usuario) localStorage.setItem('uaifrila_usuario', JSON.stringify(data.usuario));
+          onLogin?.(data.usuario || data);
+        }}
         onVoltar={() => setEtapa('email')}
       />
     );

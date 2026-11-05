@@ -1,52 +1,70 @@
 import React, { useEffect, useState } from 'react';
+import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
+import { apiFetch } from '../utils/Api';
 
-interface RolePermissao {
-    role_id: number;
-    role_nome: string;
-    permissoes: Array<{ id: number; nome: string; chave: string }>;
+export default function PainelPermissoesCategorias() {
+  const styles = useUaiFrilaStyles();
+  const [matriz, setMatriz] = useState<any[]>([]);
+  const [erro, setErro] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    const carregar = async () => {
+      try {
+        const data = await apiFetch('/api/permissoes/matriz');
+        // FIX: Backend retorna {success, data: {message}} ou array direto
+        // Garante que matriz sempre é array
+        let lista: any[] = [];
+        if (Array.isArray(data)) lista = data;
+        else if (Array.isArray(data.data)) lista = data.data;
+        else if (Array.isArray(data.matriz)) lista = data.matriz;
+        else if (data?.data && typeof data.data === 'object' && !Array.isArray(data.data)) {
+          // Se vier objeto, transforma em array vazio ou mock
+          console.warn('[Permissoes] API retornou objeto, não array:', data.data);
+          lista = [];
+        }
+        
+        if (mounted) setMatriz(lista);
+      } catch (e: any) {
+        if (mounted) setErro(e.message);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+    carregar();
+    return () => { mounted = false; };
+  }, []);
+
+  if (loading) return <div className={styles.pageContainer}>Carregando permissões...</div>;
+  if (erro) return <div className="p-4 border-2 border-red-600 bg-red-50">Erro: {erro}</div>;
+
+  return (
+    <div className={styles.pageContainer}>
+      <div className={styles.card}>
+        <h2 className={styles.typography.h1}>Permissões - RBAC ({matriz.length})</h2>
+        {matriz.length === 0 ? (
+          <div className="mt-6 p-4 border-2 border-dashed border-black text-center text-[12px]">
+            Nenhuma matriz configurada. Isso é normal - endpoint retorna placeholder.
+            <br/>
+            <small>Verifique se você é ADMIN/SUPER_ADMIN. Seu usuário atual: Uai Frila (SUPER_ADMIN) deve ter acesso.</small>
+          </div>
+        ) : (
+          <div className="mt-6 space-y-3">
+            {matriz.map((item: any) => (
+              <div key={item.role_id || item.id} className="p-4 border-2 border-black">
+                <span className="text-[10px] font-mono bg-black text-white px-2 py-1">ROLE {item.role_id || item.id}</span>
+                <p className="font-black uppercase mt-2">{item.role_nome || item.nome || item.chave}</p>
+                <div className="flex gap-2 mt-2 flex-wrap">
+                  {(item.permissoes || []).map((p: any) => (
+                    <span key={p.id || p.chave} className="text-[9px] border-2 border-black px-2 py-1">{p.nome || p.chave}</span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
-
-export const PainelPermissoesCategorias: React.FC = () => {
-    const [matriz, setMatriz] = useState<RolePermissao[]>([]);
-    const [carregando, setCarregando] = useState(true);
-
-    useEffect(() => {
-        // Mock funcional respeitando o retorno da estrutura da API RBAC
-        const dadosMock = [
-            { role_id: 1, role_nome: "SUPER_ADMIN", permissoes: [{ id: 1, nome: "Visualizar Transações Financial", chave: "VER_TRANSACOES" }] },
-            { role_id: 2, role_nome: "ADMIN_FINANCEIRO", permissoes: [] },
-            { role_id: 3, role_nome: "ADMIN_REGIONAL", permissoes: [] },
-            { role_id: 4, role_nome: "CONTRATANTE_PREMIUM", permissoes: [] },
-            { role_id: 5, role_nome: "CONTRATANTE_PADRAO", permissoes: [] },
-            { role_id: 6, role_nome: "FREELA_SUPER", permissoes: [] },
-            { role_id: 7, role_nome: "FREELA_PADRAO", permissoes: [] }
-        ];
-        setMatriz(dadosMock);
-        setCarregando(false);
-    }, []);
-
-    if (carregando) return <div className="text-gray-400 text-xs">Carregando matriz de segurança RBAC...</div>;
-
-    return (
-        <div className="w-full bg-black border-2 border-[#0066FF] rounded-3xl p-6 text-white font-sans shadow-xl">
-            <h2 className="text-lg font-black uppercase text-[#0066FF] tracking-tight mb-2">🔑 Permissões Categorias • RBAC 7 Roles</h2>
-            <p className="text-xs text-gray-500 mb-4">Gerencie as permissões e o nível de acesso para as categorias homologadas no ecossistema.</p>
-
-            <div className="flex flex-col gap-3">
-                {matriz.map((item) => (
-                    <div key={item.role_id} className="p-4 bg-[#0A0A0A] border border-gray-800 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
-                        <div>
-                            <span className="text-[10px] font-mono bg-[#0066FF]/10 text-[#0066FF] border border-[#0066FF]/20 px-2 py-0.5 rounded font-black">ROLE_ID #{item.role_id}</span>
-                            <h4 className="text-sm font-black text-white uppercase mt-1.5">{item.role_nome}</h4>
-                        </div>
-                        <div className="flex flex-wrap gap-2 justify-end">
-                            <span className="text-[9px] bg-neutral-800 text-gray-400 font-bold px-2 py-1 rounded">Visualizar Mural</span>
-                            <span className="text-[9px] bg-neutral-800 text-gray-400 font-bold px-2 py-1 rounded">Disparar Chat</span>
-                            {item.role_id === 1 && <span className="text-[9px] bg-[#0066FF] text-white font-bold px-2 py-1 rounded">Acesso Irrestrito</span>}
-                        </div>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
-};

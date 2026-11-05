@@ -1,110 +1,174 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { VagaService } from '../services/VagaService';
+import { BaseController, AuthRequest } from './BaseController';
 
-export class VagaController {
+export class VagaController extends BaseController {
   private service: VagaService;
-  private vagaService: VagaService;
-  constructor() { this.service = new VagaService(); this.vagaService = this.service; }
+  constructor() { super(); this.service = new VagaService(); }
 
-  // NOVO: Calculo 100% backend - usado pelo frontend para preview em tempo real
-  calcularPreview = async (req: Request, res: Response) => {
+  listar = async (req: AuthRequest, res: Response) => {
     try {
-      const { valor_servico, valor_transporte, data_inicio_local, data_fim_local, timezone, meio_pagamento } = req.body;
+      const vagas = await this.service.listarAbertas();
+      return res.json({ success: true, data: this.mapListToPublic(vagas, req), vagas: this.mapListToPublic(vagas, req) });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
+
+  listarTodas = async (req: AuthRequest, res: Response) => {
+    try {
+      // Admin vê todas, mas contratante também pode listar todas abertas? Mantém permissão
+      const chave = (req.usuario?.tipoChave || '').toUpperCase();
+      const nivel = req.usuario?.nivelPermissao || 0;
+      // Se não for admin, retorna abertas mesmo
+      if (nivel < 80 && !['ADMIN','SUPER_ADMIN','FINANCEIRO'].includes(chave)) {
+        const vagas = await this.service.listarAbertas();
+        return res.json({ success: true, data: this.mapListToPublic(vagas, req) });
+      }
+      const vagas = await this.service.listar();
+      return res.json({ success: true, data: this.mapListToPublic(vagas, req) });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
+
+  listarPorContratante = async (req: AuthRequest, res: Response) => {
+    try {
+      const paramId = req.params.contratanteId ? Number(req.params.contratanteId) : req.usuario!.id;
+      const contratanteId = isNaN(paramId) ? req.usuario!.id : paramId;
+      // Só dono ou admin
+      if (contratanteId !== req.usuario!.id && !this.isAdmin(req)) {
+        return this.error(res, 'Acesso negado', 403);
+      }
+      const vagas = await this.service.listarPorContratante(contratanteId);
+      return res.json({ success: true, data: this.mapListToPublic(vagas, req), vagas: this.mapListToPublic(vagas, req) });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
+
+  minhasVagas = async (req: AuthRequest, res: Response) => {
+    try {
+      // FIX 400 ID da vaga inválido: nunca valida params.id aqui, usa usuario.id
+      const usuario = req.usuario;
+      if (!usuario?.id || isNaN(Number(usuario.id))) {
+        console.warn('[VagaController.minhasVagas] usuario sem id, retornando vazio');
+        return res.json({ success: true, data: [], vagas: [] });
+      }
+
+      // REGRA: Todo exceto FREELA é CONTRATANTE
+      const chave = (usuario.tipoChave || '').toUpperCase();
+      const isContratante = chave !== 'FREELA';
       
-      if (!data_inicio_local || !data_fim_local) {
-        res.status(400).json({ erro: 'data_inicio_local e data_fim_local obrigatórios (formato YYYY-MM-DDTHH:mm)' });
-        return;
+      console.log(`[minhasVagas] usuario ${usuario.id} tipo ${chave} isContratante=${isContratante}`);
+
+      if (!isContratante && !this.isAdmin(req)) {
+        // FREELA não tem vagas publicadas, retorna vazio em vez de 403/400
+        return res.json({ success: true, data: [], vagas: [], message: 'FREELA não publica vagas' });
       }
 
-      const repo = (this.service as any).repo || new (require('../repositories/VagaRepository').VagaRepository)();
-      const calculo = await repo.calcularVaga({
-        valor_servico: Number(valor_servico) || 0,
-        valor_transporte: Number(valor_transporte) || 0,
-        data_inicio_local,
-        data_fim_local,
-        timezone: timezone || 'America/Sao_Paulo',
-        meio_pagamento: meio_pagamento || 'pix'
+      const vagas = await this.service.listarPorContratante(usuario.id);
+      return res.json({ success: true, data: this.mapListToPublic(vagas, req), vagas: this.mapListToPublic(vagas, req) });
+    } catch (e: any) {
+      console.error('[VagaController.minhasVagas] erro', e.message);
+      // NUNCA retorna 400 ID da vaga inválido aqui, retorna array vazio
+      return res.json({ success: true, data: [], vagas: [], message: 'Nenhuma vaga - ' + e.message });
+    }
+  };
+
+  minhasPublicadas = async (req: AuthRequest, res: Response) => {
+    return this.minhasVagas(req, res);
+  };
+
+  buscarPorId = async (req: AuthRequest, res: Response) => {
+    try {
+      const id = Number(req.params.id);
+      if (!id || isNaN(id)) return this.error(res, 'ID da vaga inválido', 400);
+      const vaga = await this.service.buscarCompletaPorId(id);
+      if (!vaga) return this.error(res, 'Vaga não encontrada', 404);
+      return res.json({ success: true, data: this.mapToPublic(vaga, req) });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
+
+  criar = async (req: AuthRequest, res: Response) => {
+    try {
+      const usuario = req.usuario!;
+      const chave = (usuario.tipoChave || '').toUpperCase();
+      const nivel = usuario.nivelPermissao || 0;
+
+      // REGRA: Todo exceto FREELA pode criar
+      const isContratante = chave !== 'FREELA';
+      const isAdmin = nivel >= 80 || ['ADMIN','SUPER_ADMIN'].includes(chave);
+
+      console.log(`[VagaController.criar] usuario ${usuario.id} tipo ${chave} isContratante=${isContratante} isAdmin=${isAdmin}`);
+
+      if (!isContratante && !isAdmin) {
+        return this.error(res, `Acesso negado. Apenas CONTRATANTE pode criar vaga. Seu tipo: ${chave}. Vá em Perfil e altere seu tipo.`, 403);
+      }
+
+      const vaga = await this.service.criar({
+        ...req.body,
+        contratanteId: usuario.id,
+        contratante_id: usuario.id,
       });
+      
+      // Calculo para retorno
+      let calculo: any = null;
+      try {
+        calculo = await this.service.calcular(req.body);
+      } catch {}
 
-      res.json({ sucesso: true, calculo });
-    } catch (e:any) {
-      console.error('[VagaController.calcularPreview] Erro:', e.message);
-      res.status(400).json({ erro: e.message });
+      return res.status(201).json({ success: true, data: this.mapToPublic(vaga, req), calculo });
+    } catch (e: any) { 
+      console.error('[VagaController.criar] erro', e);
+      return this.handleError(res, e); 
     }
   };
 
-  criarVaga = async (req: Request, res: Response) => {
+  atualizar = async (req: AuthRequest, res: Response) => {
     try {
-      const usuarioId = (req as any).usuario?.id;
-      if (!usuarioId) {
-        res.status(401).json({ erro: 'Não autenticado' });
-        return;
+      const id = Number(req.params.id);
+      if (!id || isNaN(id)) return this.error(res, 'ID inválido', 400);
+      const vagaExistente = await this.service.buscarPorId(id);
+      if (!vagaExistente) return this.error(res, 'Vaga não encontrada', 404);
+
+      if ((vagaExistente as any).contratanteId !== req.usuario!.id && (vagaExistente as any).contratante_id !== req.usuario!.id && !this.isAdmin(req)) {
+        return this.error(res, 'Só dono da vaga pode atualizar', 403);
       }
 
-      // Frontend deve enviar data_inicio_local + timezone, não data_inicio em UTC
-      // Compatibilidade: se enviou data_inicio (antigo), converte para local
-      let payload = { ...req.body, contratante_id: usuarioId };
+      const vaga = await this.service.atualizar(id, req.body);
+      return res.json({ success: true, data: this.mapToPublic(vaga, req) });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
 
-      // Compatibilidade com frontend antigo que mandava data_inicio em UTC
-      if (payload.data_inicio && !payload.data_inicio_local) {
-        // Tenta extrair local do campo
-        try {
-          const d = new Date(payload.data_inicio);
-          payload.data_inicio_local = d.toISOString().slice(0,16);
-          payload.timezone = payload.timezone || 'America/Sao_Paulo';
-        } catch {}
+  deletar = async (req: AuthRequest, res: Response) => {
+    try {
+      const id = Number(req.params.id);
+      if (!id || isNaN(id)) return this.error(res, 'ID inválido', 400);
+      const vagaExistente = await this.service.buscarPorId(id);
+      if (!vagaExistente) return this.error(res, 'Vaga não encontrada', 404);
+
+      if ((vagaExistente as any).contratanteId !== req.usuario!.id && (vagaExistente as any).contratante_id !== req.usuario!.id && !this.isAdmin(req)) {
+        return this.error(res, 'Só dono da vaga pode deletar', 403);
       }
 
-      // Valida campos obrigatórios que existem no banco vagas
-      const obrigatorios = ['titulo','descricao','data_inicio_local','data_fim_local'];
-      for (const campo of obrigatorios) {
-        if (!payload[campo]) {
-          res.status(400).json({ erro: `Campo obrigatório: ${campo}` });
-          return;
-        }
+      await this.service.deletar(id);
+      return res.json({ success: true, message: 'Vaga deletada' });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
+
+  fecharVaga = async (req: AuthRequest, res: Response) => {
+    try {
+      const id = Number(req.params.id);
+      if (!id || isNaN(id)) return this.error(res, 'ID inválido', 400);
+      const chave = (req.usuario?.tipoChave || '').toUpperCase();
+      const isContratante = chave !== 'FREELA';
+      if (!isContratante && !this.isAdmin(req)) {
+        return this.error(res, 'Acesso negado', 403);
       }
-
-      const vaga = await this.service.criarVaga(payload);
-      res.json({ sucesso:true, vaga, calculo: (vaga as any)._calculo });
-    } catch (e:any) { 
-      console.error('[VagaController.criarVaga] Erro:', e.message, e.stack);
-      res.status(400).json({ erro:e.message }); 
-    }
+      const vaga = await this.service.atualizar(id, { status: 'FECHADA' });
+      return res.json({ success: true, data: this.mapToPublic(vaga, req) });
+    } catch (e: any) { return this.handleError(res, e); }
   };
 
-  criar = async (req: Request, res: Response) => { return await this.criarVaga(req,res); }
-
-  listarVagasPorContratante = async (req: Request, res: Response) => {
+  calcular = async (req: AuthRequest, res: Response) => {
     try {
-      const usuarioId = (req as any).usuario?.id;
-      const vagas = await this.service.listarVagasPorContratante(usuarioId);
-      res.json({ sucesso:true, vagas });
-    } catch (e:any) { res.status(500).json({ erro:e.message }); }
+      const calc = await this.service.calcular(req.body);
+      return res.json({ success: true, calculo: calc, data: calc });
+    } catch (e: any) { return this.handleError(res, e); }
   };
-
-  listarPorContratante = async (req: Request, res: Response) => { return await this.listarVagasPorContratante(req,res); }
-  minhasPublicadas = async (req: Request, res: Response) => { return await this.listarVagasPorContratante(req,res); }
-
-  buscarPorId = async (req: Request, res: Response) => {
-    try {
-      const vaga = await this.service.buscarPorId(Number(req.params.id));
-      res.json({ sucesso:true, vaga });
-    } catch (e:any) { res.status(404).json({ erro:e.message }); }
-  };
-
-  atualizarVaga = async (req: Request, res: Response) => {
-    try {
-      const vaga = await this.service.atualizarVaga(Number(req.params.id), req.body);
-      res.json({ sucesso:true, vaga });
-    } catch (e:any) { res.status(400).json({ erro:e.message }); }
-  };
-  atualizar = async (req: Request, res: Response) => { return await this.atualizarVaga(req,res); }
-
-  cancelarVaga = async (req: Request, res: Response) => {
-    try {
-      await this.service.cancelarVaga(Number(req.params.id));
-      res.json({ sucesso:true });
-    } catch (e:any) { res.status(400).json({ erro:e.message }); }
-  };
-  cancelar = async (req: Request, res: Response) => { return await this.cancelarVaga(req,res); }
 }

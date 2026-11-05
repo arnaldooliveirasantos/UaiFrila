@@ -1,55 +1,53 @@
 
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { CandidaturaService } from '../services/CandidaturaService';
+import { BaseController, AuthRequest } from './BaseController';
 
-export class CandidaturaController {
+export class CandidaturaController extends BaseController {
   private service: CandidaturaService;
 
   constructor() {
+    super();
     this.service = new CandidaturaService();
   }
 
-  candidatar = async (req: Request, res: Response) => {
+  listarPorVaga = async (req: AuthRequest, res: Response) => {
     try {
-      const usuarioId = (req as any).usuario.id;
-      const { vaga_id, mensagem } = req.body;
-      const vagaId = Number(vaga_id || req.params.id);
-      const result = await this.service.candidatar(vagaId, usuarioId, mensagem);
-      res.status(201).json({ sucesso: true, candidatura: result });
-    } catch (e: any) {
-      res.status(400).json({ erro: e.message });
-    }
+      const candidaturas = await this.service.listarPorVaga(Number(req.params.vagaId));
+      return res.json({ success: true, data: this.mapListToPublic(candidaturas, req), candidaturas: this.mapListToPublic(candidaturas, req) });
+    } catch (e: any) { return this.handleError(res, e); }
   };
 
-  listarPorVaga = async (req: Request, res: Response) => {
+  minhasCandidaturas = async (req: AuthRequest, res: Response) => {
     try {
-      const vagaId = Number(req.params.id);
-      const candidaturas = await this.service.listarPorVaga(vagaId);
-      res.json({ sucesso: true, candidaturas });
-    } catch (e: any) {
-      res.status(500).json({ erro: e.message });
-    }
+      const candidaturas = await this.service.minhasCandidaturas(req.usuario!.id);
+      return res.json({ success: true, data: this.mapListToPublic(candidaturas, req), candidaturas: this.mapListToPublic(candidaturas, req) });
+    } catch (e: any) { return this.handleError(res, e); }
   };
 
-  listarMinhas = async (req: Request, res: Response) => {
+  candidatar = async (req: AuthRequest, res: Response) => {
     try {
-      const usuarioId = (req as any).usuario.id;
-      const candidaturas = await this.service.listarPorUsuario(usuarioId);
-      res.json({ sucesso: true, candidaturas });
-    } catch (e: any) {
-      res.status(500).json({ erro: e.message });
-    }
+      this.checkRole(req, ['FREELA', 'DUAL', 'ADMIN', 'SUPER_ADMIN']);
+      const candidatura = await this.service.candidatar({
+        vagaId: Number(req.params.vagaId || req.body.vagaId),
+        usuarioId: req.usuario!.id,
+        mensagem: req.body.mensagem
+      });
+      return res.status(201).json({ success: true, data: this.mapToPublic(candidatura, req) });
+    } catch (e: any) { return this.handleError(res, e); }
   };
 
-  aceitar = async (req: Request, res: Response) => {
+  atualizarStatus = async (req: AuthRequest, res: Response) => {
     try {
-      const contratanteId = (req as any).usuario.id;
-      const vagaId = Number(req.params.id);
-      const candidaturaId = Number(req.params.candidaturaId);
-      const trampo = await this.service.aceitar(vagaId, candidaturaId, contratanteId);
-      res.json({ sucesso: true, trampo });
-    } catch (e: any) {
-      res.status(400).json({ erro: e.message });
-    }
+      const candidatura = await this.service.atualizarStatus(Number(req.params.id), req.body.status);
+      return res.json({ success: true, data: candidatura ? this.mapToPublic(candidatura, req) : null });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
+
+  deletar = async (req: AuthRequest, res: Response) => {
+    try {
+      await this.service.deletar(Number(req.params.id));
+      return res.json({ success: true, message: 'Candidatura removida' });
+    } catch (e: any) { return this.handleError(res, e); }
   };
 }

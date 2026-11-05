@@ -1,36 +1,47 @@
 
-import { BaseService } from './BaseService';
 import { CidadeRepository } from '../repositories/CidadeRepository';
+import { CidadeModel } from '../models/CidadeModel';
+import { BaseService } from './BaseService';
 
-export class CidadeService extends BaseService {
-  private cidadeRepository: CidadeRepository;
-  constructor() { super(); this.cidadeRepository = new CidadeRepository(); }
+export class CidadeService extends BaseService<CidadeModel> {
+  protected repository: CidadeRepository;
 
-  async listarAtivas() {
-    try { return await this.cidadeRepository.listarAtivas(); }
-    catch (e:any) { this.handleError(e, 'CidadeService.listarAtivas'); throw e; }
+  constructor() {
+    super();
+    this.repository = new CidadeRepository();
   }
-  async listarTodas() {
-    try { 
-      const repo = this.cidadeRepository as any;
-      if (repo.buscarTodasComHierarquia) return await repo.buscarTodasComHierarquia();
-      return await this.cidadeRepository.listarTodas();
-    } catch (e:any) { this.handleError(e, 'CidadeService.listarTodas'); throw e; }
-  }
-  async buscarTodasComHierarquia() {
+
+  async listarAtivas(): Promise<CidadeModel[]> {
     try {
-      const repo = this.cidadeRepository as any;
-      if (repo.buscarTodasComHierarquia) return await repo.buscarTodasComHierarquia();
-      return await this.cidadeRepository.listarTodas();
-    } catch (e:any) { this.handleError(e, 'CidadeService.buscarTodasComHierarquia'); throw e; }
+      return await this.repository.listarAtivas();
+    } catch (e: any) {
+      this.handleError(e, 'CidadeService.listarAtivas');
+    }
   }
-  async buscarPorId(id: number) { return await this.cidadeRepository.buscarPorId(id); }
-  async criar(dados: any) { return await this.cidadeRepository.criar(dados); }
-  async atualizarStatus(id: number, ativo: boolean) {
+
+  async listarPorEstado(estadoId: number): Promise<CidadeModel[]> {
     try {
-      const repo = this.cidadeRepository as any;
-      if (repo.atualizarStatus) return await repo.atualizarStatus(id, ativo);
-      return await (this.cidadeRepository as any).query?.(`UPDATE cidades SET ativa=$2 WHERE id=$1 RETURNING *`, [id, ativo]);
-    } catch (e:any) { this.handleError(e, 'CidadeService.atualizarStatus'); throw e; }
+      if (!estadoId) throw new Error('Estado ID obrigatório');
+      return await this.repository.listarPorEstado(estadoId);
+    } catch (e: any) {
+      this.handleError(e, 'CidadeService.listarPorEstado');
+    }
+  }
+
+  async listarPorEstadoSigla(sigla: string): Promise<CidadeModel[]> {
+    try {
+      this.validateRequired({ sigla }, ['sigla']);
+      return await this.repository.listarPorEstadoSigla(sigla);
+    } catch (e: any) {
+      this.handleError(e, 'CidadeService.listarPorEstadoSigla');
+    }
+  }
+
+  async buscarPorNome(nome: string, estadoId?: number): Promise<CidadeModel | null> {
+    try {
+      return await this.repository.buscarPorNome(nome, estadoId);
+    } catch (e: any) {
+      this.handleError(e, 'CidadeService.buscarPorNome');
+    }
   }
 }

@@ -1,49 +1,81 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { apiGetPublic } from '../utils/Api';
+import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 
-export default function MuralVagas(props: any) {
-  const API = (import.meta as any).env?.VITE_API_URL || 'http://192.168.24.11:3000/api';
+export default function MuralVagas() {
+  const styles = useUaiFrilaStyles();
   const [vagas, setVagas] = useState<any[]>([]);
+  const [erro, setErro] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let mounted = true;
     const carregar = async () => {
       try {
-        const token = localStorage.getItem('uaifrila_token');
-        const res = await fetch(`${API}/vagas/mural`, { headers: { 'Authorization': `Bearer ${token}` } });
-        const data = await res.json();
-        setVagas(data.vagas || data || []);
-      } catch {} finally { setLoading(false); }
+        setLoading(true);
+        setErro(null);
+        // FIX: endpoint correto é /api/vagas/abertas, não /api/vagas/mural
+        const data = await apiGetPublic('/api/vagas/abertas');
+        const lista = data.vagas || data.data || data || [];
+        // Garante que é array
+        if (mounted) setVagas(Array.isArray(lista) ? lista : []);
+      } catch (e: any) {
+        if (mounted) {
+          console.error('[MuralVagas] Erro:', e);
+          setErro(e.message);
+          setVagas([]);
+        }
+      } finally {
+        if (mounted) setLoading(false);
+      }
     };
     carregar();
+    return () => { mounted = false; };
   }, []);
 
-  if (loading) return <div className="p-8 font-black">Carregando mural...</div>;
+  if (loading) return <div className="p-8 text-center">Carregando mural de vagas...</div>;
+  
+  if (erro) {
+    return (
+      <div className="p-4 m-4 border-4 border-red-600 bg-red-50">
+        <p className="font-black">ERRO no mural:</p>
+        <p className="text-xs mt-2">{erro}</p>
+        <p className="text-[10px] mt-2 opacity-60">Verifique se o backend está rodando e se a rota /api/vagas/abertas existe no App.ts</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="max-w-[1280px] mx-auto px-4 py-8">
-      <h1 className="text-3xl font-black uppercase mb-6">Mural de Vagas - valor_hora = Freela / Horas | endereço em enderecos_Vaga</h1>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {vagas.map((v: any) => {
-          const inicio = v.data_inicio ? new Date(v.data_inicio).toLocaleString('pt-BR') : '';
-          const fim = v.data_fim ? new Date(v.data_fim).toLocaleString('pt-BR') : '';
-          const endereco = v.endereco_completo || `${v.cidade_nome || v.endereco_cidade || ''} - ${v.bairro || v.endereco_bairro || ''}`;
-          return (
-            <div key={v.id} className="bg-white border-4 border-black p-4 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
-              <div className="flex justify-between items-start">
-                <h3 className="font-black text-lg">{v.titulo}</h3>
-                <span className="bg-[#FFC700] border-2 border-black px-2 py-1 text-xs font-black">R$ {Number(v.valor_hora).toFixed(2).replace('.', ',')}/h</span>
+    <div className="p-4 max-w-5xl mx-auto">
+      <h2 className="font-black text-2xl uppercase mb-6">Mural de Vagas ({vagas.length})</h2>
+      
+      {vagas.length === 0 ? (
+        <div className="p-8 text-center border-2 border-dashed border-black">
+          <p className="font-bold">Nenhuma vaga no momento</p>
+          <p className="text-xs mt-2 opacity-60">Seja o primeiro a publicar uma vaga!</p>
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2">
+          {vagas.map((vaga: any) => (
+            <div key={vaga.id} className="border-2 border-black p-4 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] bg-white">
+              <h3 className="font-black uppercase text-sm">{vaga.titulo || 'Vaga sem título'}</h3>
+              <p className="text-xs mt-2 line-clamp-3">{vaga.descricao || 'Sem descrição'}</p>
+              <div className="mt-3 flex justify-between items-center">
+                <span className="text-xs font-bold">
+                  R$ {vaga.valor_servico || vaga.valor_total || '0'} 
+                  {vaga.cidade_nome ? ` - ${vaga.cidade_nome}` : ''}
+                </span>
+                <span className={`text-[10px] px-2 py-1 border-2 border-black font-black ${vaga.status === 'ABERTA' ? 'bg-green-400' : 'bg-yellow-300'}`}>
+                  {vaga.status || 'ABERTA'}
+                </span>
               </div>
-              <p className="text-xs opacity-70 mt-1">{v.funcao} | {v.contratante_nome || ''}</p>
-              <p className="text-xs mt-2 line-clamp-3">{v.descricao}</p>
-              <div className="mt-3 bg-yellow-100 border-2 border-black p-2 text-xs font-bold">
-                <div>📍 {endereco}</div>
-                <div>🕒 {inicio} → {fim}</div>
+              <div className="mt-2 text-[10px] opacity-50">
+                {vaga.data_inicio ? new Date(vaga.data_inicio).toLocaleString('pt-BR') : ''}
               </div>
-              <div className="text-[10px] mt-2 opacity-50">vaga.id={v.id} | enderecos_Vaga.vaga_id FK | valor_hora só freela</div>
             </div>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

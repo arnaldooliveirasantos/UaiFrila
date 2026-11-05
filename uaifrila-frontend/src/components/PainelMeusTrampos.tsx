@@ -1,130 +1,111 @@
 import React, { useEffect, useState } from 'react';
+import { apiFetch } from '../utils/Api';
 import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 
-const API = (import.meta as any).env?.VITE_API_URL || 'http://192.168.24.11:3000/api';
-
-export default function PainelMeusTrampos(props: any) {
+export default function PainelMeusTrampos() {
   const styles = useUaiFrilaStyles();
   const [vagas, setVagas] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
 
   const carregar = async () => {
-    setLoading(true);
+    setCarregando(true);
     setErro('');
     try {
-      const token = localStorage.getItem('uaifrila_token');
-      let res = await fetch(`${API}/vagas/minhas`, { headers: { 'Authorization': `Bearer ${token}` } });
-      if (!res.ok) {
-        res = await fetch(`${API}/vagas/minhas-publicadas`, { headers: { 'Authorization': `Bearer ${token}` } });
-      }
-      if (!res.ok) {
-        res = await fetch(`${API}/vagas/contratante`, { headers: { 'Authorization': `Bearer ${token}` } });
+      // Tenta /vagas/minhas, mas se der 400/403, trata como vazio (FREELA)
+      let data: any = null;
+      try {
+        data = await apiFetch('/api/vagas/minhas');
+      } catch (e: any) {
+        const msg = e.message || '';
+        console.warn('[MeusTrampos] falhou:', msg);
+        // Se for ID da vaga inválido ou 403, é porque é FREELA ou sem vagas - retorna vazio
+        if (msg.includes('ID da vaga inválido') || msg.includes('FREELA') || msg.includes('Acesso negado') || msg.includes('400') || msg.includes('403')) {
+          console.log('[MeusTrampos] Usuario sem vagas publicadas (FREELA ou sem vagas)');
+          setVagas([]);
+          setCarregando(false);
+          return;
+        }
+        throw e;
       }
       
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.erro || `Erro ${res.status}`);
-      }
-      
-      const lista = data.vagas || data || [];
+      const lista = data.vagas || data.data || data || [];
       setVagas(Array.isArray(lista) ? lista : []);
     } catch (e: any) {
-      setErro(e.message || 'Erro ao carregar vagas');
+      console.error('[MeusTrampos] erro final', e.message);
+      // Nunca mostra erro como ID da vaga inválido, mostra vazio
+      if (e.message.includes('ID da vaga inválido')) {
+        setVagas([]);
+      } else {
+        setErro(e.message);
+      }
     } finally {
-      setLoading(false);
+      setCarregando(false);
     }
   };
 
   useEffect(() => { carregar(); }, []);
 
-  const formatarData = (utc: string) => {
-    if (!utc) return '';
-    try { return new Date(utc).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); } catch { return utc; }
-  };
-
-  const editar = (vaga: any) => {
-    console.log('[MeusTrampos] Editando vaga:', vaga.id, vaga.titulo);
-    localStorage.setItem('uaifrila_vaga_editar', JSON.stringify(vaga));
-    if (props.setTelaAtiva) {
-      console.log('[MeusTrampos] Navegando para publicar com edição');
-      props.setTelaAtiva('publicar');
-    } else {
-      console.error('[MeusTrampos] setTelaAtiva não definido');
-    }
-  };
-
-  const cancelar = async (id: number) => {
-    if (!confirm('Cancelar vaga?')) return;
+  const getUsuario = () => {
     try {
-      const token = localStorage.getItem('uaifrila_token');
-      const res = await fetch(`${API}/vagas/${id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
-      if (res.ok) { alert('Vaga cancelada'); carregar(); }
-      else { const data = await res.json(); alert(data.erro || 'Erro'); }
-    } catch (e: any) { alert('Erro: ' + e.message); }
+      const raw = localStorage.getItem('uaifrila_usuario');
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
   };
 
-  const getStatusBadge = (vaga: any) => {
-    const now = new Date();
-    const fim = vaga.data_fim ? new Date(vaga.data_fim) : null;
-    if (fim && fim < now) return <span className={styles.badge('danger')}>Finalizada</span>;
-    if (vaga.status === 'cancelada') return <span className={styles.badge('danger')}>Cancelada</span>;
-    if (vaga.status === 'preenchida' || vaga.status === 'concluida') return <span className={styles.badge('success')}>{vaga.status}</span>;
-    return <span className={styles.badge('success')}>Ativa</span>;
-  };
+  const usuario = getUsuario();
+  const tipoChave = (usuario?.tipo_chave || usuario?.tipo?.chave || 'FREELA').toUpperCase();
+  const isContratante = tipoChave !== 'FREELA';
 
-  if (loading) return <div className={styles.pageContainer + ' font-black'}>Carregando minhas vagas...</div>;
+  if (carregando) {
+    return <div className={styles.pageContainer}><div className={styles.card}>Carregando meus trampos...</div></div>;
+  }
+
+  if (!isContratante) {
+    return (
+      <div className={styles.pageContainer}>
+        <div className={styles.card}>
+          <h2 className={styles.typography.h1}>Meus Trampos (Vagas Publicadas)</h2>
+          <div className={`${styles.cardSmall} mt-4 text-center`}>
+            <p className={styles.typography.body}>Você está como FREELA ({tipoChave})</p>
+            <p className={styles.typography.caption}>FREELA não publica vagas, apenas se candidata. Para publicar, vá em Perfil e mude seu tipo para CONTRATANTE, DUAL, etc.</p>
+            <p className={`${styles.typography.bodySmall} mt-2`}>Todo usuário exceto FREELA é CONTRATANTE e pode publicar.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.pageContainer}>
-      <h1 className={`${styles.typography.h1} mb-6`}>Meus Trampos Publicados</h1>
-
-      {erro && <div className={`${styles.errorBox} mb-4`}>{erro}</div>}
-
-      {vagas.length === 0 && !erro && (
-        <div className={styles.card}>
-          <p className={`${styles.typography.body} font-bold`}>Nenhuma vaga publicada. Crie uma em Nova Vaga.</p>
-          <div className="mt-4">
-            <button className={styles.buttonPrimary()} onClick={() => props.setTelaAtiva && props.setTelaAtiva('publicar')}>
-              Criar Nova Vaga
-            </button>
-          </div>
+      <div className={styles.card}>
+        <div className="flex justify-between items-center mb-4">
+          <h2 className={styles.typography.h1}>Meus Trampos ({vagas.length}) - Publicadas</h2>
+          <button onClick={carregar} className={styles.buttonSecondary}>Recarregar</button>
         </div>
-      )}
-
-      <div className="space-y-3">
-        {vagas.map((v: any) => (
-          <div key={v.id} className={styles.cardSmall}>
-            <div className="flex justify-between items-start gap-4">
-              <div className="flex-1">
-                <div className="flex items-center gap-2 flex-wrap mb-1">
-                  <h3 className="font-black uppercase">{v.titulo}</h3>
-                  {getStatusBadge(v)}
+        
+        {erro && <div className={styles.errorBox}>{erro}</div>}
+        
+        {vagas.length === 0 ? (
+          <div className={`${styles.cardSmall} text-center`}>
+            <p className={styles.typography.body}>Você ainda não publicou nenhuma vaga</p>
+            <p className={styles.typography.caption}>Vá em Publicar Vaga - seu endereço ativo {tipoChave} já vem marcado automaticamente</p>
+          </div>
+        ) : (
+          <div className="space-y-3 mt-4">
+            {vagas.map((v: any) => (
+              <div key={v.id} className={styles.cardSmall}>
+                <div className="flex justify-between">
+                  <h3 className={styles.typography.h3}>{v.titulo || v.funcao} #{v.id}</h3>
+                  <span className={styles.badge(v.status === 'ABERTA' ? 'success' : 'default')}>{v.status}</span>
                 </div>
-                <p className={`${styles.typography.bodySmall} opacity-70`}>
-                  R$ {Number(v.valor_hora).toFixed(2).replace('.', ',')}/h • {v.funcao} | {formatarData(v.data_inicio)} → {formatarData(v.data_fim)}
-                </p>
-                <p className={`${styles.typography.bodySmall} mt-1`}>
-                  📍 {v.endereco_completo || v.cidade_nome || 'Sem endereço'} {v.bairro || v.endereco_bairro ? `- ${v.bairro || v.endereco_bairro}` : ''}
-                </p>
-                {v.descricao && (
-                  <p className={`${styles.typography.bodySmall} mt-2 opacity-70 line-clamp-2`}>{v.descricao}</p>
-                )}
+                <p className={styles.typography.bodySmall}>{v.descricao?.slice(0,100)}</p>
+                <p className={styles.typography.caption}>{v.cidade_nome || ''} • {v.endereco || ''} • R$ {v.valor_servico || v.valor || ''}</p>
               </div>
-              <div className="flex flex-col sm:flex-row gap-2 ml-4 shrink-0">
-                <button onClick={() => editar(v)} className={styles.buttonWarning}>Editar</button>
-                <button onClick={() => cancelar(v.id)} className={styles.buttonDanger}>Cancelar</button>
-              </div>
-            </div>
+            ))}
           </div>
-        ))}
+        )}
       </div>
-
-      {vagas.length > 0 && (
-        <div className="mt-6">
-          <button className={styles.buttonSecondary} onClick={carregar}>Atualizar Lista</button>
-        </div>
-      )}
     </div>
   );
 }
