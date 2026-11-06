@@ -1,45 +1,46 @@
-
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { CidadeService } from '../services/CidadeService';
-import { EstadoService } from '../services/EstadoService';
 import { BaseController, AuthRequest } from './BaseController';
 
 export class CidadeController extends BaseController {
   private service: CidadeService;
-  private estadoService: EstadoService;
+  constructor() { super(); this.service = new CidadeService(); }
 
-  constructor() {
-    super();
-    this.service = new CidadeService();
-    this.estadoService = new EstadoService();
-  }
-
-  listar = async (req: Request, res: Response) => {
-    try {
-      const cidades = await this.service.listar();
-      return res.json({ success: true, data: this.mapListToPublic(cidades, req), cidades: this.mapListToPublic(cidades, req) });
-    } catch (e: any) { return this.handleError(res, e); }
-  };
-
-  ativas = async (req: Request, res: Response) => {
+  listar = async (req: AuthRequest, res: Response) => {
     try {
       const cidades = await this.service.listarAtivas();
       return res.json({ success: true, data: this.mapListToPublic(cidades, req), cidades: this.mapListToPublic(cidades, req) });
     } catch (e: any) { return this.handleError(res, e); }
   };
 
-  listarPorEstado = async (req: Request, res: Response) => {
+  listarTodas = async (req: AuthRequest, res: Response) => {
     try {
-      const estadoId = Number(req.params.estadoId);
-      const cidades = await this.service.listarPorEstado(estadoId);
+      // Se não for admin, retorna ativas mesmo
+      const cidades = await this.service.listar();
       return res.json({ success: true, data: this.mapListToPublic(cidades, req), cidades: this.mapListToPublic(cidades, req) });
     } catch (e: any) { return this.handleError(res, e); }
   };
 
-  buscarPorId = async (req: Request, res: Response) => {
+  listarPorEstado = async (req: any, res: Response) => {
+    try {
+      const estadoId = Number(req.params.estadoId);
+      const cidades = await this.service.listarPorEstado(estadoId);
+      return res.json({ success: true, cidades: this.mapListToPublic(cidades, req), data: this.mapListToPublic(cidades, req) });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
+
+  listarPorEstadoSigla = async (req: any, res: Response) => {
+    try {
+      const { sigla } = req.params;
+      const cidades = await this.service.listarPorEstadoSigla(sigla);
+      return res.json({ success: true, cidades: this.mapListToPublic(cidades, req), data: this.mapListToPublic(cidades, req) });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
+
+  buscarPorId = async (req: AuthRequest, res: Response) => {
     try {
       const cidade = await this.service.buscarPorId(Number(req.params.id));
-      return res.json({ success: true, data: this.mapToPublic(cidade, req), cidade: this.mapToPublic(cidade, req) });
+      return res.json({ success: true, data: this.mapToPublic(cidade, req) });
     } catch (e: any) { return this.handleError(res, e); }
   };
 
@@ -54,14 +55,29 @@ export class CidadeController extends BaseController {
   atualizar = async (req: AuthRequest, res: Response) => {
     try {
       this.checkRole(req, ['ADMIN', 'SUPER_ADMIN']);
-      const cidade = await this.service.atualizar(Number(req.params.id), req.body);
-      return res.json({ success: true, data: cidade ? this.mapToPublic(cidade, req) : null });
-    } catch (e: any) { return this.handleError(res, e); }
+      
+      // FIX: mapeia ativo -> ativa
+      const body = { ...req.body };
+      if (body.ativo !== undefined && body.ativa === undefined) {
+        body.ativa = body.ativo;
+        delete body.ativo;
+      }
+      delete body.ativo;
+      delete body.estado_sigla;
+      
+      console.log(`[CidadeController.atualizar] id=${req.params.id} body=`, body);
+      
+      const cidade = await this.service.atualizar(Number(req.params.id), body);
+      return res.json({ success: true, data: this.mapToPublic(cidade, req) });
+    } catch (e: any) { 
+      console.error('[CidadeController.atualizar] erro', e.message);
+      return this.handleError(res, e); 
+    }
   };
 
   deletar = async (req: AuthRequest, res: Response) => {
     try {
-      this.checkRole(req, ['ADMIN', 'SUPER_ADMIN']);
+      this.checkRole(req, ['SUPER_ADMIN']);
       await this.service.deletar(Number(req.params.id));
       return res.json({ success: true, message: 'Cidade deletada' });
     } catch (e: any) { return this.handleError(res, e); }

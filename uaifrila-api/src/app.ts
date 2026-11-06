@@ -149,8 +149,8 @@ export class App {
     this.expressApp.put('/api/usuarios/:id', (req, res) => usuarioCtrl.atualizar(req, res));
     this.expressApp.delete('/api/usuarios/:id', (req, res) => usuarioCtrl.deletar(req, res));
 
-    this.expressApp.get('/api/cidades', (req, res) => cidadeCtrl.listar(req, res));
-    this.expressApp.get('/api/cidades/todas', (req, res) => cidadeCtrl.listarTodas(req, res));
+    this.expressApp.get('/api/cidades', optionalAuthMiddleware, (req, res) => cidadeCtrl.listar(req, res));
+    this.expressApp.get('/api/cidades/todas', optionalAuthMiddleware, (req, res) => cidadeCtrl.listarTodas(req, res));
     this.expressApp.get('/api/cidades/:id', (req, res) => cidadeCtrl.buscarPorId(req, res));
     this.expressApp.post('/api/cidades', (req, res) => cidadeCtrl.criar(req, res));
     this.expressApp.put('/api/cidades/:id', (req, res) => cidadeCtrl.atualizar(req, res));
