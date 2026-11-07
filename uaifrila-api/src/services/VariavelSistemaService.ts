@@ -1,58 +1,63 @@
-
+import { BaseService } from './BaseService';
 import { VariavelSistemaRepository } from '../repositories/VariavelSistemaRepository';
 import { VariavelSistemaModel } from '../models/VariavelSistemaModel';
-import { BaseService } from './BaseService';
 
+// Tabela EXISTENTE: id, chave, valor, valor_numerico, categoria, descricao, atualizado_em
+// NÃO tem grupo / tipo / ativo
 export class VariavelSistemaService extends BaseService<VariavelSistemaModel> {
-  protected repository: VariavelSistemaRepository;
+  constructor() { super(new VariavelSistemaRepository()); }
 
-  constructor() {
-    super();
-    this.repository = new VariavelSistemaRepository();
+  async buscarValor(chave: string, fallback: string): Promise<string> {
+    try {
+      const r = this.getRepo() as VariavelSistemaRepository;
+      if (typeof (r as any).buscarValor === 'function') return await (r as any).buscarValor(chave, fallback);
+      const v: any = await (r as any).buscarPorChave(chave);
+      return v ? (v.valor ?? fallback) : fallback;
+    } catch { return fallback; }
+  }
+
+  async buscarNumero(chave: string, fallback: number): Promise<number> {
+    try {
+      const r = this.getRepo() as VariavelSistemaRepository;
+      if (typeof (r as any).buscarNumero === 'function') return await (r as any).buscarNumero(chave, fallback);
+      const v = await this.buscarValor(chave, String(fallback));
+      const n = Number(v);
+      return isNaN(n) ? fallback : n;
+    } catch { return fallback; }
+  }
+
+  async buscarBoolean(chave: string, fallback: boolean): Promise<boolean> {
+    const v = await this.buscarValor(chave, String(fallback));
+    return v === 'true' || v === '1';
+  }
+
+  async getConfigCancelamento() {
+    const prazoHoras = await this.buscarNumero('PRAZO_CANCELAMENTO_CANDIDATURA_HORAS', 24);
+    const prazoVagaHoras = await this.buscarNumero('PRAZO_CANCELAMENTO_VAGA_HORAS', 24);
+    const motivoMin = await this.buscarNumero('MOTIVO_CANCELAMENTO_MIN_CARACTERES', 10);
+    const notificar = await this.buscarBoolean('NOTIFICAR_CANCELAMENTO', true);
+    return { prazoHoras, prazoVagaHoras, motivoMin, notificar };
   }
 
   async listarPorCategoria(categoria: string): Promise<VariavelSistemaModel[]> {
     try {
-      this.validateRequired({ categoria }, ['categoria']);
-      return await this.repository.listarPorCategoria(categoria);
-    } catch (e: any) {
-      this.handleError(e, 'VariavelSistemaService.listarPorCategoria');
-    }
+      const r = this.getRepo() as VariavelSistemaRepository;
+      if (typeof (r as any).listarPorCategoria === 'function') return await (r as any).listarPorCategoria(categoria);
+      return await this.listarPorCampo('categoria', categoria);
+    } catch { return []; }
   }
 
-  async buscarPorChave(chave: string): Promise<VariavelSistemaModel | null> {
-    try {
-      this.validateRequired({ chave }, ['chave']);
-      return await this.repository.buscarPorChave(chave);
-    } catch (e: any) {
-      this.handleError(e, 'VariavelSistemaService.buscarPorChave');
-    }
+  // Compat: código antigo chamava listarPorGrupo
+  async listarPorGrupo(grupo: string): Promise<VariavelSistemaModel[]> {
+    return this.listarPorCategoria(grupo);
   }
 
-  async atualizarPorChave(chave: string, valor: any): Promise<VariavelSistemaModel | null> {
-    try {
-      this.validateRequired({ chave }, ['chave']);
-      const existente = await this.repository.buscarPorChave(chave);
-      if (!existente) throw new Error('Variável não encontrada');
-      return await this.repository.atualizarGenerico(existente.id, { 
-        valor: String(valor), 
-        valorNumerico: isNaN(Number(valor)) ? null : Number(valor), 
-        atualizadoEm: new Date() 
-      });
-    } catch (e: any) {
-      this.handleError(e, 'VariavelSistemaService.atualizarPorChave');
-    }
-  }
-
-  async getValorNumerico(chave: string, padrao: number): Promise<number> {
-    try {
-      const variavel = await this.buscarPorChave(chave);
-      if (!variavel) return padrao;
-      const num = (variavel as any).valorNumerico ?? (variavel as any).valor_numerico ?? (variavel as any).valor;
-      const parsed = parseFloat(num);
-      return isNaN(parsed) ? padrao : parsed;
-    } catch {
-      return padrao;
-    }
+  async atualizarPorChave(chave: string, valor: string): Promise<VariavelSistemaModel | null> {
+    const existente: any = await (this.getRepo() as any).buscarPorChave(chave);
+    if (!existente) throw new Error(`Variável ${chave} não encontrada`);
+    const num = parseFloat(valor);
+    const payload: any = { valor: String(valor), atualizado_em: new Date() };
+    if (!isNaN(num)) payload.valor_numerico = num;
+    return await this.getRepo().atualizarGenerico(existente.id, payload);
   }
 }

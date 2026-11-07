@@ -1,33 +1,30 @@
 import { BaseModel, Column } from './BaseModel';
 
+// Tabela EXISTENTE variaveis_sistema:
+// id, chave, valor (text), valor_numerico (numeric), categoria, descricao, atualizado_em
+// NÃO tem: grupo, tipo, ativo, editavel
 export class VariavelSistemaModel extends BaseModel {
   static tableName = 'variaveis_sistema';
 
-  @Column({ name: 'id', primaryKey: true, autoIncrement: true, description: 'ID variável' })
+  @Column({ name: 'id', primaryKey: true, autoIncrement: true })
   id!: number;
 
-  @Column({ name: 'chave', description: 'Chave: TAXA_PIX_PERCENTUAL, COMISSAO' })
+  @Column({ name: 'chave' })
   chave!: string;
 
-  @Column({ name: 'valor', description: 'Valor string' })
+  @Column({ name: 'valor' })
   valor!: string;
 
-  @Column({ name: 'valor_numerico', type: 'decimal', description: 'Valor numérico' })
+  @Column({ name: 'valor_numerico', type: 'decimal' })
   valorNumerico?: number;
 
-  @Column({ name: 'descricao', type: 'text', description: 'Descrição para admin' })
+  @Column({ name: 'categoria' })
+  categoria?: string;
+
+  @Column({ name: 'descricao', type: 'text' })
   descricao?: string;
 
-  @Column({ name: 'categoria', description: 'Categoria: geral, pagamento' })
-  categoria: string = 'geral';
-
-  @Column({ name: 'editavel', type: 'boolean', description: 'Se editável' })
-  editavel: boolean = true;
-
-  @Column({ name: 'criado_em', type: 'timestamp', description: 'Data criação' })
-  criadoEm?: Date;
-
-  @Column({ name: 'atualizado_em', type: 'timestamp', description: 'Atualização' })
+  @Column({ name: 'atualizado_em', type: 'timestamp' })
   atualizadoEm?: Date;
 
   constructor(data?: any) { super(); this.fill(data); }

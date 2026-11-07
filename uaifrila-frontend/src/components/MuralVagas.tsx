@@ -1,81 +1,71 @@
-import { useEffect, useState } from 'react';
-import { apiGetPublic } from '../utils/Api';
+import React, { useState, useEffect } from 'react';
 import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
+import { apiFetch, getToken } from '../utils/Api';
 
-export default function MuralVagas() {
+// Mural - PÚBLICO, chama SÓ /vagas/abertas (não /vagas/mural)
+// Se der 401, mostra o erro real em vez de tela em branco
+
+export default function MuralVagas({ onSelecionarVaga }: { onSelecionarVaga?: (v: any) => void }) {
   const styles = useUaiFrilaStyles();
   const [vagas, setVagas] = useState<any[]>([]);
-  const [erro, setErro] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState('');
 
-  useEffect(() => {
-    let mounted = true;
-    const carregar = async () => {
-      try {
-        setLoading(true);
-        setErro(null);
-        // FIX: endpoint correto é /api/vagas/abertas, não /api/vagas/mural
-        const data = await apiGetPublic('/api/vagas/abertas');
-        const lista = data.vagas || data.data || data || [];
-        // Garante que é array
-        if (mounted) setVagas(Array.isArray(lista) ? lista : []);
-      } catch (e: any) {
-        if (mounted) {
-          console.error('[MuralVagas] Erro:', e);
-          setErro(e.message);
-          setVagas([]);
-        }
-      } finally {
-        if (mounted) setLoading(false);
+  useEffect(() => { carregar(); }, []);
+
+  const carregar = async () => {
+    setCarregando(true); setErro('');
+    try {
+      const token = getToken();
+      console.log('[Mural] carregando /vagas/abertas, token:', token ? 'SIM' : 'NÃO (mural é público, pode ir sem token)');
+      const data: any = await apiFetch('/vagas/abertas', { method: 'GET' });
+      console.log('[Mural] resposta /vagas/abertas:', data);
+      const lista = Array.isArray(data) ? data : (data.data || data.vagas || []);
+      if (!Array.isArray(lista)) {
+        console.error('[Mural] backend não devolveu array:', data);
+        setErro('Backend não devolveu lista de vagas - veja Console');
+        setVagas([]);
+      } else {
+        setVagas(lista);
       }
-    };
-    carregar();
-    return () => { mounted = false; };
-  }, []);
+    } catch (e: any) {
+      console.error('[Mural] erro:', e, 'status:', e.status);
+      if (e.status === 401) {
+        setErro('Mural deu 401 - backend está exigindo login no /vagas/abertas. Aplique PATCH_App_vagas_publicas.txt (mural tem que ser público, antes de authMiddleware).');
+      } else {
+        setErro(e.message || 'Erro ao carregar mural');
+      }
+      setVagas([]);
+    } finally { setCarregando(false); }
+  };
 
-  if (loading) return <div className="p-8 text-center">Carregando mural de vagas...</div>;
-  
-  if (erro) {
-    return (
-      <div className="p-4 m-4 border-4 border-red-600 bg-red-50">
-        <p className="font-black">ERRO no mural:</p>
-        <p className="text-xs mt-2">{erro}</p>
-        <p className="text-[10px] mt-2 opacity-60">Verifique se o backend está rodando e se a rota /api/vagas/abertas existe no App.ts</p>
+  if (carregando) return <div className={styles.pageContainer}><p className={styles.typography.body}>Carregando mural...</p></div>;
+  if (erro) return (
+    <div className={styles.pageContainer}>
+      <div className={`${styles.errorBox} mt-4`}>{erro}</div>
+      <button type="button" onClick={carregar} className={`${styles.buttonPrimary(false)} mt-4`}>Tentar de novo</button>
+      <div className="mt-4 p-3 bg-zinc-100 text-[11px] border">
+        <p><b>Diagnóstico rápido (F12 → Console):</b></p>
+        <p>1. localStorage.getItem('uaifrila_token') - tem que ter token depois de validar</p>
+        <p>2. Network → vagas/abertas → Headers → Authorization: Bearer ... - tem que estar lá</p>
+        <p>3. Se der 401 mesmo com token, o token pode estar expirado ou JWT_SECRET do backend mudou - faça logout e login de novo</p>
       </div>
-    );
-  }
+    </div>
+  );
 
   return (
-    <div className="p-4 max-w-5xl mx-auto">
-      <h2 className="font-black text-2xl uppercase mb-6">Mural de Vagas ({vagas.length})</h2>
-      
-      {vagas.length === 0 ? (
-        <div className="p-8 text-center border-2 border-dashed border-black">
-          <p className="font-bold">Nenhuma vaga no momento</p>
-          <p className="text-xs mt-2 opacity-60">Seja o primeiro a publicar uma vaga!</p>
-        </div>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2">
-          {vagas.map((vaga: any) => (
-            <div key={vaga.id} className="border-2 border-black p-4 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] bg-white">
-              <h3 className="font-black uppercase text-sm">{vaga.titulo || 'Vaga sem título'}</h3>
-              <p className="text-xs mt-2 line-clamp-3">{vaga.descricao || 'Sem descrição'}</p>
-              <div className="mt-3 flex justify-between items-center">
-                <span className="text-xs font-bold">
-                  R$ {vaga.valor_servico || vaga.valor_total || '0'} 
-                  {vaga.cidade_nome ? ` - ${vaga.cidade_nome}` : ''}
-                </span>
-                <span className={`text-[10px] px-2 py-1 border-2 border-black font-black ${vaga.status === 'ABERTA' ? 'bg-green-400' : 'bg-yellow-300'}`}>
-                  {vaga.status || 'ABERTA'}
-                </span>
-              </div>
-              <div className="mt-2 text-[10px] opacity-50">
-                {vaga.data_inicio ? new Date(vaga.data_inicio).toLocaleString('pt-BR') : ''}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+    <div className={styles.pageContainer}>
+      <h1 className={styles.typography.h1}>Mural de Vagas ({vagas.length})</h1>
+      {vagas.length === 0 && <p className={`${styles.typography.body} mt-4`}>Nenhuma vaga aberta no momento.</p>}
+      <div className="grid gap-4 mt-4">
+        {vagas.map((v: any) => (
+          <div key={v.id} className={styles.card} onClick={() => onSelecionarVaga?.(v)} style={{ cursor: 'pointer' }}>
+            <h3 className={styles.typography.h3}>{v.titulo || v.descricao || `Vaga #${v.id}`}</h3>
+            <p className={styles.typography.bodySmall}>{v.bairro || ''} {v.cidade || ''} • {v.valor_total ? `R$ ${v.valor_total}` : ''}</p>
+            {v.calculo && <p className={styles.typography.bodySmall}>Recebe: R$ {v.calculo.valor_receber ?? v.calculo.valorReceber ?? '-'} • Transporte: R$ {v.calculo.valor_transporte ?? '-'}</p>}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

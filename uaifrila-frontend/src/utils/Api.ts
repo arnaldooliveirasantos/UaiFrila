@@ -1,96 +1,65 @@
-// src/utils/Api.ts - FINAL com setToken
-export function getApiUrl(): string {
-  const raw = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3000/api';
-  return raw.replace(/\/$/, '');
-}
+// Api.ts UNIFICADO - ÚNICO lugar que chama o backend
+// VITE_API_URL=http://192.168.24.11:3000/api  (com /api no fim)
+// Por isso os caminhos são '/auth/...' '/vagas/...' SEM /api no início
 
-export function getApiBase(): string {
-  const url = getApiUrl();
-  return url.endsWith('/api') ? url : `${url}/api`;
-}
+const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3000/api';
+const TOKEN_KEY = 'uaifrila_token';
 
 export function getToken(): string | null {
-  return localStorage.getItem('uaifrila_token') || localStorage.getItem('token') || localStorage.getItem('@UaiFrila:token');
+  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
 }
-
-export function setToken(token: string): void {
-  localStorage.setItem('uaifrila_token', token);
-  localStorage.setItem('token', token);
-  localStorage.setItem('@UaiFrila:token', token);
-  localStorage.setItem('auth_token', token);
-  localStorage.setItem('@UaiFrila:usuario:token', token);
+export function setToken(token: string) {
+  try { localStorage.setItem(TOKEN_KEY, token); } catch {}
+  try { localStorage.setItem('uaifrila_token', token); } catch {}
 }
-
-export function removeToken(): void {
-  localStorage.removeItem('uaifrila_token');
-  localStorage.removeItem('token');
-  localStorage.removeItem('@UaiFrila:token');
-  localStorage.removeItem('auth_token');
-  localStorage.removeItem('@UaiFrila:usuario:token');
-  localStorage.removeItem('uaifrila_usuario');
-}
-
-async function handleResponse(res: Response, path: string) {
-  if (res.status === 401) {
-    let msg = 'Nao autorizado';
-    try { const j = await res.clone().json(); msg = j.message || j.erro || msg; } catch {}
-    throw new Error(msg);
-  }
-  if (!res.ok) {
-    let erroMsg = `API ${res.status} em ${path}`;
-    try {
-      const errData = await res.clone().json();
-      erroMsg = errData.message || errData.erro || errData.error || erroMsg;
-    } catch {
-      try { erroMsg = await res.text(); } catch {}
-    }
-    throw new Error(erroMsg);
-  }
-  const text = await res.text();
-  try { return text ? JSON.parse(text) : {}; } catch { return { raw: text }; }
+export function clearToken() {
+  try { localStorage.removeItem(TOKEN_KEY); } catch {}
+  try { localStorage.removeItem('uaifrila_token'); } catch {}
+  try { localStorage.removeItem('token'); } catch {}
 }
 
 function buildUrl(path: string): string {
-  const base = getApiUrl().replace(/\/api$/, '');
-  if (path.startsWith('http')) return path;
-  let normalizedPath = path;
-  if (!normalizedPath.startsWith('/api/') && !normalizedPath.startsWith('/api')) {
-    normalizedPath = `/api${normalizedPath.startsWith('/') ? normalizedPath : '/' + normalizedPath}`;
-  }
-  normalizedPath = normalizedPath.replace(/\/api\/api/g, '/api');
-  return `${base}${normalizedPath}`;
+  // Aceita '/vagas/abertas' ou 'vagas/abertas' ou '/api/vagas/abertas' (corrige duplicação)
+  let p = path.trim();
+  if (p.startsWith('/api/')) p = p.slice(4); // '/api/vagas' -> '/vagas'
+  if (!p.startsWith('/')) p = '/' + p;
+  const base = API_URL.replace(/\/$/, '');
+  return `${base}${p}`;
 }
 
 export async function apiFetch(path: string, options: RequestInit = {}): Promise<any> {
-  const url = buildUrl(path);
   const token = getToken();
-  const headers: any = {
-    'Content-Type': 'application/json',
-    ...(options.headers || {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {})
-  };
-  const res = await fetch(url, { ...options, headers });
-  return handleResponse(res, path);
-}
-
-export async function apiGetPublic(path: string): Promise<any> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(options.headers as any || {}) };
+  // SEMPRE manda o token se existir - sem isso o mural dá 401
+  if (token && !headers['Authorization'] && !headers['authorization']) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
   const url = buildUrl(path);
-  const res = await fetch(url);
-  return handleResponse(res, path);
+  // Log só em DEV para debugar 401
+  if ((import.meta as any).env?.DEV) console.log(`[Api] ${options.method || 'GET'} ${url} token=${token ? 'SIM (' + token.slice(0, 20) + '...)' : 'NÃO'}`);
+  const res = await fetch(url, { ...options, headers });
+  const text = await res.text();
+  let data: any = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+  if (!res.ok) {
+    const msg = (data as any)?.message || (data as any)?.error || `Erro ${res.status} em ${path}`;
+    const err: any = new Error(msg);
+    err.status = res.status;
+    err.data = data;
+    // 401 = token inválido/expirado - limpa e manda para login, mas NÃO limpa se a rota for pública (mural)
+    if (res.status === 401) {
+      console.warn(`[Api] 401 em ${path} - token pode estar expirado ou rota exigindo auth indevidamente`);
+    }
+    throw err;
+  }
+  return data;
 }
 
-export const Api = {
-  get: (p: string) => apiGetPublic(p),
-  getAuth: (p: string) => apiFetch(p),
-  post: (p: string, body: any) => apiFetch(p, { method: 'POST', body: JSON.stringify(body) }),
-  put: (p: string, body: any) => apiFetch(p, { method: 'PUT', body: JSON.stringify(body) }),
-  delete: (p: string) => apiFetch(p, { method: 'DELETE' })
-};
-
-export const api = Api;
-export const API_URL = getApiUrl();
-
-// Compat
-export const getApiUrlFn = getApiUrl;
-export const salvarToken = setToken;
-export const limparToken = removeToken;
+// Atalhos usados em vários componentes
+export async function apiGet(path: string) { return apiFetch(path, { method: 'GET' }); }
+export async function apiGetPublic(path: string) {
+  // Para rotas públicas (mural) - manda token se tiver, mas não exige
+  return apiFetch(path, { method: 'GET' });
+}
+export async function apiPost(path: string, body: any) { return apiFetch(path, { method: 'POST', body: JSON.stringify(body) }); }
+export default apiFetch;

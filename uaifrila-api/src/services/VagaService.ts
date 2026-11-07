@@ -1,279 +1,204 @@
+import { BaseService } from './BaseService';
 import { VagaRepository } from '../repositories/VagaRepository';
+import { VariavelSistemaRepository } from '../repositories/VariavelSistemaRepository';
 import { VagaModel } from '../models/VagaModel';
 import { BaseRepository } from '../repositories/BaseRepository';
+import { VariavelSistemaService } from './VariavelSistemaService';
 
-export class VagaService {
-  private repo: VagaRepository;
-  constructor() { 
-    this.repo = new VagaRepository(); 
+// ATENÇÃO: NÃO use nome 'variavelService' aqui - BaseService antigo tinha 'protected variavelService'
+// Use 'variavelSvc' para não dar TS2415 (private vs protected)
+export class VagaService extends BaseService<VagaModel> {
+  // 'repository' já vem do BaseService via this.repo / this.repository
+  private variavelSvc: VariavelSistemaService;
+  private variavelRepo: VariavelSistemaRepository;
+
+  constructor() {
+    super(new VagaRepository());
+    this.variavelSvc = new VariavelSistemaService();
+    this.variavelRepo = new VariavelSistemaRepository();
   }
 
-  async listar(): Promise<VagaModel[]> { 
-    try { return await this.repo.buscarTodos(); }
-    catch { return []; }
+  private getVagaRepo(): VagaRepository {
+    return this.getRepo() as VagaRepository;
   }
-  
-  async listarAbertas(): Promise<VagaModel[]> { 
-    try { return await this.repo.listarAbertas(); }
-    catch { return []; }
+
+  async listarAbertas(): Promise<any[]> {
+    try {
+      const r = this.getVagaRepo();
+      if (typeof (r as any).listarAbertas === 'function') return await (r as any).listarAbertas();
+      return await this.listar();
+    } catch (e: any) { this.handleError(e, 'VagaService.listarAbertas'); }
   }
-  
-  async listarPorContratante(contratanteId: number): Promise<VagaModel[]> { 
-    const id = Number(contratanteId);
-    if (!id || isNaN(id)) return [];
-    try { return await this.repo.listarPorContratante(id); }
-    catch (e: any) { console.warn('[VagaService.listarPorContratante]', e.message); return []; }
+
+  async listarPorContratante(contratanteId: number): Promise<any[]> {
+    try {
+      if (!contratanteId) throw new Error('Contratante ID obrigatório');
+      const r = this.getVagaRepo();
+      if (typeof (r as any).listarPorContratante === 'function') return await (r as any).listarPorContratante(contratanteId);
+      return await this.listarPorCampo('contratante_id', contratanteId);
+    } catch (e: any) { this.handleError(e, 'VagaService.listarPorContratante'); }
   }
-  
-  async listarComFiltro(filtro: any): Promise<VagaModel[]> { 
-    try { return await this.repo.listarComFiltro(filtro); }
-    catch { return []; }
+
+  async listarComFiltro(filtro: any): Promise<any[]> {
+    try {
+      const r = this.getVagaRepo();
+      if (typeof (r as any).listarComFiltro === 'function') return await (r as any).listarComFiltro(filtro);
+      return await this.listar();
+    } catch (e: any) { this.handleError(e, 'VagaService.listarComFiltro'); }
   }
-  
-  async buscarPorId(id: number): Promise<VagaModel> { 
-    const v = await this.repo.buscarPorId(id); 
-    if (!v) throw new Error('Vaga não encontrada'); 
-    return v; 
-  }
-  
-  async buscarCompletaPorId(id: number): Promise<VagaModel | null> { 
-    const idNum = Number(id);
-    if (!idNum || isNaN(idNum)) return null;
-    try { return await this.repo.buscarCompletaPorId(idNum); }
-    catch { 
-      try { return await this.repo.buscarPorId(idNum); }
-      catch { return null; }
-    }
-  }
-  
-  async buscarPorIdComRelacoes(id: number): Promise<VagaModel | null> { 
-    return await this.buscarCompletaPorId(id); 
+
+  async buscarCompletaPorId(id: number): Promise<any | null> {
+    try {
+      const r = this.getVagaRepo();
+      if (typeof (r as any).buscarCompletaPorId === 'function') return await (r as any).buscarCompletaPorId(id);
+      const pool = BaseRepository.getPool() as any;
+      if (pool) {
+        const res = await pool.query(`SELECT v.*, sv.chave as status_chave, sv.nome_exibicao as status_nome FROM vagas v LEFT JOIN status_vaga sv ON sv.id = v.status_vaga_id WHERE v.id = $1 LIMIT 1`, [id]);
+        return res.rows[0] || null;
+      }
+      return await this.getRepo().buscarPorId(id);
+    } catch (e: any) { this.handleError(e, 'VagaService.buscarCompletaPorId'); }
   }
 
   async calcular(dados: any): Promise<any> {
-    const valorServico = Number(dados.valor_servico) || 0;
-    const valorTransporte = Number(dados.valor_transporte) || 0;
-    const base = valorServico + valorTransporte;
-    
-    const taxaPix = 0.01;
-    const taxaCartao = 0.04;
-    const comissao = 0.10;
-    
-    const taxaPercent = dados.meio_pagamento === 'cartao' ? taxaCartao : taxaPix;
-    const taxaPagamento = base * taxaPercent;
-    const comissaoApp = base * comissao;
-    const totalContratante = base + taxaPagamento + comissaoApp;
-    const freelaRecebe = base;
-    const freelaLiquido = base - comissaoApp;
-    
-    let horas = 4;
     try {
-      if (dados.data_inicio_local && dados.data_fim_local) {
-        const ini = new Date(dados.data_inicio_local);
-        const fim = new Date(dados.data_fim_local);
-        horas = Math.max(0.5, (fim.getTime() - ini.getTime()) / (1000 * 60 * 60));
-      } else if (dados.data_inicio && dados.data_fim) {
-        const ini = new Date(dados.data_inicio);
-        const fim = new Date(dados.data_fim);
-        horas = Math.max(0.5, (fim.getTime() - ini.getTime()) / (1000 * 60 * 60));
-      }
-    } catch {}
-    
-    return {
-      valor_servico: valorServico,
-      valor_transporte: valorTransporte,
-      base_calculo: base,
-      horas_estimadas: horas,
-      valor_hora_bruto: horas > 0 ? base / horas : 0,
-      taxa_pix_percentual: 1,
-      taxa_cartao_percentual: 4,
-      comissao_percentual: 10,
-      taxa_pagamento: taxaPagamento,
-      comissao_app: comissaoApp,
-      total_contratante: totalContratante,
-      freela_recebe_bruto: freelaRecebe,
-      freela_recebe_liquido: freelaLiquido,
-      valor_hora_liquido: horas > 0 ? freelaLiquido / horas : 0,
-      valor_hora_final: horas > 0 ? freelaLiquido / horas : 0,
-      valor_minimo_valido: valorServico >= 75,
-      mensagem_validacao: valorServico < 75 ? 'Valor mínimo R$ 75,00' : undefined
-    };
-  }
-
-  async criar(dados: any): Promise<VagaModel> { 
-    // Extrai endereco_id que NÃO existe na tabela vagas, mas sim em enderecos_vaga
-    const enderecoIdRaw = dados.endereco_id || dados.enderecoId;
-    const enderecoId = enderecoIdRaw ? Number(enderecoIdRaw) : null;
-    
-    // Remove campos que não existem na tabela vagas
-    const payload: any = { ...dados };
-    delete payload.endereco_id;
-    delete payload.enderecoId;
-    delete payload.endereco_ativo;
-    delete payload.enderecoAtivo;
-    delete payload.data_inicio_local;
-    delete payload.data_fim_local;
-    delete payload.timezone;
-    delete payload.meio_pagamento;
-    delete payload.meioPagamento;
-    delete payload.calculo;
-    
-    const contratanteId = Number(payload.contratanteId || payload.contratante_id || payload.usuario_id);
-    if (!contratanteId || isNaN(contratanteId)) throw new Error('contratanteId obrigatório');
-    payload.contratante_id = contratanteId;
-    delete payload.contratanteId;
-    delete payload.usuario_id;
-
-    // Datas
-    if (dados.data_inicio_local && !payload.data_inicio) {
-      try { payload.data_inicio = new Date(dados.data_inicio_local).toISOString(); }
-      catch { payload.data_inicio = dados.data_inicio_local; }
-    }
-    if (dados.data_fim_local && !payload.data_fim) {
-      try { payload.data_fim = new Date(dados.data_fim_local).toISOString(); }
-      catch { payload.data_fim = dados.data_fim_local; }
-    }
-    if (!payload.data_inicio) payload.data_inicio = new Date().toISOString();
-    if (!payload.data_fim) payload.data_fim = new Date(Date.now() + 4*3600*1000).toISOString();
-
-    payload.status = payload.status || 'ABERTA';
-    
-    // Garante campos obrigatórios da tabela vagas
-    if (!payload.titulo) throw new Error('Título obrigatório');
-    if (!payload.valor_hora && !payload.valor_servico) {
-      payload.valor_hora = 20;
-    }
-    if (payload.valor_servico) {
-      payload.valor_hora = Number(payload.valor_servico) / 4; // aproxima
-    }
-    
-    // Remove campos que não existem na tabela vagas original (verifica no model)
-    // Model tem: contratante_id, titulo, descricao, funcao, valor_hora, valor_servico, valor_transporte, total_freela, status, data_inicio, data_fim
-    // Não tem endereco_id, cep, bairro, etc. Esses ficam em enderecos_vaga
-    const camposPermitidos = ['contratante_id','titulo','descricao','funcao','valor_hora','valor_servico','valor_transporte','total_freela','status','data_inicio','data_fim'];
-    const payloadLimpo: any = {};
-    for (const k of camposPermitidos) {
-      if (payload[k] !== undefined) payloadLimpo[k] = payload[k];
-    }
-    // Mantém pelo menos titulo, contratante_id, valor_hora, data_inicio, data_fim
-    if (!payloadLimpo.valor_hora) payloadLimpo.valor_hora = Number(payload.valor_servico) || 20;
-    if (!payloadLimpo.valor_servico) payloadLimpo.valor_servico = payload.valor_servico || payloadLimpo.valor_hora;
-    if (!payloadLimpo.valor_transporte) payloadLimpo.valor_transporte = Number(dados.valor_transporte) || 0;
-    if (!payloadLimpo.total_freela) payloadLimpo.total_freela = payloadLimpo.valor_servico;
-
-    console.log('[VagaService.criar] Payload vagas (sem endereco_id):', payloadLimpo);
-    console.log('[VagaService.criar] endereco_id para vincular depois:', enderecoId);
-
-    let vaga: VagaModel;
-    try {
-      vaga = await this.repo.criarGenerico(payloadLimpo);
-    } catch (e: any) {
-      console.error('[VagaService.criar] erro ao criar vaga', e.message);
-      // Tenta com payload ainda mais mínimo
-      const minimo = {
-        contratante_id: payloadLimpo.contratante_id,
-        titulo: payloadLimpo.titulo,
-        descricao: payloadLimpo.descricao || 'Sem descrição',
-        funcao: payloadLimpo.funcao || 'Garçom',
-        valor_hora: Number(payloadLimpo.valor_hora) || 20,
-        valor_servico: Number(payloadLimpo.valor_servico) || 75,
-        valor_transporte: Number(payloadLimpo.valor_transporte) || 0,
-        status: 'ABERTA',
-        data_inicio: payloadLimpo.data_inicio,
-        data_fim: payloadLimpo.data_fim,
+      this.validateRequired(dados, ['valor_servico']);
+      let vars: any[] = [];
+      try { vars = await this.variavelRepo.buscarTodos(); } catch { vars = []; }
+      const findVar = (chave: string) => vars.find((v: any) => v.chave === chave);
+      const getNum = (chave: string, def: number) => {
+        const v = findVar(chave);
+        if (!v) return def;
+        const num = (v as any).valorNumerico ?? (v as any).valor_numerico ?? (v as any).valor;
+        const parsed = parseFloat(num);
+        return isNaN(parsed) ? def : parsed;
       };
-      vaga = await this.repo.criarGenerico(minimo);
-    }
+      const VALOR_MINIMO = getNum('VALOR_MINIMO_VAGA', 75);
+      const TAXA_PIX = getNum('TAXA_PIX_PERCENTUAL', 1);
+      const TAXA_CARTAO = getNum('TAXA_CARTAO_PERCENTUAL', 4);
+      const COMISSAO = getNum('COMISSAO_APLICATIVO', getNum('TAXA_PLATAFORMA_PERCENTUAL', 10));
 
-    // Agora vincula endereco na tabela enderecos_vaga se tiver endereco_id
-    if (enderecoId && !isNaN(enderecoId)) {
-      try {
-        const pool = BaseRepository.getPool() as any;
-        if (pool) {
-          await pool.query(
-            'INSERT INTO enderecos_vaga (vaga_id, endereco_id, ativo) VALUES ($1,$2,true) ON CONFLICT (vaga_id, endereco_id) DO UPDATE SET ativo = true',
-            [(vaga as any).id, enderecoId]
-          );
-          console.log(`[VagaService.criar] Vaga ${(vaga as any).id} vinculada ao endereco ${enderecoId} em enderecos_vaga`);
-        }
-      } catch (e: any) {
-        console.warn(`[VagaService.criar] Falha ao vincular endereco_vaga vaga=${(vaga as any).id} endereco=${enderecoId}:`, e.message);
-        // Se tabela não existe, tenta criar
-        try {
-          const pool = BaseRepository.getPool() as any;
-          if (pool) {
-            await pool.query(`
-              CREATE TABLE IF NOT EXISTS enderecos_vaga (
-                id SERIAL PRIMARY KEY,
-                vaga_id INT REFERENCES vagas(id) ON DELETE CASCADE,
-                endereco_id INT REFERENCES enderecos(id) ON DELETE CASCADE,
-                ativo BOOLEAN DEFAULT true,
-                criado_em TIMESTAMP DEFAULT NOW(),
-                UNIQUE(vaga_id, endereco_id)
-              )
-            `);
-            await pool.query(
-              'INSERT INTO enderecos_vaga (vaga_id, endereco_id, ativo) VALUES ($1,$2,true) ON CONFLICT (vaga_id, endereco_id) DO UPDATE SET ativo = true',
-              [(vaga as any).id, enderecoId]
-            );
-          }
-        } catch (e2: any) {
-          console.error('[VagaService.criar] Falha ao criar tabela enderecos_vaga', e2.message);
-        }
+      const iniStr = dados.data_inicio_local || dados.data_inicio || dados.dataInicio;
+      const fimStr = dados.data_fim_local || dados.data_fim || dados.dataFim;
+      let horas = 4;
+      if (iniStr && fimStr) {
+        const diffMs = new Date(fimStr).getTime() - new Date(iniStr).getTime();
+        horas = Math.round((diffMs / (1000 * 60 * 60)) * 100) / 100;
+        if (horas <= 0) throw new Error('Data fim deve ser maior que início');
       }
-    }
-
-    return vaga;
+      const base = Number(dados.valor_servico) + Number(dados.valor_transporte || 0);
+      const taxaPercent = dados.meio_pagamento === 'cartao' ? TAXA_CARTAO : TAXA_PIX;
+      const taxa_pagamento = (Number(dados.valor_servico) * taxaPercent / 100);
+      const comissao_app = (Number(dados.valor_servico) * COMISSAO / 100);
+      const total_contratante = base + taxa_pagamento + comissao_app;
+      const freela_recebe_liquido = Number(dados.valor_servico) + Number(dados.valor_transporte || 0) - taxa_pagamento - comissao_app;
+      const valor_hora_final = horas > 0 ? freela_recebe_liquido / horas : 0;
+      const valor_minimo_valido = freela_recebe_liquido >= VALOR_MINIMO;
+      // Campos que o mural API-only espera
+      const taxa_cartao = base * (TAXA_CARTAO / 100);
+      const comissao = base * (COMISSAO / 100);
+      const total_descontos = taxa_cartao + comissao;
+      const valor_a_receber = base - total_descontos;
+      return {
+        valor_servico: Number(dados.valor_servico),
+        valor_transporte: Number(dados.valor_transporte || 0),
+        base_calculo: base,
+        horas_estimadas: horas,
+        valor_hora_bruto: horas > 0 ? Number(dados.valor_servico) / horas : 0,
+        taxa_pix_percentual: TAXA_PIX, taxa_cartao_percentual: TAXA_CARTAO, comissao_percentual: COMISSAO,
+        taxa_pagamento, taxa_cartao, taxa_pagamento_cartao: taxa_cartao,
+        comissao_app, comissao, total_descontos,
+        total_contratante, contratante_paga: base,
+        freela_recebe_bruto: base, freela_recebe_liquido, valor_a_receber,
+        valor_servico_liquido: valor_a_receber - Number(dados.valor_transporte || 0),
+        valor_servico_liquido_cartao: valor_a_receber - Number(dados.valor_transporte || 0),
+        valor_hora_liquido: valor_hora_final, valor_hora_final, valor_minimo_valido,
+        mensagem_validacao: valor_minimo_valido ? undefined : `Valor mínimo R$ ${VALOR_MINIMO.toFixed(2)} - aumente o valor do serviço`,
+        meio_pagamento: 'cartao',
+      };
+    } catch (e: any) { this.handleError(e, 'VagaService.calcular'); }
   }
 
-  async atualizar(id: number, dados: any): Promise<VagaModel | null> { 
-    const idNum = Number(id);
-    if (!idNum || isNaN(idNum)) throw new Error('ID inválido');
-    
-    const enderecoIdRaw = dados.endereco_id || dados.enderecoId;
-    const enderecoId = enderecoIdRaw ? Number(enderecoIdRaw) : null;
-    
-    const payload = { ...dados };
-    delete payload.endereco_id;
-    delete payload.enderecoId;
-    delete payload.contratante_id;
-    delete payload.contratanteId;
-    delete payload.data_inicio_local;
-    delete payload.data_fim_local;
-    delete payload.timezone;
-    delete payload.meio_pagamento;
-
-    // Atualiza vaga
-    const atualizado = await this.repo.atualizarGenerico(idNum, payload);
-    
-    // Se mudou endereco, atualiza vínculo
-    if (enderecoId && !isNaN(enderecoId)) {
-      try {
-        const pool = BaseRepository.getPool() as any;
-        if (pool) {
-          await pool.query('UPDATE enderecos_vaga SET ativo = false WHERE vaga_id = $1', [idNum]);
-          await pool.query(
-            'INSERT INTO enderecos_vaga (vaga_id, endereco_id, ativo) VALUES ($1,$2,true) ON CONFLICT (vaga_id, endereco_id) DO UPDATE SET ativo = true',
-            [idNum, enderecoId]
-          );
-        }
-      } catch (e: any) {
-        console.warn('[atualizar] falha vincular endereco', e.message);
-      }
-    }
-    
-    return atualizado; 
+  calcularDistanciaKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+    if (!lat1 || !lng1 || !lat2 || !lng2) return 0;
+    const R = 6371, dLat = (lat2 - lat1) * Math.PI / 180, dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
-  
-  async deletar(id: number): Promise<boolean> { 
-    const idNum = Number(id);
-    if (!idNum || isNaN(idNum)) throw new Error('ID inválido');
+
+  async listarMuralParaUsuario(usuarioId: number): Promise<any[]> {
+    const pool = BaseRepository.getPool() as any;
+    const cfg = await this.variavelSvc.getConfigCancelamento().catch(() => ({ prazoHoras: 24 }));
+    let vagas: any[] = [];
     try {
-      const pool = BaseRepository.getPool() as any;
+      const r = await pool.query(`SELECT v.*, sv.chave as status_chave, sv.nome_exibicao as status_nome, sv.cor_hex as status_cor, sv.permite_editar, sv.permite_cancelar, sv.permite_candidatar FROM vagas v JOIN status_vaga sv ON sv.id = v.status_vaga_id WHERE sv.chave IN ('AGUARDANDO_CANDIDATURA','AGUARDANDO_ACEITE') ORDER BY v.criado_em DESC`);
+      vagas = r.rows;
+    } catch { vagas = await this.listarAbertas(); }
+
+    let enderecoAtivoUsuario: any = null;
+    const minhasCandidaturas = new Map<number, any>();
+    if (pool && usuarioId) {
+      try { const rr = await pool.query(`SELECT * FROM enderecos WHERE usuario_id=$1 AND ativo=true LIMIT 1`, [usuarioId]); enderecoAtivoUsuario = rr.rows[0] || null; } catch {}
+      try { const rc = await pool.query(`SELECT * FROM candidaturas WHERE (freela_id=$1 OR usuario_id=$1) AND status IN ('PENDENTE','ACEITA','EM_ANALISE')`, [usuarioId]); rc.rows.forEach((c: any) => minhasCandidaturas.set(Number(c.vaga_id), c)); } catch {}
+    }
+
+    const result: any[] = [];
+    for (const v of vagas) {
+      const calculo = await this.calcular(v);
+      let enderecoVaga: any = null;
       if (pool) {
-        await pool.query('DELETE FROM enderecos_vaga WHERE vaga_id = $1', [idNum]);
+        try { const re = await pool.query(`SELECT e.*, c.nome as cidade_nome, c.estado as cidade_estado FROM enderecos_vaga ev JOIN enderecos e ON e.id=ev.endereco_id LEFT JOIN cidades c ON c.id=e.cidade_id WHERE ev.vaga_id=$1 AND ev.ativo=true LIMIT 1`, [v.id]); enderecoVaga = re.rows[0] || null; } catch {}
       }
-    } catch {}
-    return await this.repo.deletarPorId(idNum); 
+      let distanciaKm = 0, distanciaTexto = '';
+      if (enderecoAtivoUsuario && enderecoVaga && enderecoAtivoUsuario.latitude && enderecoVaga.latitude) {
+        distanciaKm = this.calcularDistanciaKm(Number(enderecoAtivoUsuario.latitude), Number(enderecoAtivoUsuario.longitude), Number(enderecoVaga.latitude), Number(enderecoVaga.longitude));
+        distanciaTexto = distanciaKm < 1 ? `${Math.round(distanciaKm * 1000)} m` : `${distanciaKm.toFixed(1)} km`;
+      }
+      const isMinha = Number(v.contratante_id) === Number(usuarioId);
+      const minhaCand = minhasCandidaturas.get(Number(v.id));
+      const statusChave = (v.status_chave || 'AGUARDANDO_CANDIDATURA').toUpperCase();
+      let horasParaInicio = 9999, podeCancelarCandidatura = true, motivoCancelarBloqueado = '';
+      if (minhaCand) {
+        horasParaInicio = (new Date(v.data_inicio).getTime() - Date.now()) / (1000 * 60 * 60);
+        if ((minhaCand.status || '').toUpperCase() === 'ACEITA' || statusChave === 'ACEITA') {
+          if (horasParaInicio < cfg.prazoHoras) { podeCancelarCandidatura = false; motivoCancelarBloqueado = `Faltam ${horasParaInicio.toFixed(1)}h para o início. Cancelamento até ${cfg.prazoHoras}h antes.`; }
+        }
+        if (statusChave === 'EM_ANDAMENTO') { podeCancelarCandidatura = false; motivoCancelarBloqueado = 'Trampo já em andamento, não pode cancelar.'; }
+      }
+      result.push({
+        id: v.id, titulo: v.titulo, funcao: v.funcao, descricao: v.descricao,
+        contratante_id: v.contratante_id, contratante_nome: v.contratante_nome,
+        status: v.status_nome || statusChave, status_chave: statusChave, status_nome: v.status_nome || statusChave, status_cor: v.status_cor,
+        permite_editar: v.permite_editar ?? !['ACEITA','EM_ANDAMENTO','FINALIZADA','CANCELADA','FECHADA'].includes(statusChave),
+        permite_cancelar: v.permite_cancelar ?? !['EM_ANDAMENTO','FINALIZADA','CANCELADA','FECHADA'].includes(statusChave),
+        permite_candidatar: v.permite_candidatar ?? true,
+        data_inicio: v.data_inicio, data_fim: v.data_fim,
+        valor_servico: v.valor_servico, valor_transporte: v.valor_transporte,
+        calculo,
+        bairro: enderecoVaga?.bairro, cidade_nome: enderecoVaga?.cidade_nome, cidade_estado: enderecoVaga?.cidade_estado,
+        endereco_completo: isMinha && enderecoVaga ? `${enderecoVaga.logradouro || ''} ${enderecoVaga.numero || ''}, ${enderecoVaga.bairro || ''}, ${enderecoVaga.cidade_nome || ''} - ${enderecoVaga.cidade_estado || ''} CEP ${enderecoVaga.cep || ''}` : null,
+        logradouro: isMinha ? enderecoVaga?.logradouro : undefined,
+        cep: isMinha ? enderecoVaga?.cep : undefined,
+        numero: isMinha ? enderecoVaga?.numero : undefined,
+        distancia_km: distanciaKm, distancia_texto: distanciaTexto,
+        is_minha: isMinha, ja_candidatado: !!minhaCand, minha_candidatura: minhaCand || null, candidatura_status: minhaCand?.status || null,
+        horas_para_inicio: horasParaInicio, pode_cancelar_candidatura: podeCancelarCandidatura, motivo_cancelar_bloqueado: motivoCancelarBloqueado,
+        valor_total_pagar: calculo.contratante_paga, valor_a_receber: calculo.valor_a_receber, valor_servico_liquido: calculo.valor_servico_liquido,
+      });
+    }
+    return result;
+  }
+
+  // Cancelar vaga do dono - com trava via status_vaga
+  async cancelarVaga(vagaId: number, usuarioId: number, motivo?: string): Promise<any> {
+    const pool = BaseRepository.getPool() as any;
+    const vaga = await this.buscarCompletaPorId(vagaId);
+    if (!vaga) throw new Error('Vaga não encontrada');
+    if (Number(vaga.contratante_id) !== Number(usuarioId)) throw new Error('Só o dono pode cancelar a vaga');
+    const statusChave = (vaga.status_chave || '').toUpperCase();
+    if (['EM_ANDAMENTO','FINALIZADA','CANCELADA','FECHADA'].includes(statusChave)) throw new Error(`Não pode cancelar com status ${statusChave}`);
+    const rs = await pool.query(`SELECT id FROM status_vaga WHERE chave='CANCELADA'`);
+    if (rs.rows[0]) await pool.query(`UPDATE vagas SET status_vaga_id=$1 WHERE id=$2`, [rs.rows[0].id, vagaId]);
+    return { vaga_id: vagaId, novo_status: 'CANCELADA', motivo: motivo || 'Cancelado pelo contratante' };
   }
 }

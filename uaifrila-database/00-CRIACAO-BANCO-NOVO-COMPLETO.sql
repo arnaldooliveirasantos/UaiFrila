@@ -183,6 +183,22 @@ CREATE TABLE IF NOT EXISTS enderecos (
 -- =====================================================================
 -- 5. VAGAS, CANDIDATURAS, TRAMPOS, TRANSACOES, AVALIACOES
 -- =====================================================================
+CREATE TABLE IF NOT EXISTS status_vaga (
+  id SERIAL PRIMARY KEY,
+  chave VARCHAR(50) UNIQUE NOT NULL,
+  nome_exibicao VARCHAR(100) NOT NULL,
+  descricao TEXT,
+  cor_hex VARCHAR(20),
+  ordem INT DEFAULT 0,
+  permite_editar BOOLEAN DEFAULT true,
+  permite_cancelar BOOLEAN DEFAULT true,
+  permite_candidatar BOOLEAN DEFAULT true,
+  ativo BOOLEAN DEFAULT true,
+  criado_em TIMESTAMP DEFAULT NOW()
+);
+
+
+
 CREATE TABLE vagas (
   id SERIAL PRIMARY KEY,
   contratante_id INT NOT NULL REFERENCES usuarios(id),
@@ -193,7 +209,7 @@ CREATE TABLE vagas (
   valor_servico NUMERIC(10,2) ,
   valor_transporte NUMERIC(10,2) ,
   total_freela NUMERIC(10,2),
-  status VARCHAR(20) DEFAULT 'PENDENTE',
+  status_vaga_id INT  NOT NULL REFERENCES status_vaga(id)DEFAULT 1,
   data_inicio TIMESTAMP NOT NULL,
   data_fim TIMESTAMP NOT NULL,
   criado_em TIMESTAMP DEFAULT NOW(),
@@ -477,12 +493,12 @@ ON CONFLICT (sigla, pais_id) DO UPDATE SET
   regiao = EXCLUDED.regiao,
   ativo = CASE WHEN EXCLUDED.sigla = 'MG' THEN true ELSE false END;
 
-INSERT INTO cidades (nome, estado,estado_id, ativa, lat, lng, raio_km, regiao, codigo_ibge, populacao, status_expansao, demanda_score) VALUES
-('Uberlândia', 'MG',(SELECT id FROM estados WHERE sigla='MG'),  true, -18.9186, -48.2772, 25, 'Triângulo Mineiro', '3170206', 713232, 'ATIVA', 100),
-('Uberaba', 'MG',(SELECT id FROM estados WHERE sigla='MG'),  false, -19.7476, -47.9381, 20, 'Triângulo Mineiro', '3170107', 337836, 'ATIVA', 80),
-('Araguari', 'MG',(SELECT id FROM estados WHERE sigla='MG'),  false, -18.6455, -48.1873, 15, 'Triângulo Mineiro', '3103504', 117825, 'ATIVA', 60),
-('Ituiutaba', 'MG',(SELECT id FROM estados WHERE sigla='MG'),  false, -18.9689, -49.4656, 15, 'Triângulo Mineiro', '3134202', 105818, 'INATIVA', 20),
-('Patrocínio', 'MG',(SELECT id FROM estados WHERE sigla='MG'),  false, -18.9443, -46.9936, 15, 'Triângulo Mineiro', '3144607', 91995, 'INATIVA', 15);
+INSERT INTO cidades (pais_id,nome, estado,estado_id, ativa, lat, lng, raio_km, regiao, codigo_ibge, populacao, status_expansao, demanda_score) VALUES
+((SELECT id FROM paises WHERE sigla='BRA'),('Uberlândia', 'MG',(SELECT id FROM estados WHERE sigla='MG'),  true, -18.9186, -48.2772, 25, 'Triângulo Mineiro', '3170206', 713232, 'ATIVA', 100),
+((SELECT id FROM paises WHERE sigla='BRA'),'Uberaba', 'MG',(SELECT id FROM estados WHERE sigla='MG'),  false, -19.7476, -47.9381, 20, 'Triângulo Mineiro', '3170107', 337836, 'ATIVA', 80),
+((SELECT id FROM paises WHERE sigla='BRA'),'Araguari', 'MG',(SELECT id FROM estados WHERE sigla='MG'),  false, -18.6455, -48.1873, 15, 'Triângulo Mineiro', '3103504', 117825, 'ATIVA', 60),
+((SELECT id FROM paises WHERE sigla='BRA'),('Ituiutaba', 'MG',(SELECT id FROM estados WHERE sigla='MG'),  false, -18.9689, -49.4656, 15, 'Triângulo Mineiro', '3134202', 105818, 'INATIVA', 20),
+((SELECT id FROM paises WHERE sigla='BRA'),'Patrocínio', 'MG',(SELECT id FROM estados WHERE sigla='MG'),  false, -18.9443, -46.9936, 15, 'Triângulo Mineiro', '3144607', 91995, 'INATIVA', 15);
 
 
 --'Em dev'
@@ -522,6 +538,18 @@ INSERT INTO tipos_endereco (chave, nome, descricao, icone) VALUES
 ('EVENTO', 'Evento', 'Local onde a vaga será realizada','briefcase'),
 ('OUTRO', 'Outro', 'Outro tipo de endereço', 'map-pin')
 ON CONFLICT (chave) DO NOTHING;
+
+INSERT INTO status_vaga (chave, nome_exibicao, descricao, cor_hex, ordem, permite_editar, permite_cancelar, permite_candidatar) VALUES
+('AGUARDANDO_CANDIDATURA', 'Aguardando Candidatura', 'Vaga aberta, aguardando freelas se candidatarem', '#22C55E', 1, true, true, true),
+('AGUARDANDO_ACEITE', 'Aguardando Aceite', 'Tem candidaturas pendentes, aguardando contratante aceitar um freela', '#F59E0B', 2, true, true, true),
+('ACEITA', 'Aceita', 'Freela aceito, aguardando início (pode cancelar até Xh antes com motivo)', '#3B82F6', 3, false, false, false),
+('EM_ANDAMENTO', 'Em Andamento', 'Trampo iniciado, freela trabalhando', '#8B5CF6', 4, false, false, false),
+('FINALIZADA', 'Finalizada', 'Trampo finalizado', '#10B981', 5, false, false, false),
+('CANCELADA', 'Cancelada', 'Vaga cancelada', '#EF4444', 6, false, false, false),
+('FECHADA', 'Fechada', 'Vaga fechada sem contratação', '#6B7280', 7, false, false, false)
+ON CONFLICT (chave) DO UPDATE SET nome_exibicao=EXCLUDED.nome_exibicao, descricao=EXCLUDED.descricao, cor_hex=EXCLUDED.cor_hex, ordem=EXCLUDED.ordem, permite_editar=EXCLUDED.permite_editar, permite_cancelar=EXCLUDED.permite_cancelar, permite_candidatar=EXCLUDED.permite_candidatar;
+
+
 
 INSERT INTO status_usuario (chave, nome_exibicao, descricao, cor_hex, ordem) VALUES
 ('AGUARDANDO_VALIDACAO', 'Aguardando Validação', 'Usuário cadastrado mas ainda não validou e-mail', '#FFC700', 1),
@@ -665,7 +693,11 @@ INSERT INTO variaveis_sistema (chave, valor, valor_numerico, tipo, descricao, ca
 ('TAXA_PIX_PERCENTUAL', '1', 1.00, 'number', 'Taxa PIX 1% sobre subtotal servico', 'financeiro', true),
 ('TAXA_CARTAO_PERCENTUAL', '4', 4.00, 'number', 'Taxa Cartao 4% sobre subtotal servico', 'financeiro', true),
 ('COMISSAO_APLICATIVO', '10', 10.00, 'number', 'Comissao aplicativo 10% sobre subtotal', 'financeiro', true),
-('VAGA_ANTECEDENCIA_MINUTOS', '30', 30.00, 'number', 'Antecedencia minima para criar vaga em minutos', 'vagas', true)
+('VAGA_ANTECEDENCIA_MINUTOS', '30', 30.00, 'number', 'Antecedencia minima para criar vaga em minutos', 'vagas', true),
+('PRAZO_CANCELAMENTO_CANDIDATURA_HORAS', '24', 24, 'number',  'Prazo mínimo antes do início para freela aceito cancelar candidatura com motivo + notificação ao contratante. Se faltar menos, botão trava.', 'CANDIDATURA', true),
+('PRAZO_CANCELAMENTO_VAGA_HORAS', '24', 24, 'number', 'Prazo mínimo antes do início para contratante cancelar vaga com freela aceito.', 'VAGA', true),
+('MOTIVO_CANCELAMENTO_MIN_CARACTERES', '10', 10, 'number',  'Tamanho mínimo do motivo de cancelamento quando já aceito.', 'CANDIDATURA', true),
+('NOTIFICAR_CANCELAMENTO', 'true', 1, 'boolean', 'Se true, envia notificação ao contratante/freela ao cancelar candidatura aceita.', 'CANDIDATURA', true)
 ON CONFLICT (chave) 
 DO UPDATE SET 
   valor = EXCLUDED.valor,
@@ -675,6 +707,9 @@ DO UPDATE SET
   categoria = EXCLUDED.categoria,
   editavel = EXCLUDED.editavel,
   atualizado_em = NOW();
+
+
+ON CONFLICT (chave) DO NOTHING;
 -- SUPER ADMIN OBRIGATÓRIO
 INSERT INTO usuarios (
   nome_completo, cpf, email, senha_hash, cnpj, nome_fantasia,
