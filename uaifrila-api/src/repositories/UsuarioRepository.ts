@@ -1,15 +1,17 @@
 import { BaseRepository } from './BaseRepository';
 import { UsuarioModel } from '../models/UsuarioModel';
 
-// UsuarioRepository - SEM tu.nome / su.nome em nenhuma query
-// Se precisar do tipo, busca em query separada sem JOIN com nome.
+// UsuarioRepository - CORRIGIDO TS2554
+// Antes: super(UsuarioModel) -> faltava tableName
+// BaseRepository espera: constructor(tableName: string, modelClass, primaryKey = 'id')
+// Todos os outros repos fazem: super('tabela', Model) - ex: super('vagas', VagaModel)
+// SEM tu.nome / su.nome em nenhuma query
 
 export class UsuarioRepository extends BaseRepository<UsuarioModel> {
-  constructor() { super(UsuarioModel); }
+  constructor() { super('usuarios', UsuarioModel); }
 
   async buscarPorEmail(email: string): Promise<any | null> {
     const pool = BaseRepository.getPool() as any;
-    // Só usuarios - sem JOIN
     const res = await pool.query(`SELECT * FROM usuarios WHERE LOWER(email) = LOWER($1) LIMIT 1`, [email]);
     return res.rows[0] || null;
   }

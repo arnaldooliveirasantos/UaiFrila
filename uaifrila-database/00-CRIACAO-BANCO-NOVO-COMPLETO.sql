@@ -122,7 +122,7 @@ CREATE TABLE usuarios (
   nome_completo VARCHAR(150) NOT NULL,
   cpf VARCHAR(14) UNIQUE,
   email VARCHAR(150) UNIQUE NOT NULL,
-  senha_hash VARCHAR(255) NOT NULL,
+  senha_hash VARCHAR(255)  NULL,
   cnpj VARCHAR(18),
   nome_fantasia VARCHAR(150),
   status_usuario_id INT REFERENCES status_usuario(id) DEFAULT 1,
@@ -138,7 +138,9 @@ CREATE TABLE usuarios (
   permissoes JSONB DEFAULT '[]'::jsonb,
   role VARCHAR(30) DEFAULT 'FREELA',
   criado_em TIMESTAMP DEFAULT NOW(),
-  atualizado_em TIMESTAMP DEFAULT NOW()
+  atualizado_em TIMESTAMP DEFAULT NOW(),
+  cancelado_em TIMESTAMP NULL,
+  cancelado_por TEXT NULL
 );
 
 CREATE INDEX idx_usuarios_email ON usuarios(LOWER(email));
@@ -556,8 +558,13 @@ INSERT INTO status_usuario (chave, nome_exibicao, descricao, cor_hex, ordem) VAL
 ('ATIVO', 'Ativo', 'Usuário validado e ativo', '#00C851', 2),
 ('INATIVO', 'Inativo', 'Desativado', '#9E9E9E', 3),
 ('BLOQUEADO', 'Bloqueado', 'Bloqueado por violação', '#E53935', 4),
-('SUSPENSO', 'Suspenso', 'Suspenso temporariamente', '#FF6D00', 5);
-
+('SUSPENSO', 'Suspenso', 'Suspenso temporariamente', '#FF6D00', 5),
+('CANCELADO','Cancelado',  'Cadastro cancelado pelo próprio usuário via link de cancelamento (LGPD). E-mail e CPF anonimizados para IdUsuario@cancelado.com e IdUsuario. Sem acesso ao sistema. E-mail e CPF originais liberados para novo cadastro.', '#6B7280', 99
+)
+ON CONFLICT (chave) DO UPDATE SET
+  nome_exibicao = EXCLUDED.nome_exibicao,
+  descricao = EXCLUDED.descricao,
+  cor_hex = EXCLUDED.cor_hex;
 INSERT INTO email_status (chave, nome) VALUES
 ('EM_ESPERA','Em espera'),
 ('ENVIADO','Enviado'),
@@ -694,10 +701,10 @@ INSERT INTO variaveis_sistema (chave, valor, valor_numerico, tipo, descricao, ca
 ('TAXA_CARTAO_PERCENTUAL', '4', 4.00, 'number', 'Taxa Cartao 4% sobre subtotal servico', 'financeiro', true),
 ('COMISSAO_APLICATIVO', '10', 10.00, 'number', 'Comissao aplicativo 10% sobre subtotal', 'financeiro', true),
 ('VAGA_ANTECEDENCIA_MINUTOS', '30', 30.00, 'number', 'Antecedencia minima para criar vaga em minutos', 'vagas', true),
-('PRAZO_CANCELAMENTO_CANDIDATURA_HORAS', '24', 24, 'number',  'Prazo mínimo antes do início para freela aceito cancelar candidatura com motivo + notificação ao contratante. Se faltar menos, botão trava.', 'CANDIDATURA', true),
-('PRAZO_CANCELAMENTO_VAGA_HORAS', '24', 24, 'number', 'Prazo mínimo antes do início para contratante cancelar vaga com freela aceito.', 'VAGA', true),
-('MOTIVO_CANCELAMENTO_MIN_CARACTERES', '10', 10, 'number',  'Tamanho mínimo do motivo de cancelamento quando já aceito.', 'CANDIDATURA', true),
-('NOTIFICAR_CANCELAMENTO', 'true', 1, 'boolean', 'Se true, envia notificação ao contratante/freela ao cancelar candidatura aceita.', 'CANDIDATURA', true)
+('PRAZO_CANCELAMENTO_CANDIDATURA_HORAS', '24', 24, 'number',  'Prazo mínimo antes do início para freela aceito cancelar candidatura com motivo + notificação ao contratante. Se faltar menos, botão trava.', 'candidatura', true),
+('PRAZO_CANCELAMENTO_VAGA_HORAS', '24', 24, 'number', 'Prazo mínimo antes do início para contratante cancelar vaga com freela aceito.', 'vagas', true),
+('MOTIVO_CANCELAMENTO_MIN_CARACTERES', '10', 10, 'number',  'Tamanho mínimo do motivo de cancelamento quando já aceito.', 'candidatura', true),
+('NOTIFICAR_CANCELAMENTO', 'true', 1, 'boolean', 'Se true, envia notificação ao contratante/freela ao cancelar candidatura aceita.', 'candidatura', true)
 ON CONFLICT (chave) 
 DO UPDATE SET 
   valor = EXCLUDED.valor,

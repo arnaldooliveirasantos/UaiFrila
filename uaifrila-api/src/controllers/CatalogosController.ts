@@ -4,6 +4,7 @@ import { PaisService } from '../services/PaisService';
 import { FuncaoService } from '../services/FuncaoService';
 import { TipoEnderecoService } from '../services/TipoEnderecoService';
 import { StatusUsuarioService } from '../services/StatusUsuarioService';
+import { TipoUsuarioService } from '../services/TipoUsuarioService';
 import { BaseController } from './BaseController';
 
 export class PaisController extends BaseController {
@@ -46,6 +47,23 @@ export class StatusUsuarioController extends BaseController {
     try {
       const status = await this.service.listar();
       return res.json({ success: true, data: this.mapListToPublic(status, req) });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
+}
+
+export class TipoUsuarioController extends BaseController {
+  private service: TipoUsuarioService;
+  constructor() { super(); this.service = new TipoUsuarioService(); }
+  listar = async (req: Request, res: Response) => {
+    try {
+      const tipos = await this.service.listar();
+      return res.json({ success: true, data: this.mapListToPublic(tipos, req), tipos: this.mapListToPublic(tipos, req) });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
+  criar = async (req: Request, res: Response) => {
+    try {
+      const tipo = await this.service.criar(req.body);
+      return res.status(201).json({ success: true, data: this.mapToPublic(tipo, req) });
     } catch (e: any) { return this.handleError(res, e); }
   };
 }

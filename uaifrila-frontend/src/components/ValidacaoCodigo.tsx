@@ -1,6 +1,10 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
-import { apiFetch, setToken } from '../utils/Api';
+
+const API = (import.meta as any).env?.VITE_API_URL || 'http://192.168.24.11:3000/api';
+
+const STORAGE_KEY = 'uaifrila_validacao_pendente';
 
 interface Props {
   email?: string;
@@ -8,145 +12,331 @@ interface Props {
   onValidado: (data: any) => void;
   onVoltar: () => void;
   codigoInicial?: string;
-  autoValidarDoLink?: boolean;
+  dadosCadastro?: any;
 }
 
-export default function ValidacaoCodigo({ email: emailProp, tipo: tipoProp, onValidado, onVoltar, codigoInicial, autoValidarDoLink }: Props) {
+export default function ValidacaoCodigo({ email: emailProp, tipo: tipoProp, onValidado, onVoltar, codigoInicial, dadosCadastro }: Props) {
   const styles = useUaiFrilaStyles();
-  const [email, setEmail] = useState(emailProp || '');
-  const [tipo] = useState(tipoProp || 'login');
-  const [codigo, setCodigo] = useState('');
+  
+  const getStored = () => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch {}
+    return null;
+  };
+
+  const stored = getStored();
+
+  const [email, setEmail] = useState(emailProp || stored?.email || '');
+  const [tipo, setTipo] = useState<'cadastro' | 'login' | 'recuperacao'>(tipoProp || stored?.tipo || 'login');
+  const [codigo, setCodigo] = useState(codigoInicial || '');
   const [carregando, setCarregando] = useState(false);
-  const [reenviando, setReenviando] = useState(false);
   const [erro, setErro] = useState('');
   const [sucesso, setSucesso] = useState('');
-  const [debug, setDebug] = useState('');
   const [tempoRestante, setTempoRestante] = useState(300);
-  const [cooldownReenvio, setCooldownReenvio] = useState(0);
+  const [tentativas, setTentativas] = useState(stored?.tentativas || 0);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
-  const validandoRef = useRef(false);
-  const jaAutoValidouRef = useRef(false);
+  const jaAutoValidou = useRef<string>(''); // guarda: auto-validate SÓ 1x por código (StrictMode roda o useEffect 2x)
 
-  // Sincroniza email que veio da URL (Login pode setar depois do mount)
-  useEffect(() => { if (emailProp) setEmail(emailProp); }, [emailProp]);
+  // FIX 1: Sincroniza props que vêm da URL (email e codigo do link do e-mail)
+  useEffect(() => {
+    if (emailProp && emailProp !== email) {
+      console.log('[Validacao] Email da URL/link:', emailProp);
+      setEmail(emailProp);
+    }
+  }, [emailProp]);
 
   useEffect(() => {
-    const t = setInterval(() => setTempoRestante((p) => (p <= 1 ? 0 : p - 1)), 1000);
-    return () => clearInterval(t);
+    if (tipoProp && tipoProp !== tipo) {
+      setTipo(tipoProp);
+    }
+  }, [tipoProp]);
+
+  useEffect(() => {
+    if (codigoInicial && codigoInicial !== codigo) {
+      console.log('[Validacao] Código da URL/link:', codigoInicial);
+      setCodigo(codigoInicial);
+    }
+  }, [codigoInicial]);
+
+  useEffect(() => {
+    if (email) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        email,
+        tipo,
+        timestamp: Date.now(),
+        tentativas
+      }));
+    }
+  }, [email, tipo, tentativas]);
+
+  useEffect(() => {
+    const storedTime = stored?.timestamp ? Math.floor((Date.now() - stored.timestamp) / 1000) : 0;
+    const restanteInicial = Math.max(0, 300 - storedTime);
+    setTempoRestante(restanteInicial);
+
+    const timer = setInterval(() => {
+      setTempoRestante(prev => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
   }, []);
-  useEffect(() => {
-    if (cooldownReenvio <= 0) return;
-    const t = setTimeout(() => setCooldownReenvio((c) => c - 1), 1000);
-    return () => clearTimeout(t);
-  }, [cooldownReenvio]);
 
-  const formatarTempo = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
+  // FIX 2: Auto-valida quando tem email e codigo da URL - SÓ 1x por código.
+  // Antes: rodava 2x (StrictMode) e rodava mesmo em cadastro sem dadosCadastro -> 2x 400 "Código inválido".
+  useEffect(() => {
+    const cod = codigoInicial || codigo;
+    const em = emailProp || email;
+    if (!cod || cod.length !== 6 || !em) return;
+    if (jaAutoValidou.current === `${em}|${cod}`) return; // já tentou esse código, não tenta de novo
+    // Cadastro: NÃO bloqueia por falta de dadosCadastro.
+    // ANTES: sem dadosCadastro, não auto-validava e depois o validar() bloqueava com
+    // "Dados do cadastro perdidos". Isso era da regra antiga (usuário nascia no validar).
+    // AGORA: o usuário JÁ nasceu no Cadastrar (solicitar), com AGUARDANDO_VALIDACAO.
+    // O validar SÓ ativa. Não precisa de nome/CPF de novo. Pode auto-validar pelo link.
+    jaAutoValidou.current = `${em}|${cod}`;
+    console.log('[Validacao] Auto-validando código da URL:', cod, 'para', em);
+    setCodigo(cod);
+    if (em) setEmail(em);
+    setTimeout(() => validarCodigo(cod, em), 800);
+  }, [codigoInicial, emailProp]);
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (email && !sucesso) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+          email, tipo, timestamp: Date.now(), tentativas
+        }));
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.hidden && email) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+          email, tipo, timestamp: Date.now(), tentativas
+        }));
+        console.log('[Validacao] Aba oculta - estado salvo');
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [email, tipo, tentativas, sucesso]);
+
+  const formatarTempo = (s: number) => {
+    const m = Math.floor(s / 60);
+    const seg = s % 60;
+    return `${m}:${seg.toString().padStart(2, '0')}`;
+  };
 
   const validarCodigo = async (codigoParaValidar?: string, emailParaValidar?: string) => {
-    const codigoFinal = (codigoParaValidar ?? codigo).trim();
-    const emailFinal = (emailParaValidar ?? email ?? emailProp ?? '').trim().toLowerCase();
-    console.log('[ValidacaoCodigo] validarCodigo chamado:', { codigo: codigoFinal, email: emailFinal, tipo });
-    setDebug(`Tentando validar: codigo=${codigoFinal} email=${emailFinal} tipo=${tipo}`);
-    if (codigoFinal.length !== 6) { setErro('Digite o código de 6 dígitos'); return; }
-    if (!emailFinal.includes('@')) { setErro('E-mail inválido - volte e informe o e-mail'); return; }
-    if (validandoRef.current) { console.log('[ValidacaoCodigo] já validando, ignorando'); return; }
-    validandoRef.current = true;
-    setCarregando(true); setErro(''); setSucesso('');
+    const cod = codigoParaValidar || codigo;
+    const em = emailParaValidar || email;
+    if (!cod || cod.length !== 6) {
+      setErro('Digite o código de 6 dígitos');
+      return;
+    }
+    if (!em) {
+      setErro('E-mail não informado - volte e digite seu e-mail');
+      return;
+    }
+    setCarregando(true);
+    setErro('');
     try {
-      // ATENÇÃO: Api.ts já tem /api na base (VITE_API_URL=http://...:3000/api)
-      // Por isso o caminho é /auth/validar-codigo, NÃO /api/auth/validar-codigo (daria /api/api/...)
-      const data: any = await apiFetch('/auth/validar-codigo', {
-        method: 'POST',
-        body: JSON.stringify({ email: emailFinal, codigo: codigoFinal, tipo }),
-      });
-      console.log('[ValidacaoCodigo] resposta validar-codigo:', data);
-      const token = data.token || data.data?.token;
-      const usuario = data.usuario || data.data?.usuario;
-      if (!token || !usuario) {
-        console.error('[ValidacaoCodigo] backend sem token/usuario:', data);
-        throw new Error(`Backend retornou sem token/usuario. Resposta: ${JSON.stringify(data).slice(0, 300)} - verifique se AuthController.validarCodigo() é o REAL, não o mock`);
+      console.log('[Validacao] Enviando para API:', { email: em, codigo: cod, tipo });
+      // dadosCadastro ANTES do fetch - nunca dentro do objeto do fetch (era o erro de sintaxe 151:8)
+      let dadosParaEnviar: any = null;
+      if (tipo === 'cadastro') {
+        if (dadosCadastro && Object.keys(dadosCadastro).length > 0) dadosParaEnviar = dadosCadastro;
+        else {
+          try { const raw = localStorage.getItem('uaifrila_cadastro_pendente'); dadosParaEnviar = raw ? JSON.parse(raw) : null; } catch { dadosParaEnviar = null; }
+        }
       }
-      setToken(token);
-      localStorage.setItem('uaifrila_usuario', JSON.stringify(usuario));
-      localStorage.removeItem('uaifrila_validacao_pendente');
-      try { window.history.replaceState({}, '', window.location.pathname); } catch {}
-      setSucesso('Código validado! Entrando...');
-      setTimeout(() => onValidado(data), 300);
+      // SEM TRAVA de "Dados perdidos": se não tem dadosCadastro (ex: abriu pelo link do e-mail
+      // em outra aba, ou o localStorage foi limpo), AINDA ASSIM valida. O backend ativa o usuário
+      // que já existe (criado no Cadastrar). Só loga o aviso, não bloqueia.
+      if (tipo === 'cadastro' && (!dadosParaEnviar || !dadosParaEnviar.nome || !dadosParaEnviar.cpf)) {
+        console.warn('[Validacao] Sem dadosCadastro no front (prop + localStorage vazios) - validando mesmo assim, backend ativa o usuário já criado no Cadastrar');
+        dadosParaEnviar = null;
+      }
+      const res = await fetch(`${API}/auth/validar-codigo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: em, codigo: cod, tipo, ...(dadosParaEnviar ? { dadosCadastro: dadosParaEnviar, ...dadosParaEnviar } : {}) })
+      });
+      const data = await res.json();
+      console.log('[Validacao] Resposta API:', res.status, data);
+      if (!res.ok) throw new Error(data.erro || 'Código inválido');
+      
+      setSucesso('Código validado com sucesso!');
+      localStorage.removeItem(STORAGE_KEY);
+      
+      setTimeout(() => onValidado(data), 800);
     } catch (e: any) {
-      console.error('[ValidacaoCodigo] erro validar:', e);
-      setErro(e.message || 'Código inválido');
-      setDebug(`Erro: ${e.message} | Verifique Network > validar-codigo > Response`);
+      console.error('[Validacao] Erro:', e.message);
+      setErro(e.message);
+      setTentativas(t => t + 1);
+      if (tentativas >= 4) {
+        setErro('Muitas tentativas. Solicite um novo código.');
+      }
     } finally {
       setCarregando(false);
-      validandoRef.current = false;
     }
   };
-
-  // Auto-valida SÓ do link, e espera o email chegar (emailProp pode chegar depois)
-  useEffect(() => {
-    if (!autoValidarDoLink) return;
-    if (jaAutoValidouRef.current) return;
-    if (!codigoInicial || codigoInicial.length !== 6) return;
-    const emailAtual = (emailProp || email || '').trim();
-    if (!emailAtual.includes('@')) {
-      console.log('[ValidacaoCodigo] aguardando email da URL antes de auto-validar...');
-      return; // espera o email chegar, não valida com email vazio
-    }
-    jaAutoValidouRef.current = true;
-    setCodigo(codigoInicial);
-    setSucesso('Link do e-mail detectado! Validando automaticamente...');
-    console.log('[ValidacaoCodigo] auto-validando do link:', { codigo: codigoInicial, email: emailAtual });
-    const t = setTimeout(() => validarCodigo(codigoInicial, emailAtual), 500);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoValidarDoLink, codigoInicial, emailProp, email]);
 
   const reenviarCodigo = async () => {
-    if (reenviando || cooldownReenvio > 0) return;
-    if (!email) { setErro('Informe o e-mail'); return; }
-    setReenviando(true); setErro(''); setSucesso('');
+    setCarregando(true);
+    setErro('');
     try {
-      await apiFetch('/auth/reenviar-codigo', { method: 'POST', body: JSON.stringify({ email: email.trim().toLowerCase(), tipo }) });
-      setCodigo(''); inputRefs.current[0]?.focus();
-      setSucesso('Novo código enviado! Confira seu e-mail e digite o NOVO código.');
-      setTempoRestante(300); setCooldownReenvio(60);
-      jaAutoValidouRef.current = true; // novo código NÃO auto-valida
-    } catch (e: any) { setErro(e.message || 'Erro ao reenviar'); } finally { setReenviando(false); }
+      const res = await fetch(`${API}/auth/reenviar-codigo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, tipo, ...(tipo === 'cadastro' ? { dadosCadastro: dadosCadastro || (() => { try { const raw = localStorage.getItem('uaifrila_cadastro_pendente'); return raw ? JSON.parse(raw) : undefined; } catch { return undefined; } })() } : {}) })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.erro || 'Erro ao reenviar');
+      setSucesso('Novo código enviado! Verifique seu e-mail.');
+      setTempoRestante(300);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        email, tipo, timestamp: Date.now(), tentativas: 0
+      }));
+      setTentativas(0);
+    } catch (e: any) {
+      setErro(e.message);
+    } finally {
+      setCarregando(false);
+    }
   };
 
-  const handleChangeDigito = (v: string, i: number) => {
-    const val = v.replace(/\D/g, '').slice(-1);
-    const novo = codigo.split(''); novo[i] = val; setCodigo(novo.join('')); setErro('');
-    if (val && i < 5) inputRefs.current[i + 1]?.focus();
+  const cancelarCadastro = async () => {
+    if (!confirm('Tem certeza que deseja cancelar?')) return;
+    try {
+      // Cancelar exige email + codigo (o controller valida o código antes de cancelar)
+      const resCancel = await fetch(`${API}/auth/cancelar-cadastro`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, codigo })
+      });
+      const dataCancel = await resCancel.json().catch(() => ({}));
+      if (!resCancel.ok) throw new Error(dataCancel.erro || dataCancel.message || 'Erro ao cancelar');
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem('uaifrila_cadastro_pendente');
+      alert('Cadastro cancelado.');
+      onVoltar();
+    } catch {
+      localStorage.removeItem(STORAGE_KEY);
+      onVoltar();
+    }
   };
-  const handleColar = (e: React.ClipboardEvent) => {
+
+  const handleCodigoChange = (value: string, index: number) => {
+    const digit = value.replace(/\D/g, '').slice(-1);
+    const newCodigo = codigo.split('');
+    while (newCodigo.length < 6) newCodigo.push('');
+    newCodigo[index] = digit;
+    const joined = newCodigo.join('').slice(0, 6);
+    setCodigo(joined);
+
+    if (digit && index < 5) {
+      inputRefs.current[index + 1]?.focus();
+    }
+    if (joined.length === 6) {
+      setTimeout(() => validarCodigo(joined), 300);
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
     e.preventDefault();
-    const texto = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
-    if (!texto) return; setCodigo(texto); setErro(''); inputRefs.current[Math.min(texto.length, 5)]?.focus();
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+    if (pasted.length === 6) {
+      setCodigo(pasted);
+      setTimeout(() => validarCodigo(pasted), 300);
+    }
   };
 
   return (
     <div className={styles.pageContainerSmall}>
       <div className={styles.card}>
-        <h1 className={styles.typography.h1}>Validar Código</h1>
-        <p className={`${styles.typography.bodySmall} mt-2`}>Código de 6 dígitos enviado para {email || '(sem e-mail)'} • Expira em {formatarTempo(tempoRestante)}</p>
-        {autoValidarDoLink && codigoInicial && <p className="text-[11px] mt-2 text-green-600 font-bold">✓ Link do e-mail detectado! Validando automaticamente... ({codigoInicial} / {email})</p>}
-        {erro && <div className={`${styles.errorBox} mt-4`}>{erro}</div>}
-        {sucesso && <div className={`${styles.successBox} mt-4`}>{sucesso}</div>}
-        {debug && <div className="mt-2 p-2 bg-zinc-100 text-[11px] border">{debug}</div>}
-        <div className="mt-6 space-y-4">
-          <div><label className={styles.label}>Email</label><input value={email} onChange={(e) => setEmail(e.target.value)} className={styles.input} placeholder="seu@email.com" /></div>
+        <div className="flex justify-between items-start">
           <div>
-            <label className={styles.label}>Código de 6 dígitos</label>
-            <div className="grid grid-cols-6 gap-2" onPaste={handleColar}>
-              {[0, 1, 2, 3, 4, 5].map((i) => (<input key={i} ref={(el) => { inputRefs.current[i] = el; }} value={codigo[i] || ''} onChange={(e) => handleChangeDigito(e.target.value, i)} onKeyDown={(e) => { if (e.key === 'Backspace' && !codigo[i] && i > 0) inputRefs.current[i - 1]?.focus(); if (e.key === 'Enter') validarCodigo(); }} className={`${styles.input} text-center text-xl font-black`} maxLength={1} inputMode="numeric" autoComplete="one-time-code" />))}
-            </div>
-            <p className={`${styles.typography.caption} mt-2`}>Se o link não validou sozinho, confira o e-mail e clique em Validar.</p>
+            <h2 className={styles.typography.h1}>
+              {tipo === 'cadastro' ? 'Confirme seu cadastro' : 'Código de acesso'}
+            </h2>
+            <p className={`${styles.typography.bodySmall} mt-2 opacity-70`}>
+              Enviamos um código de 6 dígitos para<br />
+              <span className="font-black">{email || 'seu e-mail'}</span>
+            </p>
+            {codigoInicial && (
+              <p className="text-[11px] mt-2 text-green-600 font-bold">✓ Link do e-mail detectado! Validando automaticamente...</p>
+            )}
           </div>
-          <button type="button" onClick={() => validarCodigo()} disabled={carregando || codigo.length !== 6} className={styles.buttonPrimary(carregando || codigo.length !== 6)}>{carregando ? 'Validando...' : 'Validar e Entrar'}</button>
-          <div className="flex justify-between">
-            <button type="button" onClick={reenviarCodigo} disabled={reenviando || cooldownReenvio > 0} className={styles.buttonSecondary}>{reenviando ? 'Reenviando...' : cooldownReenvio > 0 ? `Reenviar em ${cooldownReenvio}s` : 'Reenviar código'}{tempoRestante > 0 ? ` (${formatarTempo(tempoRestante)})` : ''}</button>
-            <button type="button" onClick={onVoltar} className={styles.buttonGhost}>Voltar</button>
+          <span className={styles.badge(tempoRestante > 60 ? 'success' : 'warning')}>
+            {formatarTempo(tempoRestante)}
+          </span>
+        </div>
+
+        <div className={`${styles.valorBox} mt-4 !bg-yellow-50 !border-yellow-400`}>
+          <div className="col-span-2 md:col-span-4 flex gap-2 text-[11px]">
+            <span>📱</span>
+            <span><b>Dica:</b> Link do e-mail expira em 5min. Se não funcionar, copie o código e cole aqui.</span>
+          </div>
+        </div>
+
+        <div className="mt-6">
+          <label className={styles.label}>Código de 6 dígitos *</label>
+          <div className="grid grid-cols-6 gap-2 mt-2" onPaste={handlePaste}>
+            {[0,1,2,3,4,5].map(i => (
+              <input
+                key={i}
+                ref={el => inputRefs.current[i] = el}
+                type="text"
+                inputMode="numeric"
+                maxLength={1}
+                value={codigo[i] || ''}
+                onChange={e => handleCodigoChange(e.target.value, i)}
+                className={`${styles.input} !text-center !text-xl !font-black !h-[56px]`}
+                autoFocus={i === 0}
+              />
+            ))}
+          </div>
+          <p className={`${styles.typography.caption} mt-2`}>Cole o código ou digite. Valida automaticamente.</p>
+          {codigoInicial && <p className="text-[11px] mt-1 text-blue-600">Código da URL: {codigoInicial}</p>}
+        </div>
+
+        {erro && <div className={`${styles.errorBox} mt-4`}>❌ {erro}</div>}
+        {sucesso && <div className={`${styles.successBox} mt-4`}>✅ {sucesso}</div>}
+
+        <div className="mt-6 space-y-3">
+          <button 
+            onClick={() => validarCodigo()} 
+            disabled={carregando || codigo.length !== 6} 
+            className={styles.buttonPrimary(carregando || codigo.length !== 6)}
+          >
+            {carregando ? 'Validando...' : tipo === 'cadastro' ? 'Finalizar cadastro' : 'Entrar'}
+          </button>
+
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={reenviarCodigo} disabled={carregando || tempoRestante > 240} className={styles.buttonSecondary}>
+              {tempoRestante > 240 ? `Aguarde ${formatarTempo(tempoRestante - 240)}` : 'Reenviar código'}
+            </button>
+            <button onClick={onVoltar} className={styles.buttonSecondary}>
+              Voltar
+            </button>
+          </div>
+
+          <div className="border-t-2 border-dashed border-black/10 pt-4 mt-4">
+            <p className={`${styles.typography.caption} text-center mb-2`}>Não foi você?</p>
+            <button onClick={cancelarCadastro} className={styles.buttonGhost + ' !text-red-600 !underline'}>
+              🚫 Não sou eu - Cancelar
+            </button>
           </div>
         </div>
       </div>
