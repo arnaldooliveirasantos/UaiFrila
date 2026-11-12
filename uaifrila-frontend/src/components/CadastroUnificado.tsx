@@ -22,12 +22,12 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
   const tipoAtual = (usuarioProp?.tipo_chave||'').toUpperCase();
   const isTipoRestrito = modoEdicao && tipoAtual && !UsuarioService.isTipoEditavel(tipoAtual);
   const isReadOnly = !!isTipoRestrito;
-  // Trava dos botoes de tipo no Perfil (modoEdicao):
-  // - FREELA: "Quero Trampar" travado ligado; "Quero Contratar" livre (ligar -> DUAL).
-  // - CONTRATANTE: "Quero Contratar" travado ligado; "Quero Trampar" livre (ligar -> DUAL).
-  // - DUAL: os DOIS travados LIGADOS (ja tem os dois).
-  // - OUTROS tipos (ADMIN, SUPER_ADMIN, etc.): os DOIS travados LIGADOS.
-  // Em modoEdicao, o unico botao livre e o "adicionar o outro" de FREELA/CONTRATANTE.
+
+  // Travas de tipo no Perfil — pelo TIPO LOGADO (usuarioProp.tipo_chave):
+  // FREELA: Trampar travado ligado, Contratar livre (ligar -> vira DUAL)
+  // CONTRATANTE: Trampar livre (ligar -> vira DUAL), Contratar travado ligado
+  // DUAL: os dois travados ligados
+  // Outros tipos: os dois travados ligados
   const travaTrampar = modoEdicao && tipoAtual !== 'CONTRATANTE';
   const travaContratar = modoEdicao && tipoAtual !== 'FREELA';
 
@@ -38,22 +38,17 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
       setQueroTrampar(checks.trampar);
       setQueroContratar(checks.contratar);
     }
-    apiGetPublic('/cidades/ativas').then((d: any) => setCidades(d.cidades || d.data || [])).catch(() => {});
+    // /api/cidades ja devolve SO ativas (a rota /api/cidades/ativas nao existia e caia no /:id). A lista serve p/ o select e p/ resolver o estado pela cidade.
+    fetch(`${API}/api/cidades`).then(r=>r.json()).then(d=>setCidades(d.cidades||d.data||[])).catch(()=>{});
   }, []);
 
   useEffect(()=>{
     if (modoEdicao && usuarioProp) {
       const checks = UsuarioService.parseTipoParaChecks(usuarioProp.tipo_chave||'FREELA');
+      // Outros tipos: os dois travados ligados (ex.: ADMIN nao e nem FREELA nem CONTRATANTE).
+      if (!['FREELA', 'CONTRATANTE', 'DUAL'].includes((usuarioProp.tipo_chave || '').toUpperCase())) { checks.trampar = true; checks.contratar = true; }
       setQueroTrampar(checks.trampar);
       setQueroContratar(checks.contratar);
-      // OUTROS tipos (nem FREELA, nem CONTRATANTE, nem DUAL): os dois botoes
-      // ficam travados LIGADOS. O parseTipoParaChecks devolve { trampar: true,
-      // contratar: false } para tipo desconhecido — sem esse override, o
-      // "Quero Contratar" apareceria desligado para um ADMIN, por exemplo.
-      if (!['FREELA','CONTRATANTE','DUAL'].includes((usuarioProp.tipo_chave||'').toUpperCase())) {
-        setQueroTrampar(true);
-        setQueroContratar(true);
-      }
       // BUG 1 - endereço não carregava no Perfil:
       // ANTES: lia só usuarioProp.endereco_ativo_bairro / _completo / _cep (campos planos).
       // O /auth/me devolve endereco_ativo (OBJETO) + enderecos_usuarios (LISTA), não os campos planos.
@@ -69,17 +64,20 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
         nome: usuarioProp.nome_completo||'', cpf: (usuarioProp.cpf||'').replace(/\D/g,''), email: usuarioProp.email||'',
         cnpj: (usuarioProp.cnpj||'').replace(/\D/g,''), nomeFantasia: usuarioProp.nome_fantasia||'',
         funcao: usuarioProp.funcao_principal||'Garçom', valorHora: usuarioProp.valor_hora_base||20, bio: usuarioProp.bio||'',
-        bairro: end?.bairro || usuarioProp.endereco_ativo_bairro || 'Centro',
-        endereco: end ? (end.logradouro || end.endereco || '') : (usuarioProp.endereco_ativo_completo || ''),
-        cidade_id: end?.cidade_id || end?.cidadeId || end?.cidade?.id || usuarioProp.endereco_ativo_cidade_id || 1,
-        estado_id: end?.cidade?.estadoId ?? end?.cidade?.estado_id ?? end?.estado_id ?? end?.estadoId ?? usuarioProp.endereco_ativo_estado_id ?? null,
-        cep: end?.cep || usuarioProp.endereco_ativo_cep || '',
-        numero: end?.numero || usuarioProp.endereco_ativo_numero || '',
-        complemento: end?.complemento || usuarioProp.endereco_ativo_complemento || '',
-        lat: end?.latitude ?? end?.lat ?? usuarioProp.endereco_ativo_lat, lng: end?.longitude ?? end?.lng ?? usuarioProp.endereco_ativo_lng,
+        // Campos de endereco: caminho unico a partir de `end` (linha do /auth/me).
+        // Estado: CAMINHO UNICO — end.cidade.estadoId (o /auth/me devolve o cidade
+        // aninhado). Sem fallback, sem cadeia de alternativas.
+        bairro: end?.bairro,
+        endereco: end?.logradouro,
+        cidade_id: end?.cidade_id,
+        estado_id: (end as any)?.cidade?.estadoId,
+        cep: end?.cep,
+        numero: end?.numero,
+        complemento: end?.complemento,
+        lat: end?.latitude, lng: end?.longitude,
         termos: [true,true,true,true,true], temMei: usuarioProp.tem_mei||false
       });
-      if (end) console.log('[CadastroUnificado] endereço carregado do /auth/me:', { completo, bairro: end.bairro, cep: end.cep, cidade_id: end.cidade_id, estadoId_via_cidade: end?.cidade?.estadoId, estado_id_plano: end?.estado_id });
+      if (end) console.log('[CadastroUnificado] endereço carregado do /auth/me:', { completo, bairro: end.bairro, cep: end.cep, cidade_id: end.cidade_id });
       else console.warn('[CadastroUnificado] sem endereço em endereco_ativo/enderecos_usuarios - campos ficam vazios');
     }
   }, [modoEdicao, usuarioProp]);
@@ -124,15 +122,14 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
         <h2 className={styles.typography.h1}>{modoEdicao ? 'Meu Perfil' : 'Cadastro'}</h2>
         {isReadOnly && <div className="mt-4 p-4 bg-yellow-300 border-4 border-black font-black text-xs">🔒 Tipo {tipoAtual} só visualização - editáveis: FREELA, CONTRATANTE, DUAL</div>}
         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-          <button disabled={isReadOnly || travaTrampar} title={travaTrampar ? 'Travado no Perfil — o tipo nao pode ser removido' : undefined} onClick={()=>{ if (!isReadOnly && !travaTrampar) setQueroTrampar(!queroTrampar); }} className={`${queroTrampar ? styles.cardHighlight + ' p-6 flex gap-4' : styles.cardSmall + ' flex gap-4 opacity-70'} ${isReadOnly || travaTrampar ? 'opacity-40' : ''}`}>
-            <span>💪</span><div><div className="font-black uppercase text-sm">Quero Trampar</div></div><div className="ml-auto w-6 h-6 border-2 flex items-center justify-center">{queroTrampar && '✓'}</div>
+          <button disabled={isReadOnly || travaTrampar} onClick={()=>{ if (!isReadOnly && !travaTrampar) setQueroTrampar(!queroTrampar); }} className={`${queroTrampar ? styles.cardHighlight + ' p-6 flex gap-4' : styles.cardSmall + ' flex gap-4 opacity-70'} ${(isReadOnly || travaTrampar) ? 'opacity-40' : ''}`}>
+            <span>💪</span><div><div className="font-black uppercase text-sm">Quero Trampar{travaTrampar ? ' 🔒' : ''}</div></div><div className="ml-auto w-6 h-6 border-2 flex items-center justify-center">{queroTrampar && '✓'}</div>
           </button>
-          <button disabled={isReadOnly || travaContratar} title={travaContratar ? 'Travado no Perfil — o tipo nao pode ser removido' : undefined} onClick={()=>{ if (!isReadOnly && !travaContratar) setQueroContratar(!queroContratar); }} className={`${queroContratar ? 'p-6 border-4 bg-red-500 text-white border-black flex gap-4' : styles.cardSmall + ' flex gap-4 opacity-70'} ${isReadOnly || travaContratar ? 'opacity-40' : ''}`}>
-            <span>🏢</span><div><div className="font-black uppercase text-sm">Quero Contratar</div></div><div className="ml-auto w-6 h-6 border-2 flex items-center justify-center">{queroContratar && '✓'}</div>
+          <button disabled={isReadOnly || travaContratar} onClick={()=>{ if (!isReadOnly && !travaContratar) setQueroContratar(!queroContratar); }} className={`${queroContratar ? 'p-6 border-4 bg-red-500 text-white border-black flex gap-4' : styles.cardSmall + ' flex gap-4 opacity-70'} ${(isReadOnly || travaContratar) ? 'opacity-40' : ''}`}>
+            <span>🏢</span><div><div className="font-black uppercase text-sm">Quero Contratar{travaContratar ? ' 🔒' : ''}</div></div><div className="ml-auto w-6 h-6 border-2 flex items-center justify-center">{queroContratar && '✓'}</div>
           </button>
         </div>
         {queroTrampar && queroContratar && <div className="mt-3 text-xs p-3 bg-green-200 border-2 border-black">✨ DUAL</div>}
-        {modoEdicao && (travaTrampar || travaContratar) && <div className="mt-3 text-xs p-3 bg-yellow-100 border-2 border-black">🔒 {tipoAtual === 'FREELA' ? 'Seu tipo atual e FREELA — Quero Trampar esta travado. Voce pode ligar Quero Contratar para virar DUAL.' : tipoAtual === 'CONTRATANTE' ? 'Seu tipo atual e CONTRATANTE — Quero Contratar esta travado. Voce pode ligar Quero Trampar para virar DUAL.' : `Seu tipo atual e ${tipoAtual || '—'} — os dois botoes estao travados e ligados no Perfil.`}</div>}
         <div className="text-[10px] opacity-50 mt-2">DEBUG: {getTipoChave()} trampar={queroTrampar?'sim':'nao'} contratar={queroContratar?'sim':'nao'}</div>
         <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
           <div><label className={styles.label}>Nome</label><input value={form.nome} disabled={isReadOnly} onChange={e=>setForm({...form, nome: e.target.value})} className={styles.input} /></div>
@@ -153,6 +150,16 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
         {erro && <div className={styles.errorBox + ' mt-4'}>{erro}</div>}
         <button onClick={handleSubmit} disabled={carregando || isReadOnly} className={`${styles.buttonPrimary(carregando || isReadOnly)} mt-8`}>{isReadOnly ? 'Somente Visualização' : `Cadastrar como ${getTipoChave()}`}</button>
       </div>
+      {modoEdicao && (
+        <div className={styles.card + ' mt-4'}>
+          <h2 className={styles.typography.h1}>Meus endereços</h2>
+          <p className={styles.typography.caption + ' mt-1'}>Cadastre um novo, troque o ativo ou edite o endereço ativo. A alteração vale na hora e o endereço do perfil acima acompanha.</p>
+          <div className="mt-4"><BlocoEndereco onEnderecoChange={(end: any) => {
+            if (!end) return;
+            setForm((f: any) => ({ ...f, endereco: end.logradouro, bairro: end.bairro, cep: end.cep, numero: end.numero, complemento: end.complemento, cidade_id: end.cidade_id, estado_id: end?.cidade?.estadoId, lat: end.latitude, lng: end.longitude }));
+          }} /></div>
+        </div>
+      )}
     </div>
   );
 }

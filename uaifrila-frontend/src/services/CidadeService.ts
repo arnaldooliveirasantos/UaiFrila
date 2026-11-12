@@ -43,16 +43,23 @@ export class CidadeService {
   }
 
   // ===== STATIC METHODS =====
+  // REGRA: selecao usa SO cidades ativas. /api/cidades ja devolve ativas;
+  // o filtro client-side e seguranca caso o backend devolva todas.
+  private static soAtivas(lista: any): Cidade[] {
+    const arr = Array.isArray(lista) ? lista : [];
+    return arr.filter((c: any) => c.ativa !== false && c.ativo !== false);
+  }
+
   static async listar(): Promise<Cidade[]> {
     try {
       const data = await apiGetPublic('/api/cidades');
       const lista = data.data || data.cidades || data || [];
-      return Array.isArray(lista) ? lista : [];
+      return this.soAtivas(lista);
     } catch {
       try {
         const data = await apiFetch('/api/cidades');
         const lista = data.data || data.cidades || data || [];
-        return Array.isArray(lista) ? lista : [];
+        return this.soAtivas(lista);
       } catch { return []; }
     }
   }
@@ -61,7 +68,7 @@ export class CidadeService {
     try {
       const data = await apiGetPublic('/api/cidades/ativas');
       const lista = data.data || data.cidades || data || [];
-      if (Array.isArray(lista) && lista.length > 0) return lista;
+      if (Array.isArray(lista) && lista.length > 0) return this.soAtivas(lista);
     } catch {}
     return this.listar();
   }
@@ -84,14 +91,14 @@ export class CidadeService {
     try {
       if (!estadoId) return this.listar();
       const data = await apiGetPublic(`/api/cidades/estado/${estadoId}`);
-      return data.cidades || data.data || data || [];
+      return this.soAtivas(data.cidades || data.data || data || []);
     } catch { return this.listar(); }
   }
 
   static async listarPorEstadoSigla(sigla: string): Promise<Cidade[]> {
     try {
       const data = await apiGetPublic(`/api/cidades/por-estado/${sigla}`);
-      return data.cidades || data.data || data || [];
+      return this.soAtivas(data.cidades || data.data || data || []);
     } catch { return this.listar(); }
   }
 

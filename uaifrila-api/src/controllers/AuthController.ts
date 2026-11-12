@@ -91,9 +91,12 @@ export class AuthController extends BaseController {
       try { enderecos = await this.enderecoService.listarBrutosPorUsuario(req.usuario!.id); }
       catch (eEnd: any) { console.warn('[AuthController.me] enderecos indisponiveis:', eEnd.message); enderecos = []; }
       const ativo = enderecos.find((e: any) => e.ativo === true || e.ativo === 1) || enderecos[0] || null;
-      publico.enderecos_usuarios = enderecos;
-      publico.enderecos = enderecos;
-      publico.endereco_ativo = ativo;
+      // Cidade aninhada a partir do JOIN (cidade_nome / cidade_estado_sigla / estado_id).
+      // O front le end.cidade.estadoId — caminho unico, sem fallback.
+      const comCidade = (e: any) => e ? { ...e, cidade: { id: e.cidade_id, nome: e.cidade_nome, estado: e.cidade_estado_sigla, estadoId: e.estado_id } } : e;
+      publico.enderecos_usuarios = enderecos.map(comCidade);
+      publico.enderecos = enderecos.map(comCidade);
+      publico.endereco_ativo = comCidade(ativo);
       if (ativo) {
         publico.endereco_ativo_id = ativo.id;
         publico.endereco_ativo_cidade = ativo.cidade_nome || ativo.cidade || null;

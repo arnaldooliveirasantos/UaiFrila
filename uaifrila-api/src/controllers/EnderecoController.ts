@@ -8,27 +8,24 @@ export class EnderecoController extends BaseController {
 
   meusEnderecos = async (req: AuthRequest, res: Response) => {
     try {
-      const enderecos = await this.service.listarPorUsuario(req.usuario!.id);
-      return res.json({ success: true, data: this.mapListToPublic(enderecos, req), enderecos: this.mapListToPublic(enderecos, req) });
+      // ERRO DA ENTREGA 29: o front chama /api/enderecos/meus, que cai AQUI —
+      // nao no listarPorUsuario. Sem o cidade aninhado, end.cidade.estadoId
+      // era undefined e o Estado nao preenchia.
+      // Com cidade aninhada: o front le end.cidade.estadoId (caminho unico, sem fallback).
+      const enderecos = await (this.service as any).listarPorUsuarioComCidade(req.usuario!.id);
+      return res.json({ success: true, data: enderecos, enderecos });
     } catch (e: any) { return this.handleError(res, e); }
   };
 
   buscarAtivo = async (req: AuthRequest, res: Response) => {
     try {
-      const svc: any = this.service as any;
-      let ativo: any = null;
-      if (typeof svc.buscarAtivoPorUsuario === 'function') {
-        try { ativo = await svc.buscarAtivoPorUsuario(req.usuario!.id); } catch {}
-      }
-      if (!ativo) {
-        const lista = await this.service.listarPorUsuario(req.usuario!.id);
-        const arr = Array.isArray(lista) ? lista : [];
-        ativo = (arr as any[]).find((x: any) => x.ativo) || arr[0] || null;
-      }
-      return res.json({ success: true, data: ativo ? this.mapToPublic(ativo, req) : null, endereco: ativo ? this.mapToPublic(ativo, req) : null });
-    } catch (e: any) { 
+      // Mesma forma do /meus: com cidade aninhada (end.cidade.estadoId).
+      const lista = await (this.service as any).listarPorUsuarioComCidade(req.usuario!.id);
+      const ativo = (Array.isArray(lista) ? lista : []).find((x: any) => x.ativo) || lista[0] || null;
+      return res.json({ success: true, data: ativo, endereco: ativo });
+    } catch (e: any) {
       console.warn('[EnderecoController.buscarAtivo] erro', e.message);
-      return res.json({ success: true, data: null, endereco: null }); 
+      return res.json({ success: true, data: null, endereco: null });
     }
   };
 
@@ -38,8 +35,9 @@ export class EnderecoController extends BaseController {
       if (usuarioId !== req.usuario!.id && !this.isAdmin(req)) {
         return this.error(res, 'Acesso negado', 403);
       }
-      const enderecos = await this.service.listarPorUsuario(usuarioId);
-      return res.json({ success: true, data: this.mapListToPublic(enderecos, req) });
+      // Com cidade aninhada: o front le end.cidade.estadoId (caminho unico, sem fallback).
+      const enderecos = await (this.service as any).listarPorUsuarioComCidade(usuarioId);
+      return res.json({ success: true, data: enderecos });
     } catch (e: any) { return this.handleError(res, e); }
   };
 

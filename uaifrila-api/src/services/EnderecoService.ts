@@ -13,6 +13,15 @@ export class EnderecoService {
     const id = Number(usuarioId); if (!id || isNaN(id)) return [];
     try { return await this.repo.listarPorUsuario(id); } catch { return []; }
   }
+  // Fonte unica do cidade do endereco: o JOIN com cidades (listarBrutosPorUsuario).
+  // O front le end.cidade.estadoId — direto, sem fallback, sem cadeia de alternativas.
+  async listarPorUsuarioComCidade(usuarioId: number): Promise<any[]> {
+    const rows = await this.listarBrutosPorUsuario(usuarioId);
+    return rows.map((e: any) => ({
+      ...e,
+      cidade: { id: e.cidade_id, nome: e.cidade_nome, estado: e.cidade_estado_sigla, estadoId: e.estado_id },
+    }));
+  }
   async buscarAtivoPorUsuario(usuarioId: number): Promise<EnderecoModel | null> {
     const id = Number(usuarioId); if (!id || isNaN(id)) return null;
     try { return await this.repo.buscarAtivoPorUsuario(id); } catch { return null; }

@@ -15,14 +15,27 @@ export class CidadeRepository extends BaseRepository<CidadeModel> {
     }
   }
 
+  // REGRA: selecao de cidade usa SO cidades ativas (mesmo que listarAtivas).
   async listarPorEstado(estadoId: number): Promise<CidadeModel[]> {
-    const result = await this.query(`SELECT * FROM cidades WHERE estado_id = $1 ORDER BY nome`, [estadoId]);
-    return this.mapRows(result.rows || result);
+    try {
+      const result = await this.query(`SELECT * FROM cidades WHERE estado_id = $1 AND ativa = true ORDER BY nome`, [estadoId]);
+      return this.mapRows(result.rows || result);
+    } catch {
+      // Fallback se a coluna ativa nao existir
+      const result = await this.query(`SELECT * FROM cidades WHERE estado_id = $1 ORDER BY nome`, [estadoId]);
+      return this.mapRows(result.rows || result);
+    }
   }
 
+  // REGRA: selecao de cidade usa SO cidades ativas.
   async listarPorEstadoSigla(sigla: string): Promise<CidadeModel[]> {
-    const result = await this.query(`SELECT * FROM cidades WHERE estado = $1 ORDER BY nome`, [sigla]);
-    return this.mapRows(result.rows || result);
+    try {
+      const result = await this.query(`SELECT * FROM cidades WHERE estado = $1 AND ativa = true ORDER BY nome`, [sigla]);
+      return this.mapRows(result.rows || result);
+    } catch {
+      const result = await this.query(`SELECT * FROM cidades WHERE estado = $1 ORDER BY nome`, [sigla]);
+      return this.mapRows(result.rows || result);
+    }
   }
 
   async buscarPorNomeEstado(nome: string, estado: string): Promise<CidadeModel | null> {

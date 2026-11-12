@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { apiFetch, apiGetPublic } from '../utils/Api';
 import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 import CadastroEndereco from './CadastroEndereco';
@@ -15,7 +15,7 @@ import CadastroEndereco from './CadastroEndereco';
 //   Só renderiza os inputs do endereço (CEP, logradouro, número, bairro, cidade) ligados ao form do cadastro.
 //   O endereço vai junto no cadastro (INSERT no validar-codigo), não via POST /enderecos.
 // - modoCadastro=false (logado / Meu Perfil / Vaga): chama /enderecos/meus SÓ se houver token.
-// - /cidades, /estados, /tipos-endereco: SEMPRE via apiGetPublic (rotas públicas no backend).
+// - /cidades, /estados/ativos, /tipos-endereco: SEMPRE via apiGetPublic (rotas públicas no backend).
 // REGRA: SEM botão de tema aqui. Troca de tema só no Navbar.
 
 interface Props {
@@ -40,53 +40,67 @@ export default function BlocoEndereco({ form, setForm, cidades: cidadesProp, tit
   const [cidades, setCidades] = useState<any[]>(cidadesProp || []);
   const [estados, setEstados] = useState<any[]>([]);
   const [estadoId, setEstadoId] = useState<number | null>(null);
+  const [editarId, setEditarId] = useState<number | null>(null);
+  const canceladoRef = useRef(false);
 
   const ehCadastro = modoCadastro === true || (!!form && !!setForm && !temToken());
 
   useEffect(() => { if (cidadesProp) setCidades(cidadesProp); }, [cidadesProp]);
 
-  // Estado inicial vindo do form (endereco ja salvo): sem isso o select de
-  // Estado ficava sempre em "Selecione o estado" e a lista de cidades nunca
-  // carregava — era o que a captura mostrava (CEP/logradouro preenchidos,
-  // Estado/Cidade vazios).
-  useEffect(() => {
-    if (form?.estado_id && Number(form.estado_id) !== estadoId) setEstadoId(Number(form.estado_id));
-  }, [form?.estado_id]);
+  // Busca o endereco ATIVO (ativo=true; se nenhum, o primeiro). Reutilizada
+  // apos salvar/trocar no CadastroEndereco para o bloco nao ficar defasado.
+  const carregarAtivo = async () => {
+    if (ehCadastro) return; // cadastro: sem token, sem /enderecos/meus
+    if (!temToken()) return;
+    try {
+      let data: any = null;
+      try { data = await apiFetch('/api/enderecos/meus'); }
+      catch { data = await apiFetch('/api/enderecos/ativo'); }
+      if (canceladoRef.current) return;
+      let lista: any[] = [];
+      if (Array.isArray(data)) lista = data;
+      else if (Array.isArray(data?.data)) lista = data.data;
+      else if (Array.isArray(data?.enderecos)) lista = data.enderecos;
+      else if (data?.data) lista = [data.data];
+      else if (data?.endereco) lista = [data.endereco];
+      else if (data) lista = [data];
+      const end = lista.find((e: any) => e.ativo) || lista[0] || null;
+      setAtivo(end);
+      if (end) onEnderecoChange?.(end);
+    } catch { /* sem endereço ativo - normal em perfil novo, não é erro */ }
+  };
 
   // Só busca endereço ativo se NÃO é cadastro e TEM token
   useEffect(() => {
-    if (ehCadastro) return; // cadastro: sem token, sem /enderecos/meus
-    if (!temToken()) return;
-    let cancelado = false;
-    (async () => {
-      try {
-        let data: any = null;
-        try { data = await apiFetch('/api/enderecos/meus'); }
-        catch { data = await apiFetch('/api/enderecos/ativo'); }
-        if (cancelado) return;
-        let end: any = null;
-        if (data?.data) end = Array.isArray(data.data) ? data.data[0] || null : data.data;
-        else if (data?.endereco) end = data.endereco;
-        else if (Array.isArray(data)) end = data[0] || null;
-        else end = data;
-        setAtivo(end);
-        if (end) onEnderecoChange?.(end);
-      } catch { /* sem endereço ativo - normal em perfil novo, não é erro */ }
-    })();
-    return () => { cancelado = true; };
+    canceladoRef.current = false;
+    carregarAtivo();
+    return () => { canceladoRef.current = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ehCadastro]);
 
   // Estados / cidades por estado - SEMPRE público, nunca apiFetch com token
   useEffect(() => {
     if (!form || !setForm) return;
-    apiGetPublic('/estados').then((d: any) => setEstados(d.estados || d.data || [])).catch(() => setEstados([]));
+    // Estados: SOMENTE ativos.
+    apiGetPublic('/estados/ativos').then((d: any) => { const lista = d.estados || d.data || []; setEstados(Array.isArray(lista) ? lista.filter((s: any) => s.ativo !== false) : []); }).catch(() => setEstados([]));
   }, [form, setForm]);
+
+  // Sincroniza o select de Estado com o form: o form.estado_id chega DEPOIS do
+  // mount (o Perfil carrega o usuario async no /auth/me), entao o estado inicial
+  // null nao basta. Sem isso o select ficava em "Selecione" mesmo com o estado
+  // no form — e as cidades do estado nem carregavam. Nao briga com o usuario:
+  // ao trocar o Estado no select, o onChange ja seta form.estado_id igual.
+  useEffect(() => {
+    const eid = form?.estado_id ? Number(form.estado_id) : null;
+    if (eid !== estadoId) setEstadoId(eid);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form?.estado_id]);
 
   useEffect(() => {
     if (!form || !setForm) return;
     if (!estadoId) return;
-    apiGetPublic(`/cidades/estado/${estadoId}`).then((d: any) => setCidades(d.cidades || d.data || [])).catch(() => setCidades([]));
+    // Cidades do estado: SO ativas (backend filtra + filtro client-side).
+    apiGetPublic(`/cidades/estado/${estadoId}`).then((d: any) => { const lista = d.cidades || d.data || []; setCidades(Array.isArray(lista) ? lista.filter((c: any) => c.ativa !== false && c.ativo !== false) : []); }).catch(() => setCidades([]));
   }, [estadoId, form, setForm]);
 
   // ===== MODO CADASTRO / FORM - inputs ligados ao form, sem chamar /enderecos =====
@@ -112,7 +126,7 @@ export default function BlocoEndereco({ form, setForm, cidades: cidadesProp, tit
           <div><label className={styles.label}>Complemento</label><input value={form.complemento || ''} onChange={(e) => setForm({ ...form, complemento: e.target.value })} className={styles.input} placeholder="Apto, bloco" /></div>
           <div>
             <label className={styles.label}>Estado</label>
-            <select value={estadoId || ''} onChange={(e) => { const v = e.target.value ? Number(e.target.value) : null; setEstadoId(v); setForm({ ...form, estado_id: v, cidade_id: '' }); }} className={styles.select}>
+            <select value={estadoId || ''} onChange={(e) => { const v = e.target.value ? Number(e.target.value) : null; setEstadoId(v); setForm({ ...form, estado_id: v || '', cidade_id: '' }); }} className={styles.select}>
               <option value="">Selecione o estado</option>
               {estados.map((s: any) => <option key={s.id} value={s.id}>{s.sigla} - {s.nome}</option>)}
             </select>
@@ -126,6 +140,9 @@ export default function BlocoEndereco({ form, setForm, cidades: cidadesProp, tit
           </div>
         </div>
         {!ehCadastro && ativo && <p className={styles.typography.caption}>Endereço ativo atual: {ativo.endereco_completo || ativo.logradouro}</p>}
+        {form && setForm && form.cidade_id && cidades.length > 0 && !cidades.some((c: any) => Number(c.id) === Number(form.cidade_id)) && (
+          <p className={styles.typography.caption}>A cidade atual deste endereço não está mais ativa — escolha um estado e uma cidade ativa.</p>
+        )}
       </div>
     );
   }
@@ -135,19 +152,24 @@ export default function BlocoEndereco({ form, setForm, cidades: cidadesProp, tit
     <div className="space-y-3">
       <div className="flex justify-between items-center">
         <h4 className={styles.typography.h3}>Endereço {modoVaga ? 'da Vaga' : 'Ativo'} (Estado via Cidade)</h4>
-        {temToken() && <button type="button" onClick={() => setMostrar(!mostrar)} className={styles.buttonSecondary}>{mostrar ? 'Fechar' : 'Trocar'}</button>}
+        <div className="flex gap-2 flex-wrap">
+          {temToken() && <button type="button" onClick={() => { setEditarId(null); setMostrar(true); }} className={styles.buttonSecondary}>Cadastrar endereço</button>}
+          {temToken() && <button type="button" onClick={() => { setEditarId(null); setMostrar(true); }} className={styles.buttonSecondary}>Trocar</button>}
+          {temToken() && ativo && <button type="button" onClick={() => { setEditarId(Number(ativo.id)); setMostrar(true); }} className={styles.buttonSecondary}>Editar</button>}
+          {temToken() && mostrar && <button type="button" onClick={() => { setEditarId(null); setMostrar(false); }} className={styles.buttonSecondary}>Fechar</button>}
+        </div>
       </div>
       {ativo ? (
         <div className={styles.cardSmall}>
           <div className={styles.typography.label}>{ativo.apelido || ativo.tipo_nome || 'Ativo'}</div>
           <div className={`${styles.typography.body} mt-2 font-black`}>{ativo.endereco_completo || `${ativo.logradouro || ''} ${ativo.numero || ''} ${ativo.bairro || ''}`.trim()}</div>
-          <div className={styles.typography.caption}>{ativo.cidade_nome || ''} / {ativo.estado_sigla || ''}{ativo.cep ? ` • CEP: ${ativo.cep}` : ''}</div>
+          <div className={styles.typography.caption}>{ativo.cidade?.nome || ''} / {ativo.cidade?.estado || ''}{ativo.cep ? ` • CEP: ${ativo.cep}` : ''}</div>
         </div>
       ) : (
         <div className={`${styles.cardSmall} text-center`}><p className={styles.typography.body}>Nenhum endereço ativo</p><p className={styles.typography.caption}>Cadastre um endereço em Perfil ou selecione abaixo</p></div>
       )}
       {mostrar && temToken() && (
-        <div className={styles.card}><CadastroEndereco modoSelecao={modoVaga} onEnderecoSelecionado={(id: number, end: any) => { setAtivo(end); setMostrar(false); onEnderecoSelecionado?.(id, end); }} /></div>
+        <div className={styles.card}><CadastroEndereco modoSelecao={modoVaga} editarIdInicial={editarId} onSalvo={() => { setEditarId(null); carregarAtivo(); }} onEnderecoSelecionado={(id: number, end: any) => { setAtivo(end); setEditarId(null); setMostrar(false); onEnderecoSelecionado?.(id, end); }} /></div>
       )}
     </div>
   );
