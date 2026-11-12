@@ -7,13 +7,23 @@ import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 // Agora: sem token, não busca endereços e não permite POST - o endereço do cadastro vai junto no cadastro.
 // Com token (Meu Perfil / Vaga): comportamento normal, busca /enderecos/meus + POST/PUT com token.
 
-interface Props { onEnderecoSelecionado?: (id: number, endereco: any) => void; modoSelecao?: boolean; modoCadastro?: boolean; }
+interface Props {
+  onEnderecoSelecionado?: (id: number, endereco: any) => void;
+  modoSelecao?: boolean; modoCadastro?: boolean;
+  // Mesma regra do Perfil, aplicada na vaga: o painel abre num modo so.
+  // - 'cadastrar': mostra SO o formulario de novo endereco.
+  // - 'trocar': mostra SO a lista de enderecos para escolher.
+  // - 'ambos' (padrao): lista + formulario, como era antes.
+  modoPainel?: 'cadastrar' | 'trocar' | 'ambos';
+  // Chamado apos criar um endereco novo, com o endereco criado.
+  onEnderecoCriado?: (endereco: any) => void;
+}
 
 function temToken(): boolean {
   try { return !!(localStorage.getItem('uaifrila_token') || localStorage.getItem('@UaiFrila:token') || localStorage.getItem('token')); } catch { return false; }
 }
 
-export default function CadastroEndereco({ onEnderecoSelecionado, modoSelecao = false, modoCadastro = false }: Props) {
+export default function CadastroEndereco({ onEnderecoSelecionado, modoSelecao = false, modoCadastro = false, modoPainel = 'ambos', onEnderecoCriado }: Props) {
   const styles = useUaiFrilaStyles();
   const [enderecos, setEnderecos] = useState<any[]>([]);
   const [estados, setEstados] = useState<any[]>([]);
@@ -29,7 +39,7 @@ export default function CadastroEndereco({ onEnderecoSelecionado, modoSelecao = 
 
   useEffect(() => {
     // Listas públicas - SEMPRE via apiGetPublic, nunca com token
-    apiGetPublic('/estados/ativos').then((d: any) => setEstados(d.estados || d.data || [])).catch(() => {});
+    apiGetPublic('/estados').then((d: any) => setEstados(d.estados || d.data || [])).catch(() => {});
     apiGetPublic('/tipos-endereco').then((d: any) => setTipos(d.tipos || d.data || [])).catch(() => {});
     // Endereços do usuário - SÓ com token, NUNCA no cadastro
     if (semToken) return;
@@ -60,7 +70,11 @@ export default function CadastroEndereco({ onEnderecoSelecionado, modoSelecao = 
     try {
       const payload = { ...form }; delete (payload as any).estado_id;
       if (editandoId) await apiFetch(`/api/enderecos/${editandoId}`, { method: 'PUT', body: JSON.stringify(payload) });
-      else await apiFetch('/api/enderecos', { method: 'POST', body: JSON.stringify({ ...payload, ativo: enderecos.length === 0 }) });
+      else {
+        const criado: any = await apiFetch('/api/enderecos', { method: 'POST', body: JSON.stringify({ ...payload, ativo: enderecos.length === 0 }) });
+        // Na vaga, criar ja seleciona o endereco novo para a vaga.
+        onEnderecoCriado?.(criado?.data || criado?.endereco || criado);
+      }
       await carregarEnderecos();
       setForm({ logradouro: '', numero: '', bairro: '', cep: '', apelido: 'Casa', cidade_id: 0, tipo_endereco_id: 1 });
       setEstadoId(null); setEditandoId(null);
@@ -77,7 +91,7 @@ export default function CadastroEndereco({ onEnderecoSelecionado, modoSelecao = 
     <div className="space-y-4">
       <h3 className="font-black uppercase">Endereços ({enderecos.length}) - Estado via Cidade + Tipos</h3>
       {erro && <div className="bg-red-50 border-2 border-red-600 p-2 text-[12px] font-bold">ERRO: {erro}</div>}
-      <div className="grid gap-2">
+      {modoPainel !== 'cadastrar' && (<div className="grid gap-2">
         {enderecos.map((end: any) => (
           <div key={end.id} className={`border-2 p-3 flex justify-between ${end.ativo ? 'border-green-600 bg-green-50' : 'border-black bg-white'}`}>
             <div>
@@ -86,14 +100,15 @@ export default function CadastroEndereco({ onEnderecoSelecionado, modoSelecao = 
               <div className="text-[10px]">Cidade: {end.cidade_nome} | Estado: {end.estado_sigla} | Tipo: {end.tipo_chave}</div>
             </div>
             <div className="flex flex-col gap-1">
-              {!end.ativo && <button type="button" onClick={async () => { await apiFetch(`/api/enderecos/${end.id}/ativar`, { method: 'POST' }); await carregarEnderecos(); }} className="text-[10px] bg-green-600 text-white border-2 border-black px-2 py-1 font-black">Ativar</button>}
-              {modoSelecao && <button type="button" onClick={() => onEnderecoSelecionado?.(end.id, end)} className="text-[10px] bg-blue-600 text-white border-2 border-black px-2 py-1 font-black">Usar nesta Vaga</button>}
+              {modoSelecao
+                ? <button type="button" onClick={() => onEnderecoSelecionado?.(end.id, end)} className="text-[10px] bg-blue-600 text-white border-2 border-black px-2 py-1 font-black">Usar nesta Vaga</button>
+                : !end.ativo && <button type="button" onClick={async () => { await apiFetch(`/api/enderecos/${end.id}/ativar`, { method: 'POST' }); await carregarEnderecos(); }} className="text-[10px] bg-green-600 text-white border-2 border-black px-2 py-1 font-black">Ativar</button>}
               <button type="button" onClick={() => { setForm(end); setEstadoId(end.estado_id || null); setEditandoId(end.id!); }} className="text-[10px] border-2 border-black px-2 py-1 font-black">Editar</button>
             </div>
           </div>
         ))}
-      </div>
-      <form onSubmit={handleSubmit} className="border-2 border-black p-4 space-y-3 bg-white">
+      </div>)}
+      {modoPainel !== 'trocar' && (<form onSubmit={handleSubmit} className="border-2 border-black p-4 space-y-3 bg-white">
         <h4 className="font-black text-[12px] uppercase">{editandoId ? 'Editar' : 'Novo'} Endereço - Sem estado_id</h4>
         <div className="grid md:grid-cols-2 gap-3">
           <input value={form.apelido || ''} onChange={(e) => setForm({ ...form, apelido: e.target.value })} className="border-2 border-black p-2 text-[13px]" placeholder="Apelido" />
@@ -107,7 +122,7 @@ export default function CadastroEndereco({ onEnderecoSelecionado, modoSelecao = 
           <input value={form.complemento || ''} onChange={(e) => setForm({ ...form, complemento: e.target.value })} className="border-2 border-black p-2 text-[13px]" placeholder="Complemento" />
         </div>
         <button type="submit" disabled={carregando} className="w-full bg-black text-white border-2 border-black p-2 font-black uppercase text-[12px]">{carregando ? 'Salvando...' : editandoId ? 'Atualizar' : 'Cadastrar'}</button>
-      </form>
+      </form>)}
     </div>
   );
 }

@@ -148,6 +148,14 @@ export default function TelaCadastroVaga(props: any) {
       setCalculoBackend(null);
       return;
     }
+    // Enquanto digita, o estado passa por intervalos invalidos (ex.: trocou o
+    // inicio para depois do fim e ainda nao ajustou o fim). Nao chama a API
+    // nesses estados — senao o console enche de "Data fim deve ser maior que
+    // início" mesmo com as datas finais validas. O validar() ja barra publicar.
+    if (new Date(form.dataHoraFim).getTime() <= new Date(form.dataHoraInicio).getTime()) {
+      setCalculoBackend(null);
+      return;
+    }
     setCalculando(true);
     try {
       const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo';
