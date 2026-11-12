@@ -1,8 +1,14 @@
 import { EnderecoRepository } from '../repositories/EnderecoRepository';
 import { EnderecoModel } from '../models/EnderecoModel';
+// listarBrutosPorUsuario e o metodo usado pelo AuthController.me (linhas cruas snake_case).
+// Os demais metodos sao os mesmos da entrega 2.
 export class EnderecoService {
   private repo = new EnderecoRepository();
   async listar(): Promise<EnderecoModel[]> { try { return await this.repo.buscarTodos(); } catch { return []; } }
+  async listarBrutosPorUsuario(usuarioId: number): Promise<any[]> {
+    const id = Number(usuarioId); if (!id || isNaN(id)) return [];
+    try { return await this.repo.listarBrutosPorUsuario(id); } catch { return []; }
+  }
   async listarPorUsuario(usuarioId: number): Promise<EnderecoModel[]> {
     const id = Number(usuarioId); if (!id || isNaN(id)) return [];
     try { return await this.repo.listarPorUsuario(id); } catch { return []; }
@@ -30,10 +36,8 @@ export class EnderecoService {
     else { try { const outros = await this.listarPorUsuario(usuarioId); if (outros.length === 1) await this.repo.atualizarGenerico((criado as any).id, { ativo: true }); } catch {} }
     return criado;
   }
-  // Fluxo de codigo: 1 endereco por usuario no cadastro — cria se nao existe, atualiza se ja existe.
   async criarOuAtualizarPorUsuario(usuarioId: number, end: any): Promise<EnderecoModel> {
     const payload: any = { usuario_id: usuarioId, cep: end.cep || null, logradouro: end.logradouro || end.endereco || '', numero: end.numero || null, complemento: end.complemento || null, bairro: end.bairro || null, cidade_id: Number(end.cidade_id), tipo_endereco_id: 1, latitude: end.latitude ?? end.lat ?? null, longitude: end.longitude ?? end.lng ?? null, apelido: end.apelido || 'Casa', ativo: true };
-    if (payload.logradouro && (this.repo as any).constructor) { /* logradouro e a coluna real; se o banco usar 'endereco', o mapToDbColumns resolve */ }
     const existente = await this.repo.buscarPrimeiroPorUsuario(usuarioId);
     if (!existente) return await this.criar(payload);
     const { usuario_id, ...resto } = payload;

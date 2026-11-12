@@ -1,74 +1,41 @@
-
-import { Request, Response } from 'express';
-import { BaseRepository } from '../repositories/BaseRepository';
-
-export class PermissaoController {
-  private async q(sql: string, params: any[] = []): Promise<any[]> {
-    try {
-      const pool = (BaseRepository as any).getPool();
-      if (!pool) return [];
-      const result: any = await pool.query(sql, params);
-      return result.rows || result || [];
-    } catch (e) {
-      console.error('[PermissaoController] Erro query:', (e as any).message);
-      return [];
-    }
-  }
-
-  listar = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const permissoes = await this.q(`SELECT p.*, tu.nome as tipo_nome FROM permissoes p LEFT JOIN tipos_usuario tu ON tu.id = p.tipo_id ORDER BY p.categoria, p.nome`);
-      res.json({ sucesso: true, permissoes });
-    } catch (e: any) {
-      res.json({ sucesso: true, permissoes: [], aviso: e.message });
-    }
+import { Response } from 'express';
+import { PermissaoService } from '../services/PermissaoService';
+import { BaseController, AuthRequest } from './BaseController';
+// Padrao dos demais controllers: fino, delega para o service. Sem pool.query, sem SQL.
+// Inclui matriz + meuTipo (que eram os 2 metodos do PermissaoController de
+// SistemaControllers.ts, que sera apagado) + listar/categorias/criar/atualizar
+// (que existiam no PermissaoController antigo, mas nunca estavam ligados no App).
+export class PermissaoController extends BaseController {
+  private service = new PermissaoService();
+  listar = async (req: AuthRequest, res: Response) => {
+    try { const permissoes = await this.service.listar(); return res.json({ success: true, sucesso: true, data: permissoes, permissoes }); }
+    catch (e: any) { return this.handleError(res, e); }
   };
-
-  matriz = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const permissoes = await this.q(`SELECT * FROM permissoes ORDER BY categoria, nome`);
-      const matriz: any = {};
-      permissoes.forEach((p: any) => {
-        const cat = p.categoria || 'geral';
-        if (!matriz[cat]) matriz[cat] = [];
-        matriz[cat].push(p);
-      });
-      res.json({ sucesso: true, matriz, permissoes });
-    } catch (e: any) {
-      console.error('[PermissaoController.matriz] Erro:', e.message);
-      res.json({ sucesso: true, matriz: {}, permissoes: [] });
-    }
+  matriz = async (req: AuthRequest, res: Response) => {
+    try { const matriz = await this.service.matriz(); return res.json({ success: true, sucesso: true, data: matriz, matriz, permissoes: matriz }); }
+    catch (e: any) { return this.handleError(res, e); }
   };
-
-  categorias = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const rows = await this.q(`SELECT DISTINCT categoria FROM permissoes WHERE categoria IS NOT NULL ORDER BY categoria`);
-      res.json({ sucesso: true, categorias: rows.map((r: any) => r.categoria) });
-    } catch (e: any) {
-      res.json({ sucesso: true, categorias: [] });
-    }
+  categorias = async (req: AuthRequest, res: Response) => {
+    try { const categorias = await this.service.categorias(); return res.json({ success: true, sucesso: true, data: categorias, categorias }); }
+    catch (e: any) { return this.handleError(res, e); }
   };
-
-  criar = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const pool = (BaseRepository as any).getPool();
-      const { nome, chave, categoria, descricao, tipo_id } = req.body;
-      const result: any = await pool.query(`INSERT INTO permissoes (nome, chave, categoria, descricao, tipo_id) VALUES ($1,$2,$3,$4,$5) RETURNING *`, [nome, chave, categoria, descricao, tipo_id]);
-      res.status(201).json({ sucesso: true, permissao: (result.rows || result)[0] });
-    } catch (e: any) {
-      res.status(400).json({ sucesso: false, erro: e.message });
-    }
+  meuTipo = async (req: AuthRequest, res: Response) => {
+    try { return res.json({ success: true, data: { tipoUsuarioId: req.usuario?.tipoUsuarioId, tipo_chave: req.usuario?.tipoChave } }); }
+    catch (e: any) { return this.handleError(res, e); }
   };
-
-  atualizar = async (req: Request, res: Response): Promise<void> => {
+  criar = async (req: AuthRequest, res: Response) => {
     try {
-      const pool = (BaseRepository as any).getPool();
-      const { id } = req.params;
-      const { nome, categoria, descricao } = req.body;
-      const result: any = await pool.query(`UPDATE permissoes SET nome = COALESCE($1,nome), categoria = COALESCE($2,categoria), descricao = COALESCE($3,descricao) WHERE id = $4 RETURNING *`, [nome, categoria, descricao, id]);
-      res.json({ sucesso: true, permissao: (result.rows || result)[0] });
-    } catch (e: any) {
-      res.status(400).json({ sucesso: false, erro: e.message });
-    }
+      this.checkRole(req, ['ADMIN', 'SUPER_ADMIN']);
+      const permissao = await this.service.criar(req.body || {});
+      return res.status(201).json({ success: true, sucesso: true, data: permissao, permissao });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
+  atualizar = async (req: AuthRequest, res: Response) => {
+    try {
+      this.checkRole(req, ['ADMIN', 'SUPER_ADMIN']);
+      // :id da rota e a chave antiga da permissao (nao ha tabela permissoes com id).
+      const permissao = await this.service.atualizar(req.params.id, req.body || {});
+      return res.json({ success: true, sucesso: true, data: permissao, permissao });
+    } catch (e: any) { return this.handleError(res, e); }
   };
 }
