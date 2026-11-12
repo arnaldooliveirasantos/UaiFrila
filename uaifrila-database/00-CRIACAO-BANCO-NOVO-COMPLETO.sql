@@ -364,6 +364,32 @@ CREATE TABLE variaveis_sistema (
   atualizado_em TIMESTAMP DEFAULT NOW()
 );
 
+-- 001_usuario_pix_e_ganhos.sql - rode 1x no banco (psql / DBeaver / pgAdmin)
+-- Tabela de dados PIX do usuário - para receber os trampos realizados.
+-- 1 usuário = 1 chave ativa (UNIQUE usuario_id). Histórico: ativo=false quando troca.
+CREATE TABLE IF NOT EXISTS usuario_pix (
+  id SERIAL PRIMARY KEY,
+  usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  tipo_chave VARCHAR(20) NOT NULL CHECK (tipo_chave IN ('CPF','CNPJ','EMAIL','TELEFONE','ALEATORIA')),
+  chave_pix VARCHAR(255) NOT NULL,
+  nome_titular VARCHAR(255) NOT NULL,
+  cpf_cnpj_titular VARCHAR(20),
+  banco VARCHAR(100),
+  agencia VARCHAR(20),
+  conta VARCHAR(30),
+  tipo_conta VARCHAR(20) CHECK (tipo_conta IN ('CORRENTE','POUPANCA',NULL)),
+  ativo BOOLEAN NOT NULL DEFAULT TRUE,
+  criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (usuario_id, ativo) -- garante 1 ativo por usuário (parcial na prática: só 1 linha ativo=true)
+);
+CREATE INDEX IF NOT EXISTS idx_usuario_pix_usuario ON usuario_pix(usuario_id);
+CREATE INDEX IF NOT EXISTS idx_usuario_pix_chave ON usuario_pix(chave_pix);
+-- Se o banco reclamar do UNIQUE (usuario_id, ativo) por já ter 2 inativos, use em vez disso:
+-- CREATE UNIQUE INDEX IF NOT EXISTS idx_usuario_pix_um_ativo ON usuario_pix(usuario_id) WHERE ativo = TRUE;
+COMMENT ON TABLE usuario_pix IS 'Dados PIX para recebimento dos trampos. 1 chave ativa por usuário.';
+
+
 -- =====================================================================
 -- 8. FUNÇÕES E VIEWS
 -- =====================================================================
