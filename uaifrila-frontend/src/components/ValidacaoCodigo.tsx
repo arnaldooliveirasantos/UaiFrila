@@ -2,7 +2,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 
-const API = (import.meta as any).env?.VITE_API_URL || 'http://192.168.24.11:3000/api';
+const _API_RAW = (import.meta as any).env?.VITE_API_URL || 'http://192.168.24.11:3000/api';
+// Normaliza: garante /api no fim. Se VITE_API_URL vier sem /api, o fetch direto
+// `${API}/auth/...` daria 404 igual ao bug do Api.ts. Com a normalização, os dois funcionam.
+const API = _API_RAW.replace(/\/$/, '').endsWith('/api') ? _API_RAW.replace(/\/$/, '') : _API_RAW.replace(/\/$/, '') + '/api';
 
 const STORAGE_KEY = 'uaifrila_validacao_pendente';
 

@@ -58,16 +58,26 @@ function AppContent() {
       if (!getToken()) { setCarregandoSessao(false); return; }
       try {
         const data = await apiFetch('/api/auth/me');
-        const u = data.usuario || data.data?.usuario || data;
-        if (u?.id) setUsuario(u); else clearAuth();
+        // Backend me() devolve { success, data: <usuario> } - data É o usuário, não data.usuario.
+        // ANTES: const u = data.usuario || data.data?.usuario || data
+        // -> data.usuario = undefined, data.data?.usuario = undefined (usuário não tem .usuario)
+        // -> caía no fallback data = { success, data: {...} } -> u.id = undefined
+        // -> clearAuth() apagava o token que tinha acabado de ser salvo no login!
+        // AGORA: extractor aceita as 4 formas (usuario / data.usuario / data / direto).
+        const u = (data?.usuario?.id ? data.usuario : data?.data?.usuario?.id ? data.data.usuario : data?.data?.id ? data.data : data?.id ? data : null);
+        console.log('[App] /auth/me -> usuario id=', (u as any)?.id, 'email=', (u as any)?.email);
+        if ((u as any)?.id) setUsuario(u); else { console.warn('[App] /auth/me sem id, resposta=', data); clearAuth(); }
       } catch { clearAuth(); setUsuario(null); } finally { setCarregandoSessao(false); }
     })();
   }, []);
 
   const navegar = (t: string) => { setTelaAtiva(t); window.scrollTo(0, 0); };
   const handleLogin = (data: any) => {
-    if (data.token) setToken(data.token);
-    if (data.usuario) setUsuario(data.usuario);
+    // Validar devolve { token, usuario, data: { token, usuario } } - aceita os dois níveis
+    const token = data?.token || data?.data?.token;
+    const usuario = data?.usuario?.id ? data.usuario : data?.data?.usuario?.id ? data.data.usuario : data?.data?.id ? data.data : null;
+    if (token) setToken(token);
+    if (usuario) setUsuario(usuario);
     setTelaAtiva('mural');
   };
   const handleLogout = () => { clearAuth(); setUsuario(null); setTelaAtiva('home'); };

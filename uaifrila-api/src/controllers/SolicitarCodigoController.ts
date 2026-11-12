@@ -216,7 +216,10 @@ export class SolicitarCodigoController extends BaseController {
         const { EmailService } = require('../services/EmailService');
         const metodo = EmailService.enviarCodigo || EmailService.prototype?.enviarCodigo;
         if (typeof metodo !== 'function') throw new Error('EmailService.enviarCodigo não existe (nem static nem instância)');
-        await EmailService.enviarCodigo({ email: emailNorm, nome: nomeParaTemplate || 'Uai Frila', codigo, tipo: (tipoFinal === 'reenvio' ? 'reenvio' : tipoFinal) as any, tempoExpiracaoMin: 5 });
+        // tipoFinal aqui é só 'cadastro' | 'login' (linha 40: tipo === 'cadastro' ? 'cadastro' : 'login').
+        // NÃO tem 'reenvio' - o reenvio usa a mesma função com tipo=login e o template 2FA_LOGIN.
+        // ANTES: (tipoFinal === 'reenvio' ? 'reenvio' : tipoFinal) -> TS2367: tipos sem overlap, build quebrava.
+        await EmailService.enviarCodigo({ email: emailNorm, nome: nomeParaTemplate || 'Uai Frila', codigo, tipo: tipoFinal, tempoExpiracaoMin: 5 });
         console.log(`[solicitarCodigo] EmailService.enviarCodigo OK email=${emailNorm} tipo=${tipoFinal} (só loga - SMTP ainda não ligado)`);
       } catch (eEmail: any) { return this.error(res, 'E-mail não enviado: ' + (eEmail.message || 'EmailService falhou'), 500); }
       return res.json({ success: true, message: 'Código enviado para seu e-mail', usuario_id: usuarioId, usuario_existente: !!existente });

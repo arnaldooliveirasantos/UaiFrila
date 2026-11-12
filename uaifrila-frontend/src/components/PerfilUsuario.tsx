@@ -20,8 +20,11 @@ export default function PerfilUsuario({ usuario: usuarioProp, onAtualizado }: { 
       setCarregando(true); setErro('');
       try {
         const data = await apiFetch('/api/auth/me');
-        const u = data.usuario || data.data?.usuario || data;
-        if (!u?.id) throw new Error('API /auth/me não retornou usuário');
+        // Mesmo fix do App: backend devolve { success, data: <usuario> }.
+        // ANTES: u = data (={ success, data }) -> u.id undefined -> "API /auth/me não retornou usuário".
+        const u = (data?.usuario?.id ? data.usuario : data?.data?.usuario?.id ? data.data.usuario : data?.data?.id ? data.data : data?.id ? data : null);
+        console.log('[Perfil] /auth/me -> usuario id=', (u as any)?.id, 'email=', (u as any)?.email);
+        if (!(u as any)?.id) throw new Error('API /auth/me não retornou usuário - resposta=' + JSON.stringify(data).slice(0, 300));
         setUsuario(u);
       } catch (e: any) { setErro(e.message || 'Não foi possível carregar o perfil'); setUsuario(null); } finally { setCarregando(false); }
     })();

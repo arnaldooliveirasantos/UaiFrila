@@ -131,7 +131,9 @@ export class VagaService extends BaseService<VagaModel> {
     const cfg = await this.variavelSvc.getConfigCancelamento().catch(() => ({ prazoHoras: 24 }));
     let vagas: any[] = [];
     try {
-      const r = await pool.query(`SELECT v.*, sv.chave as status_chave, sv.nome_exibicao as status_nome, sv.cor_hex as status_cor, sv.permite_editar, sv.permite_cancelar, sv.permite_candidatar FROM vagas v JOIN status_vaga sv ON sv.id = v.status_vaga_id WHERE sv.chave IN ('AGUARDANDO_CANDIDATURA','AGUARDANDO_ACEITE') ORDER BY v.criado_em DESC`);
+      // Mural: vagas com início anterior a hoje NÃO aparecem.
+      // DATE(v.data_inicio) >= CURRENT_DATE (só a data, ignora a hora).
+      const r = await pool.query(`SELECT v.*, sv.chave as status_chave, sv.nome_exibicao as status_nome, sv.cor_hex as status_cor, sv.permite_editar, sv.permite_cancelar, sv.permite_candidatar FROM vagas v JOIN status_vaga sv ON sv.id = v.status_vaga_id WHERE sv.chave IN ('AGUARDANDO_CANDIDATURA','AGUARDANDO_ACEITE') AND (v.data_inicio IS NULL OR DATE(v.data_inicio) >= CURRENT_DATE) ORDER BY v.criado_em DESC`);
       vagas = r.rows;
     } catch { vagas = await this.listarAbertas(); }
 

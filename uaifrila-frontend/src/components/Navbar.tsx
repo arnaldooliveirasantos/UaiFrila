@@ -32,6 +32,18 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
     const t = getTipo();
     return ['CONTRATANTE','DUAL','ADMIN','SUPER_ADMIN','FINANCEIRO'].includes(t);
   };
+  // BUG 2 - Transações aparecia para FREELA:
+  // ANTES: transacoes show: () => !!usuario (qualquer logado, inclusive FREELA).
+  // Transação é quem PAGA (contratante). Freela RECEBE - ele vê Meus Ganhos, não Transações.
+  // AGORA: Transações só para CONTRATANTE/DUAL/ADMIN/FINANCEIRO. FREELA puro não vê.
+  const checkContratanteOuAdmin = (): boolean => {
+    const t = getTipo();
+    return ['CONTRATANTE','DUAL','ADMIN','SUPER_ADMIN','FINANCEIRO'].includes(t);
+  };
+  const checkFreelaOuDual = (): boolean => {
+    const t = getTipo();
+    return ['FREELA','DUAL'].includes(t);
+  };
   const checkAdmin = (): boolean => {
     const nivel = getNivel();
     const chave = getTipo();
@@ -48,7 +60,9 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
     { id: 'perfil', label: 'Meu Perfil', icon: '👤', show: () => !!usuario },
     { id: 'publicar', label: 'Publicar Vaga', icon: '➕', show: () => !!usuario && checkContratante() },
     { id: 'trampos', label: 'Meus Trampos', icon: '💼', show: () => !!usuario },
-    { id: 'transacoes', label: 'Transações', icon: '💰', show: () => !!usuario },
+    { id: 'transacoes', label: 'Transações', icon: '💰', show: () => !!usuario && checkContratanteOuAdmin() },
+    { id: 'ganhos', label: 'Meus Ganhos', icon: '💵', show: () => !!usuario && checkFreelaOuDual() },
+    { id: 'pix', label: 'Meus Dados PIX', icon: '🔑', show: () => !!usuario }, // FREELA recebe por PIX; CONTRATANTE também pode cadastrar
     { id: 'codigoFreela', label: 'Código Freela', icon: '🔗', show: () => true },
   ];
 

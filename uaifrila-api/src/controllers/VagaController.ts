@@ -8,9 +8,21 @@ export class VagaController extends BaseController {
 
   listar = async (req: AuthRequest, res: Response) => {
     try {
-      const usuarioId = Number(req.usuario?.id);
-      if (!usuarioId) return this.error(res, 'Não autenticado', 401);
-      const mural = await this.service.listarMuralParaUsuario(usuarioId);
+      // MURAL / ABERTAS são PÚBLICOS (rota usa optionalAuthMiddleware).
+      // ANTES: se req.usuario fosse undefined (sem token, token inválido, ou token
+      // apagado pelo primeiro 401), retornava 401 "Não autenticado".
+      // Isso gerava a cascata do seu log: mural 401 -> Api.ts faz clearAuth() ->
+      // auth/me 401 -> minhas 401 -> tipos-usuario 401, mesmo você estando logado como freela.
+      // AGORA: sem usuário, lista as vagas abertas sem personalizar (sem is_minha).
+      // Com usuário, lista personalizado como antes.
+      const usuarioId = Number(req.usuario?.id) || null;
+      let mural: any;
+      try {
+        mural = usuarioId ? await this.service.listarMuralParaUsuario(usuarioId) : await (this.service as any).listarMuralParaUsuario(null);
+      } catch {
+        // Service antigo não aceita null -> cai para listar() genérico
+        mural = await (this.service as any).listar();
+      }
       return res.json({ success: true, data: mural, vagas: mural });
     } catch (e: any) { return this.handleError(res, e); }
   };
@@ -19,6 +31,8 @@ export class VagaController extends BaseController {
 
   minhasVagas = async (req: AuthRequest, res: Response) => {
     try {
+      // /vagas/minhas É protegida (precisa token). Se chegar sem usuário, é 401 de verdade.
+      if (!req.usuario?.id) return this.error(res, 'Não autenticado - faça login de novo (token não veio no header)', 401);
       const vagas = await this.service.listarMuralParaUsuario(Number(req.usuario?.id));
       const minhas = vagas.filter((v: any) => v.is_minha);
       return res.json({ success: true, data: minhas, vagas: minhas });

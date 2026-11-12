@@ -37,14 +37,32 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
       const checks = UsuarioService.parseTipoParaChecks(usuarioProp.tipo_chave||'FREELA');
       setQueroTrampar(checks.trampar);
       setQueroContratar(checks.contratar);
+      // BUG 1 - endereço não carregava no Perfil:
+      // ANTES: lia só usuarioProp.endereco_ativo_bairro / _completo / _cep (campos planos).
+      // O /auth/me devolve endereco_ativo (OBJETO) + enderecos_usuarios (LISTA), não os campos planos.
+      // Resultado: bairro voltava 'Centro', endereço vazio, CEP vazio - mesmo com endereço no banco.
+      // AGORA: usa o objeto endereco_ativo primeiro, depois o 1º de enderecos_usuarios, depois os campos planos.
+      // Aceita os 2 nomes de coluna: logradouro/endereco, cidade_id/cidadeId, latitude/longitude/lat/lng.
+      const end = (usuarioProp as any).endereco_ativo
+        || (Array.isArray((usuarioProp as any).enderecos_usuarios) ? (usuarioProp as any).enderecos_usuarios.find((e: any) => e.ativo) || (usuarioProp as any).enderecos_usuarios[0] : null)
+        || (Array.isArray((usuarioProp as any).enderecos) ? (usuarioProp as any).enderecos.find((e: any) => e.ativo) || (usuarioProp as any).enderecos[0] : null)
+        || null;
+      const completo = end ? [end.logradouro || end.endereco || '', end.numero || ''].join(' ').trim() : '';
       setForm({
         nome: usuarioProp.nome_completo||'', cpf: (usuarioProp.cpf||'').replace(/\D/g,''), email: usuarioProp.email||'',
         cnpj: (usuarioProp.cnpj||'').replace(/\D/g,''), nomeFantasia: usuarioProp.nome_fantasia||'',
         funcao: usuarioProp.funcao_principal||'Garçom', valorHora: usuarioProp.valor_hora_base||20, bio: usuarioProp.bio||'',
-        bairro: usuarioProp.endereco_ativo_bairro||'Centro', endereco: usuarioProp.endereco_ativo_completo||'', cidade_id: usuarioProp.endereco_ativo_cidade_id||1,
-        cep: usuarioProp.endereco_ativo_cep||'', numero: usuarioProp.endereco_ativo_numero||'', complemento: usuarioProp.endereco_ativo_complemento||'',
-        lat: usuarioProp.endereco_ativo_lat, lng: usuarioProp.endereco_ativo_lng, termos: [true,true,true,true,true], temMei: usuarioProp.tem_mei||false
+        bairro: end?.bairro || usuarioProp.endereco_ativo_bairro || 'Centro',
+        endereco: end ? (end.logradouro || end.endereco || '') : (usuarioProp.endereco_ativo_completo || ''),
+        cidade_id: end?.cidade_id || end?.cidadeId || usuarioProp.endereco_ativo_cidade_id || 1,
+        cep: end?.cep || usuarioProp.endereco_ativo_cep || '',
+        numero: end?.numero || usuarioProp.endereco_ativo_numero || '',
+        complemento: end?.complemento || usuarioProp.endereco_ativo_complemento || '',
+        lat: end?.latitude ?? end?.lat ?? usuarioProp.endereco_ativo_lat, lng: end?.longitude ?? end?.lng ?? usuarioProp.endereco_ativo_lng,
+        termos: [true,true,true,true,true], temMei: usuarioProp.tem_mei||false
       });
+      if (end) console.log('[CadastroUnificado] endereço carregado do /auth/me:', { completo, bairro: end.bairro, cep: end.cep, cidade_id: end.cidade_id });
+      else console.warn('[CadastroUnificado] sem endereço em endereco_ativo/enderecos_usuarios - campos ficam vazios');
     }
   }, [modoEdicao, usuarioProp]);
 
@@ -59,7 +77,8 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
     nomeFantasia: form.nomeFantasia || null, nome_fantasia: form.nomeFantasia || null,
     funcao: form.funcao, funcao_principal: form.funcao, valorHora: form.valorHora, valor_hora_base: form.valorHora,
     bio: form.bio || null, tipo_chave: getTipoChave(), tipoChave: getTipoChave(), temMei: !!form.temMei, tem_mei: !!form.temMei,
-    termos: form.termos, termos_aceitos: true, termos_aceitos_todos: true,
+    // Termos: NÃO vão para o banco. Ao concluir o cadastro, considera-se que o usuário aceitou todos.
+    // As caixas abaixo são só leitura/informação - não bloqueiam e não são enviadas.
     endereco: { logradouro: form.endereco, endereco: form.endereco, bairro: form.bairro, cep: form.cep, numero: form.numero, complemento: form.complemento, cidade_id: form.cidade_id, cidadeId: form.cidade_id, lat: form.lat, lng: form.lng },
     bairro: form.bairro, cep: form.cep, numero: form.numero, complemento: form.complemento, cidade_id: form.cidade_id, lat: form.lat, lng: form.lng,
   });
@@ -68,7 +87,7 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
     if (!form.nome || !form.cpf || !form.email) { setErro('Preencha nome, CPF, email'); return; }
     if (String(form.cpf || '').replace(/\D/g, '').length !== 11) { setErro('CPF deve ter 11 dígitos'); return; }
     if (!queroTrampar && !queroContratar) { setErro('Escolha Trampar ou Contratar'); return; }
-    if (!form.termos?.every(Boolean)) { setErro('Aceite os 5 termos de aceite para continuar'); return; }
+    // Termos: NÃO bloqueiam. Concluir o cadastro = aceitar todos (regra do usuário).
     if (!form.endereco?.trim() || !form.cep?.trim()) { setErro('Preencha endereço e CEP'); return; }
     const dadosCadastro = montarDadosCadastro();
     setCarregando(true);
@@ -104,13 +123,13 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
           <div className="md:col-span-2"><BlocoEndereco form={form} setForm={setForm} cidades={cidades} titulo="ENDEREÇO" subtitulo={isReadOnly ? 'Visualização' : 'Preencha CEP'} modoCadastro={!modoEdicao} /></div>
         </div>
         <div className="mt-6 space-y-2">
-          <h3 className={styles.typography.h3}>Termos de aceite * (os 5 são obrigatórios - marque para aceitar, desmarque para recusar)</h3>
+          <h3 className={styles.typography.h3}>Termos de aceite (ao concluir o cadastro, considera-se que você aceitou todos)</h3>
           <label className="flex gap-3 items-start cursor-pointer border-2 border-black p-3"><input type="checkbox" checked={!!form.termos?.[0]} disabled={isReadOnly} onChange={e => { const termos = [...(form.termos || [false,false,false,false,false])]; termos[0] = e.target.checked; setForm({ ...form, termos }); }} className="mt-0.5 w-5 h-5 accent-black shrink-0" /><span><span className="font-black text-xs">1. Autônomo Art. 442-B CLT</span><span className={styles.typography.bodySmall + ' block'}>Sou autônomo, sem vínculo CLT. Não há horário fixo, só trampo por diária.</span></span></label>
           <label className="flex gap-3 items-start cursor-pointer border-2 border-black p-3"><input type="checkbox" checked={!!form.termos?.[1]} disabled={isReadOnly} onChange={e => { const termos = [...(form.termos || [false,false,false,false,false])]; termos[1] = e.target.checked; setForm({ ...form, termos }); }} className="mt-0.5 w-5 h-5 accent-black shrink-0" /><span><span className="font-black text-xs">2. LGPD</span><span className={styles.typography.bodySmall + ' block'}>Meus dados (CPF, e-mail, bairro) são usados só para conectar você ao trampo.</span></span></label>
           <label className="flex gap-3 items-start cursor-pointer border-2 border-black p-3"><input type="checkbox" checked={!!form.termos?.[2]} disabled={isReadOnly} onChange={e => { const termos = [...(form.termos || [false,false,false,false,false])]; termos[2] = e.target.checked; setForm({ ...form, termos }); }} className="mt-0.5 w-5 h-5 accent-black shrink-0" /><span><span className="font-black text-xs">3. MEI R$1500</span><span className={styles.typography.bodySmall + ' block'}>Limite de R$1500 por contratante por mês para não caracterizar vínculo.</span></span></label>
           <label className="flex gap-3 items-start cursor-pointer border-2 border-black p-3"><input type="checkbox" checked={!!form.termos?.[3]} disabled={isReadOnly} onChange={e => { const termos = [...(form.termos || [false,false,false,false,false])]; termos[3] = e.target.checked; setForm({ ...form, termos }); }} className="mt-0.5 w-5 h-5 accent-black shrink-0" /><span><span className="font-black text-xs">4. Cancelamento R$40</span><span className={styles.typography.bodySmall + ' block'}>Cancelamento em menos de 12h antes do trampo gera taxa de R$40.</span></span></label>
           <label className="flex gap-3 items-start cursor-pointer border-2 border-black p-3"><input type="checkbox" checked={!!form.termos?.[4]} disabled={isReadOnly} onChange={e => { const termos = [...(form.termos || [false,false,false,false,false])]; termos[4] = e.target.checked; setForm({ ...form, termos }); }} className="mt-0.5 w-5 h-5 accent-black shrink-0" /><span><span className="font-black text-xs">5. Intermediação 15%</span><span className={styles.typography.bodySmall + ' block'}>Taxa de intermediação de 15% sobre a diária. Freela recebe 85%.</span></span></label>
-          <p className={styles.typography.caption}>Sem os 5 marcados, o botão Cadastrar bloqueia com "Aceite os 5 termos". Clique para marcar, clique de novo para desmarcar.</p>
+          <p className={styles.typography.caption}>Você pode marcar/desmarcar para ler, mas concluir o cadastro já vale como aceite de todos. Nada disso é gravado no banco.</p>
         </div>
         {erro && <div className={styles.errorBox + ' mt-4'}>{erro}</div>}
         <button onClick={handleSubmit} disabled={carregando || isReadOnly} className={`${styles.buttonPrimary(carregando || isReadOnly)} mt-8`}>{isReadOnly ? 'Somente Visualização' : `Cadastrar como ${getTipoChave()}`}</button>
