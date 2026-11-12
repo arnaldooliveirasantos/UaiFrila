@@ -148,14 +148,6 @@ export default function TelaCadastroVaga(props: any) {
       setCalculoBackend(null);
       return;
     }
-    // Enquanto digita, o estado passa por intervalos invalidos (ex.: trocou o
-    // inicio para depois do fim e ainda nao ajustou o fim). Nao chama a API
-    // nesses estados — senao o console enche de "Data fim deve ser maior que
-    // início" mesmo com as datas finais validas. O validar() ja barra publicar.
-    if (new Date(form.dataHoraFim).getTime() <= new Date(form.dataHoraInicio).getTime()) {
-      setCalculoBackend(null);
-      return;
-    }
     setCalculando(true);
     try {
       const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo';
@@ -233,6 +225,17 @@ export default function TelaCadastroVaga(props: any) {
     return null;
   };
 
+  // Sai do modo edicao e volta para vaga nova (limpa a chave e o form).
+  // Existe porque o Navbar NAO apaga mais a chave (ver Navbar.tsx): sem este
+  // botao, uma edicao abandonada reabriria toda vez que abrisse Publicar.
+  const cancelarEdicao = () => {
+    localStorage.removeItem('uaifrila_vaga_editar');
+    setIsEditando(false); setVagaEdicao(null);
+    setForm({ funcao: 'Garçom', titulo: '', descricao: '', dataHoraInicio: '', dataHoraFim: '', valorServicoStr: '75,00', valorServicoNum: 75.00, valorTransporteStr: '15,00', valorTransporteNum: 15, enderecoId: null, enderecoAtivo: null, meioPagamento: 'pix' });
+    setErro(''); setSucesso('');
+    carregarEnderecoAtivoAutomatico();
+  };
+
   const publicar = async () => {
     const msgErro = validar(); if (msgErro) { setErro(msgErro); return; }
     setCarregando(true); setErro(''); setSucesso('');
@@ -265,6 +268,7 @@ export default function TelaCadastroVaga(props: any) {
     <div className={styles.pageContainer + ' ' + styles.gridMainSide}>
       <div className={styles.card}>
         <h1 className={styles.typography.h1}>⚡ {isEditando ? `Editando Vaga #${vagaEdicao?.id}` : 'Nova Vaga'} {calculando ? '(calculando...)' : ''}</h1>
+        {isEditando && (<div className="mt-2"><button onClick={cancelarEdicao} className={styles.buttonSecondary}>✕ Cancelar edição / Nova vaga</button></div>)}
         <p className={styles.typography.caption + ' mt-1'}>Endereço ativo do usuário já vem marcado • Só troca se precisar</p>
 
         {erro && <div className={`${styles.errorBox} mt-4`}>{erro}</div>}

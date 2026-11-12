@@ -3,6 +3,7 @@ import { CandidaturaRepository } from '../repositories/CandidaturaRepository';
 import { VariavelSistemaService } from './VariavelSistemaService';
 import { NotificacaoService } from './NotificacaoService';
 import { BaseRepository } from '../repositories/BaseRepository';
+import { VagaService } from './VagaService';
 
 export class CandidaturaService extends BaseService<any> {
   private variavelSvc = new VariavelSistemaService();
@@ -15,10 +16,29 @@ export class CandidaturaService extends BaseService<any> {
     return await this.listarPorCampo('vaga_id', vagaId);
   }
 
+  // Candidaturas do freela ENRIQUECIDAS com os dados da vaga (titulo, datas,
+  // valores) + calculo (valor a receber, mesma regra de exibicao do mural).
+  // O repo.listarMinhas devolve so a linha de candidaturas (sem a vaga).
   async listarMinhas(freelaId: number): Promise<any[]> {
-    const r = this.getRepo() as CandidaturaRepository;
-    if (typeof (r as any).listarMinhas === 'function') return await (r as any).listarMinhas(freelaId);
-    return [];
+    const pool = BaseRepository.getPool() as any;
+    const r = await pool.query(
+      `SELECT c.*, v.titulo as vaga_titulo, v.funcao as vaga_funcao, v.descricao as vaga_descricao,
+              v.data_inicio as vaga_data_inicio, v.data_fim as vaga_data_fim,
+              v.valor_servico as vaga_valor_servico, v.valor_transporte as vaga_valor_transporte,
+              v.contratante_id as vaga_contratante_id,
+              sv.chave as vaga_status_chave, sv.nome_exibicao as vaga_status_nome
+       FROM candidaturas c JOIN vagas v ON v.id = c.vaga_id
+       LEFT JOIN status_vaga sv ON sv.id = v.status_vaga_id
+       WHERE c.freela_id = $1 OR c.usuario_id = $1 ORDER BY c.criado_em DESC`, [freelaId]);
+    const lista = r.rows || [];
+    const vs = new VagaService();
+    for (const c of lista) {
+      try {
+        c.calculo = await vs.calcular({ valor_servico: Number(c.vaga_valor_servico || 0), valor_transporte: Number(c.vaga_valor_transporte || 0), data_inicio_local: String(c.vaga_data_inicio || ''), data_fim_local: String(c.vaga_data_fim || ''), meio_pagamento: 'pix' });
+        c.valor_a_receber = c.calculo?.valor_a_receber ?? null;
+      } catch { c.calculo = null; c.valor_a_receber = null; }
+    }
+    return lista;
   }
 
   // Compatível com BaseService.criar(dados, _usuarioId?) - segundo arg OPCIONAL no base

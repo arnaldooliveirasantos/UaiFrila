@@ -225,15 +225,15 @@ export class App {
     this.expressApp.delete('/api/vagas/:id', (req, res) => vagaCtrl.deletar(req, res));
     this.expressApp.put('/api/vagas/:id/fechar', (req, res) => vagaCtrl.fecharVaga(req, res));
     this.expressApp.post('/api/vagas/:id/fechar', (req, res) => vagaCtrl.fecharVaga(req, res));
+    this.expressApp.post('/api/vagas/:id/cancelar', (req, res) => vagaCtrl.cancelarVaga(req, res));
 
-    this.expressApp.get('/api/candidaturas/minhas', (req, res) => candidaturaCtrl.minhasCandidaturas(req, res));
-    this.expressApp.get('/api/candidaturas/vaga/:vagaId', (req, res) => candidaturaCtrl.listarPorVaga(req, res));
-    this.expressApp.get('/api/candidaturas/todas', (req, res) => candidaturaCtrl.listarTodas(req, res));
-    this.expressApp.post('/api/candidaturas', (req, res) => candidaturaCtrl.candidatar(req, res));
-this.expressApp.post('/api/candidaturas/:id/cancelar', (req, res) => candidaturaCtrl.cancelar(req, res));
-this.expressApp.post('/api/candidaturas/cancelar-por-vaga/:vagaId', (req, res) => candidaturaCtrl.cancelarPorVaga(req, res));
-    this.expressApp.put('/api/candidaturas/:id/status', (req, res) => candidaturaCtrl.atualizarStatus(req, res));
-    this.expressApp.delete('/api/candidaturas/:id', (req, res) => candidaturaCtrl.deletar(req, res));
+    // ATENCAO: as rotas antigas chamavam metodos que NAO existem no controller
+    // (candidatar, minhasCandidaturas, listarPorVaga, listarTodas, atualizarStatus, deletar)
+    // e TODA chamada caia em 500 "is not a function". Metodos reais: criar, listarMinhas, cancelar, cancelarPorVaga.
+    this.expressApp.get('/api/candidaturas/minhas', (req, res) => candidaturaCtrl.listarMinhas(req, res));
+    this.expressApp.post('/api/candidaturas', (req, res) => candidaturaCtrl.criar(req, res));
+    this.expressApp.post('/api/candidaturas/:id/cancelar', (req, res) => candidaturaCtrl.cancelar(req, res));
+    this.expressApp.post('/api/candidaturas/cancelar-por-vaga/:vagaId', (req, res) => candidaturaCtrl.cancelarPorVaga(req, res));
 
     this.expressApp.get('/api/trampos/meus', (req, res) => trampoCtrl.meusTrampos(req, res));
     this.expressApp.get('/api/trampos/todos', (req, res) => trampoCtrl.listarTodos(req, res));

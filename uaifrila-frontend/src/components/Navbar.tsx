@@ -81,7 +81,13 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
   const filtrado = menuCompleto.filter((m: any) => m.show());
 
   const handleNav = (id: string) => {
-    if (id === 'publicar') localStorage.removeItem('uaifrila_vaga_editar');
+    // NAO apagar 'uaifrila_vaga_editar' aqui: era isso que destruia a edicao.
+    // Fluxo quebrado antes: Mural > Editar nao navegava (sem setTelaAtiva) >
+    // usuario ia em Publicar pelo menu > o Navbar apagava a chave >
+    // a tela abria em branco, como se a edicao nunca tivesse existido.
+    // A chave e consumida pela TelaCadastroVaga (ao publicar) ou pelo botao
+    // "Cancelar edicao / Nova vaga" dela. Abrir Publicar com uma edicao
+    // pendente abre a edicao — que e o comportamento correto.
     setTelaAtiva(id);
     setMenuAberto(false);
   };
