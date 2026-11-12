@@ -51,4 +51,9 @@ export class AvaliacaoController extends BaseController {
       return res.json({ success: true, message: 'Avaliação deletada' });
     } catch (e: any) { return this.handleError(res, e); }
   };
+  // Alias que o App ja chamava (GET /api/avaliacoes), mas nao existia (500).
+  listar = async (req: AuthRequest, res: Response) => {
+    try { const lista = await this.service.listar(); return res.json({ success: true, data: this.mapListToPublic(lista, req) }); }
+    catch (e: any) { return this.handleError(res, e); }
+  };
 }

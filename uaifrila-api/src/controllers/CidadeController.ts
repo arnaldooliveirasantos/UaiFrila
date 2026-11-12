@@ -82,4 +82,10 @@ export class CidadeController extends BaseController {
       return res.json({ success: true, message: 'Cidade deletada' });
     } catch (e: any) { return this.handleError(res, e); }
   };
+  // GET /api/cidades/ativas — o CadastroUnificado chama essa URL (antes: 404,
+  // o catch vazio deixava o select de cidades vazio sem nenhum erro visivel).
+  listarAtivas = async (req: AuthRequest, res: Response) => {
+    try { const cidades = await this.service.listarAtivas(); return res.json({ success: true, data: this.mapListToPublic(cidades, req), cidades: this.mapListToPublic(cidades, req) }); }
+    catch (e: any) { return this.handleError(res, e); }
+  };
 }

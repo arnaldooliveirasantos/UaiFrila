@@ -29,7 +29,7 @@ export default function CadastroEndereco({ onEnderecoSelecionado, modoSelecao = 
 
   useEffect(() => {
     // Listas públicas - SEMPRE via apiGetPublic, nunca com token
-    apiGetPublic('/estados').then((d: any) => setEstados(d.estados || d.data || [])).catch(() => {});
+    apiGetPublic('/estados/ativos').then((d: any) => setEstados(d.estados || d.data || [])).catch(() => {});
     apiGetPublic('/tipos-endereco').then((d: any) => setTipos(d.tipos || d.data || [])).catch(() => {});
     // Endereços do usuário - SÓ com token, NUNCA no cadastro
     if (semToken) return;

@@ -45,4 +45,13 @@ export class TrampoController extends BaseController {
       return res.json({ success: true, data: trampo ? this.mapToPublic(trampo, req) : null });
     } catch (e: any) { return this.handleError(res, e); }
   };
+  // Aliases que o App ja chamava, mas nao existiam (500).
+  listarTodos = async (req: AuthRequest, res: Response) => {
+    try { const lista = await this.service.listarTodos(); return res.json({ success: true, data: this.mapListToPublic(lista, req) }); }
+    catch (e: any) { return this.handleError(res, e); }
+  };
+  criar = async (req: AuthRequest, res: Response) => {
+    try { const r = await this.service.criar(req.body); return res.status(201).json({ success: true, data: this.mapToPublic(r, req) }); }
+    catch (e: any) { return this.handleError(res, e); }
+  };
 }

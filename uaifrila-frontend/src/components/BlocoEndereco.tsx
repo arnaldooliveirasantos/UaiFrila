@@ -72,7 +72,7 @@ export default function BlocoEndereco({ form, setForm, cidades: cidadesProp, tit
   // Estados / cidades por estado - SEMPRE público, nunca apiFetch com token
   useEffect(() => {
     if (!form || !setForm) return;
-    apiGetPublic('/estados').then((d: any) => setEstados(d.estados || d.data || [])).catch(() => setEstados([]));
+    apiGetPublic('/estados/ativos').then((d: any) => setEstados(d.estados || d.data || [])).catch(() => setEstados([]));
   }, [form, setForm]);
 
   useEffect(() => {
@@ -80,6 +80,28 @@ export default function BlocoEndereco({ form, setForm, cidades: cidadesProp, tit
     if (!estadoId) return;
     apiGetPublic(`/cidades/estado/${estadoId}`).then((d: any) => setCidades(d.cidades || d.data || [])).catch(() => setCidades([]));
   }, [estadoId, form, setForm]);
+
+  // Estado do endereco ativo: vem de form.estado_id, que o CadastroUnificado ja
+  // monta a partir de end?.cidade?.estadoId (o estado e aninhado dentro da cidade
+  // do endereco, nao um campo plano). O fallback via /cidades/:id fica so para
+  // telas que passam o form sem estado (ex.: vaga). So roda com estadoId null:
+  // nao sobrescreve a escolha manual do usuario.
+  useEffect(() => {
+    if (!form || !setForm) return;
+    if (estadoId) return;
+    const idEstadoForm = Number(form.estado_id ?? form.estadoId ?? form.cidade?.estadoId ?? form.cidade?.estado_id);
+    if (idEstadoForm) { setEstadoId(idEstadoForm); return; }
+    const cidadeId = Number(form.cidade_id);
+    if (!cidadeId) return;
+    let cancelado = false;
+    apiGetPublic(`/cidades/${cidadeId}`).then((d: any) => {
+      if (cancelado) return;
+      const cidade = d?.data || d?.cidade || d;
+      const idEstado = Number(cidade?.estado_id ?? cidade?.estadoId);
+      if (idEstado) setEstadoId(idEstado);
+    }).catch(() => {});
+    return () => { cancelado = true; };
+  }, [form?.estado_id, form?.cidade_id, form?.cidade?.estadoId, estadoId, form, setForm]);
 
   // ===== MODO CADASTRO / FORM - inputs ligados ao form, sem chamar /enderecos =====
   if (form && setForm) {
@@ -104,7 +126,7 @@ export default function BlocoEndereco({ form, setForm, cidades: cidadesProp, tit
           <div><label className={styles.label}>Complemento</label><input value={form.complemento || ''} onChange={(e) => setForm({ ...form, complemento: e.target.value })} className={styles.input} placeholder="Apto, bloco" /></div>
           <div>
             <label className={styles.label}>Estado</label>
-            <select value={estadoId || ''} onChange={(e) => setEstadoId(e.target.value ? Number(e.target.value) : null)} className={styles.select}>
+            <select value={estadoId || ''} onChange={(e) => { const v = e.target.value ? Number(e.target.value) : null; setEstadoId(v); setForm({ ...form, cidade_id: '', estado_id: v }); }} className={styles.select}>
               <option value="">Selecione o estado</option>
               {estados.map((s: any) => <option key={s.id} value={s.id}>{s.sigla} - {s.nome}</option>)}
             </select>

@@ -32,4 +32,10 @@ export class TipoEnderecoController extends BaseController {
     try { this.checkRole(req as any, ['ADMIN', 'SUPER_ADMIN']); const ok = await this.service.deletar(Number(req.params.id)); if (!ok) return this.error(res, 'TipoEndereco nao encontrado', 404); return res.json({ success: true, message: 'TipoEndereco removido' }); }
     catch (e: any) { return this.handleError(res, e); }
   };
+  // Alias que o App ja chamava (GET /api/tipos-endereco/todos), mas nao existia (500).
+  // CORRIGIDO: usa Request, como os demais metodos deste arquivo.
+  listarTodos = async (req: Request, res: Response) => {
+    try { const lista = await this.service.listarAtivos(); return res.json({ success: true, data: this.mapListToPublic(lista, req) }); }
+    catch (e: any) { return this.handleError(res, e); }
+  };
 }

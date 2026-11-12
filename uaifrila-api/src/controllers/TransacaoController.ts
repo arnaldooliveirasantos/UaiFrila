@@ -49,4 +49,9 @@ export class TransacaoController extends BaseController {
       return res.json({ success: true, data: this.mapListToPublic(transacoes, req) });
     } catch (e: any) { return this.handleError(res, e); }
   };
+  // Alias que o App ja chamava, mas nao existia (500).
+  criar = async (req: AuthRequest, res: Response) => {
+    try { const r = await this.service.criar(req.body); return res.status(201).json({ success: true, data: this.mapToPublic(r, req) }); }
+    catch (e: any) { return this.handleError(res, e); }
+  };
 }

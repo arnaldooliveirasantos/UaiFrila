@@ -39,4 +39,19 @@ export class TrampoService extends BaseService<TrampoModel> {
       this.handleError(e, 'TrampoService.finalizar');
     }
   }
+  // Criar trampo direto (rota POST /api/trampos). Antes, o App chamava
+  // trampoCtrl.criar e o metodo NAO existia -> 500.
+  async criar(dados: any): Promise<TrampoModel> {
+    try {
+      const vagaId = Number(dados.vaga_id ?? dados.vagaId);
+      const freelaId = Number(dados.freela_id ?? dados.freelaId);
+      const contratanteId = Number(dados.contratante_id ?? dados.contratanteId);
+      if (!vagaId || !freelaId || !contratanteId) throw new Error('vaga_id, freela_id e contratante_id sao obrigatorios');
+      return await this.criar({ vagaId, freelaId, contratanteId, status: dados.status || 'ACEITO' });
+    } catch (e: any) { this.handleError(e, 'TrampoService.criar'); }
+  }
+  async listarTodos(): Promise<TrampoModel[]> {
+    try { return await this.listar(); }
+    catch (e: any) { this.handleError(e, 'TrampoService.listarTodos'); }
+  }
 }

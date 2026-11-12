@@ -22,6 +22,10 @@ import { ExpansaoCidadeController } from './controllers/ExpansaoCidadeController
 import { PermissaoController } from './controllers/PermissaoController';
 import { GanhosController } from './controllers/GanhosController';
 import { CandidatoController } from './controllers/CandidatoController';
+import { CancelarCadastroController } from './controllers/CancelarCadastroController';
+import { UsuarioPixController } from './controllers/UsuarioPixController';
+import { NotificacaoController } from './controllers/NotificacaoController';
+import { StatusVagaController } from './controllers/StatusVagaController';
 
 // @ts-ignore - pode ser CatalogosController ou TiposUsuarioController
 let PaisController: any, TipoUsuarioController: any, StatusUsuarioController: any, FuncaoController: any, TipoEnderecoController: any;
@@ -131,6 +135,10 @@ export class App {
     const permissaoCtrl: any = new PermissaoController();
     const ganhosCtrl: any = new GanhosController();
     const candidatoCtrl: any = new CandidatoController();
+    const cancelarCadastroCtrl: any = new CancelarCadastroController();
+    const usuarioPixCtrl: any = new UsuarioPixController();
+    const notificacaoCtrl: any = new NotificacaoController();
+    const statusVagaCtrl: any = new StatusVagaController();
 
     this.expressApp.post('/api/auth/register', (req, res) => authCtrl.register(req, res));
     this.expressApp.post('/api/auth/login', (req, res) => authCtrl.login(req, res));
@@ -175,6 +183,7 @@ export class App {
 
     this.expressApp.get('/api/cidades', optionalAuthMiddleware, (req, res) => cidadeCtrl.listar(req, res));
     this.expressApp.get('/api/cidades/todas', optionalAuthMiddleware, (req, res) => cidadeCtrl.listarTodas(req, res));
+    this.expressApp.get('/api/cidades/ativas', (req, res) => cidadeCtrl.listarAtivas(req, res));
     this.expressApp.get('/api/cidades/:id', (req, res) => cidadeCtrl.buscarPorId(req, res));
     this.expressApp.post('/api/cidades', (req, res) => cidadeCtrl.criar(req, res));
     this.expressApp.put('/api/cidades/:id', (req, res) => cidadeCtrl.atualizar(req, res));
@@ -280,6 +289,21 @@ export class App {
     this.expressApp.get('/api/permissoes/meu-tipo', (req, res) => permissaoCtrl.meuTipo(req, res));
     this.expressApp.post('/api/permissoes', (req, res) => permissaoCtrl.criar(req, res));
     this.expressApp.put('/api/permissoes/:id', (req, res) => permissaoCtrl.atualizar(req, res));
+
+    // Rotas que faltavam: o front ja chamava, mas o App nao tinha (404).
+    this.expressApp.post('/api/auth/cancelar-cadastro', (req, res) => cancelarCadastroCtrl.cancelarCadastro(req, res));
+    this.expressApp.get('/api/usuario/pix', (req, res) => usuarioPixCtrl.buscarMeu(req, res));
+    this.expressApp.get('/api/usuario/pix/historico', (req, res) => usuarioPixCtrl.listarHistorico(req, res));
+    this.expressApp.post('/api/usuario/pix', (req, res) => usuarioPixCtrl.salvar(req, res));
+    this.expressApp.delete('/api/usuario/pix', (req, res) => usuarioPixCtrl.excluir(req, res));
+    this.expressApp.get('/api/notificacoes/minhas', (req, res) => notificacaoCtrl.listarMinhas(req, res));
+    this.expressApp.put('/api/notificacoes/:id/lida', (req, res) => notificacaoCtrl.marcarComoLida(req, res));
+    this.expressApp.get('/api/status-vaga', (req, res) => statusVagaCtrl.listar(req, res));
+    this.expressApp.get('/api/status-vaga/ativos', (req, res) => statusVagaCtrl.listarAtivos(req, res));
+    this.expressApp.get('/api/status-vaga/chave/:chave', (req, res) => statusVagaCtrl.buscarPorChave(req, res));
+    this.expressApp.get('/api/status-vaga/:id', (req, res) => statusVagaCtrl.buscarPorId(req, res));
+    this.expressApp.post('/api/status-vaga', (req, res) => statusVagaCtrl.criar(req, res));
+    this.expressApp.put('/api/status-vaga/:id', (req, res) => statusVagaCtrl.atualizar(req, res));
 
     this.expressApp.get('/health', (_req, res) => res.json({ status: 'ok' }));
     this.expressApp.get('/api/health', (_req, res) => res.json({ status: 'ok' }));

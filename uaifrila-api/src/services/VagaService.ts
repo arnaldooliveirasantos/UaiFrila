@@ -2,7 +2,9 @@ import { BaseService } from './BaseService';
 import { VagaRepository } from '../repositories/VagaRepository';
 import { VariavelSistemaRepository } from '../repositories/VariavelSistemaRepository';
 import { VagaModel } from '../models/VagaModel';
-import { BaseRepository } from '../repositories/BaseRepository';
+import { EnderecoService } from './EnderecoService';
+import { CandidaturaRepository } from '../repositories/CandidaturaRepository';
+import { EnderecoVagaRepository } from '../repositories/EnderecoVagaRepository';
 import { VariavelSistemaService } from './VariavelSistemaService';
 
 // ATENÇÃO: NÃO use nome 'variavelService' aqui - BaseService antigo tinha 'protected variavelService'
@@ -51,11 +53,6 @@ export class VagaService extends BaseService<VagaModel> {
     try {
       const r = this.getVagaRepo();
       if (typeof (r as any).buscarCompletaPorId === 'function') return await (r as any).buscarCompletaPorId(id);
-      const pool = BaseRepository.getPool() as any;
-      if (pool) {
-        const res = await pool.query(`SELECT v.*, sv.chave as status_chave, sv.nome_exibicao as status_nome FROM vagas v LEFT JOIN status_vaga sv ON sv.id = v.status_vaga_id WHERE v.id = $1 LIMIT 1`, [id]);
-        return res.rows[0] || null;
-      }
       return await this.getRepo().buscarPorId(id);
     } catch (e: any) { this.handleError(e, 'VagaService.buscarCompletaPorId'); }
   }
@@ -127,33 +124,40 @@ export class VagaService extends BaseService<VagaModel> {
   }
 
   async listarMuralParaUsuario(usuarioId: number): Promise<any[]> {
-    const pool = BaseRepository.getPool() as any;
     const cfg = await this.variavelSvc.getConfigCancelamento().catch(() => ({ prazoHoras: 24 }));
     let vagas: any[] = [];
-    try {
-      // Mural: vagas com início anterior a hoje NÃO aparecem.
-      // DATE(v.data_inicio) >= CURRENT_DATE (só a data, ignora a hora).
-      const r = await pool.query(`SELECT v.*, sv.chave as status_chave, sv.nome_exibicao as status_nome, sv.cor_hex as status_cor, sv.permite_editar, sv.permite_cancelar, sv.permite_candidatar FROM vagas v JOIN status_vaga sv ON sv.id = v.status_vaga_id WHERE sv.chave IN ('AGUARDANDO_CANDIDATURA','AGUARDANDO_ACEITE') AND (v.data_inicio IS NULL OR DATE(v.data_inicio) >= CURRENT_DATE) ORDER BY v.criado_em DESC`);
-      vagas = r.rows;
-    } catch { vagas = await this.listarAbertas(); }
-
+    try { vagas = await this.getVagaRepo().listarMural(); }
+    catch { vagas = await this.listarAbertas(); }
     let enderecoAtivoUsuario: any = null;
     const minhasCandidaturas = new Map<number, any>();
-    if (pool && usuarioId) {
-      try { const rr = await pool.query(`SELECT * FROM enderecos WHERE usuario_id=$1 AND ativo=true LIMIT 1`, [usuarioId]); enderecoAtivoUsuario = rr.rows[0] || null; } catch {}
-      try { const rc = await pool.query(`SELECT * FROM candidaturas WHERE (freela_id=$1 OR usuario_id=$1) AND status IN ('PENDENTE','ACEITA','EM_ANALISE')`, [usuarioId]); rc.rows.forEach((c: any) => minhasCandidaturas.set(Number(c.vaga_id), c)); } catch {}
+    if (usuarioId) {
+      try {
+        const enderecoSvc = new EnderecoService();
+        const ativo: any = await enderecoSvc.buscarAtivoPorUsuario(usuarioId);
+        enderecoAtivoUsuario = ativo ? (typeof ativo.toRaw === 'function' ? ativo.toRaw() : ativo) : null;
+      } catch {}
+      try {
+        const candRepo = new CandidaturaRepository();
+        const minhas = await candRepo.listarMinhas(usuarioId);
+        (minhas as any[]).forEach((c: any) => { if (['PENDENTE', 'ACEITA', 'EM_ANALISE'].includes((c.status || '').toUpperCase())) minhasCandidaturas.set(Number(c.vaga_id ?? c.vagaId), c); });
+      } catch {}
     }
-
     const result: any[] = [];
     for (const v of vagas) {
       const calculo = await this.calcular(v);
       let enderecoVaga: any = null;
-      if (pool) {
-        try { const re = await pool.query(`SELECT e.*, c.nome as cidade_nome, c.estado as cidade_estado FROM enderecos_vaga ev JOIN enderecos e ON e.id=ev.endereco_id LEFT JOIN cidades c ON c.id=e.cidade_id WHERE ev.vaga_id=$1 AND ev.ativo=true LIMIT 1`, [v.id]); enderecoVaga = re.rows[0] || null; } catch {}
-      }
+      try {
+        const evRepo = new EnderecoVagaRepository();
+        const ev: any = await evRepo.buscarAtivoPorVaga(v.id);
+        enderecoVaga = ev || null;
+      } catch {}
       let distanciaKm = 0, distanciaTexto = '';
-      if (enderecoAtivoUsuario && enderecoVaga && enderecoAtivoUsuario.latitude && enderecoVaga.latitude) {
-        distanciaKm = this.calcularDistanciaKm(Number(enderecoAtivoUsuario.latitude), Number(enderecoAtivoUsuario.longitude), Number(enderecoVaga.latitude), Number(enderecoVaga.longitude));
+      const latU = Number(enderecoAtivoUsuario?.latitude ?? enderecoAtivoUsuario?.lat);
+      const lngU = Number(enderecoAtivoUsuario?.longitude ?? enderecoAtivoUsuario?.lng);
+      const latV = Number(enderecoVaga?.latitude ?? enderecoVaga?.lat);
+      const lngV = Number(enderecoVaga?.longitude ?? enderecoVaga?.lng);
+      if (latU && lngU && latV && lngV) {
+        distanciaKm = this.calcularDistanciaKm(latU, lngU, latV, lngV);
         distanciaTexto = distanciaKm < 1 ? `${Math.round(distanciaKm * 1000)} m` : `${distanciaKm.toFixed(1)} km`;
       }
       const isMinha = Number(v.contratante_id) === Number(usuarioId);
@@ -167,18 +171,20 @@ export class VagaService extends BaseService<VagaModel> {
         }
         if (statusChave === 'EM_ANDAMENTO') { podeCancelarCandidatura = false; motivoCancelarBloqueado = 'Trampo já em andamento, não pode cancelar.'; }
       }
+      const cidadeNome = enderecoVaga?.cidade_nome ?? enderecoVaga?.cidadeNome ?? null;
+      const cidadeEstado = enderecoVaga?.cidade_estado ?? enderecoVaga?.cidadeEstado ?? null;
       result.push({
         id: v.id, titulo: v.titulo, funcao: v.funcao, descricao: v.descricao,
         contratante_id: v.contratante_id, contratante_nome: v.contratante_nome,
         status: v.status_nome || statusChave, status_chave: statusChave, status_nome: v.status_nome || statusChave, status_cor: v.status_cor,
-        permite_editar: v.permite_editar ?? !['ACEITA','EM_ANDAMENTO','FINALIZADA','CANCELADA','FECHADA'].includes(statusChave),
-        permite_cancelar: v.permite_cancelar ?? !['EM_ANDAMENTO','FINALIZADA','CANCELADA','FECHADA'].includes(statusChave),
+        permite_editar: v.permite_editar ?? !['ACEITA', 'EM_ANDAMENTO', 'FINALIZADA', 'CANCELADA', 'FECHADA'].includes(statusChave),
+        permite_cancelar: v.permite_cancelar ?? !['EM_ANDAMENTO', 'FINALIZADA', 'CANCELADA', 'FECHADA'].includes(statusChave),
         permite_candidatar: v.permite_candidatar ?? true,
         data_inicio: v.data_inicio, data_fim: v.data_fim,
         valor_servico: v.valor_servico, valor_transporte: v.valor_transporte,
         calculo,
-        bairro: enderecoVaga?.bairro, cidade_nome: enderecoVaga?.cidade_nome, cidade_estado: enderecoVaga?.cidade_estado,
-        endereco_completo: isMinha && enderecoVaga ? `${enderecoVaga.logradouro || ''} ${enderecoVaga.numero || ''}, ${enderecoVaga.bairro || ''}, ${enderecoVaga.cidade_nome || ''} - ${enderecoVaga.cidade_estado || ''} CEP ${enderecoVaga.cep || ''}` : null,
+        bairro: enderecoVaga?.bairro, cidade_nome: cidadeNome, cidade_estado: cidadeEstado,
+        endereco_completo: isMinha && enderecoVaga ? `${enderecoVaga.logradouro || ''} ${enderecoVaga.numero || ''}, ${enderecoVaga.bairro || ''}, ${cidadeNome || ''} - ${cidadeEstado || ''} CEP ${enderecoVaga.cep || ''}` : null,
         logradouro: isMinha ? enderecoVaga?.logradouro : undefined,
         cep: isMinha ? enderecoVaga?.cep : undefined,
         numero: isMinha ? enderecoVaga?.numero : undefined,
@@ -193,14 +199,12 @@ export class VagaService extends BaseService<VagaModel> {
 
   // Cancelar vaga do dono - com trava via status_vaga
   async cancelarVaga(vagaId: number, usuarioId: number, motivo?: string): Promise<any> {
-    const pool = BaseRepository.getPool() as any;
     const vaga = await this.buscarCompletaPorId(vagaId);
     if (!vaga) throw new Error('Vaga não encontrada');
     if (Number(vaga.contratante_id) !== Number(usuarioId)) throw new Error('Só o dono pode cancelar a vaga');
     const statusChave = (vaga.status_chave || '').toUpperCase();
-    if (['EM_ANDAMENTO','FINALIZADA','CANCELADA','FECHADA'].includes(statusChave)) throw new Error(`Não pode cancelar com status ${statusChave}`);
-    const rs = await pool.query(`SELECT id FROM status_vaga WHERE chave='CANCELADA'`);
-    if (rs.rows[0]) await pool.query(`UPDATE vagas SET status_vaga_id=$1 WHERE id=$2`, [rs.rows[0].id, vagaId]);
+    if (['EM_ANDAMENTO', 'FINALIZADA', 'CANCELADA', 'FECHADA'].includes(statusChave)) throw new Error(`Não pode cancelar com status ${statusChave}`);
+    await this.getVagaRepo().atualizarStatusVaga(vagaId, 'CANCELADA');
     return { vaga_id: vagaId, novo_status: 'CANCELADA', motivo: motivo || 'Cancelado pelo contratante' };
   }
 }
