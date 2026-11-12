@@ -1,13 +1,14 @@
+import { BaseService } from './BaseService';
 import { FuncaoRepository } from '../repositories/FuncaoRepository';
 import { FuncaoModel } from '../models/FuncaoModel';
-export class FuncaoService {
-  private repo: FuncaoRepository;
-  constructor() { this.repo = new FuncaoRepository(); }
-  async listar(): Promise<FuncaoModel[]> { return await this.repo.buscarTodos(); }
-  async listarAtivas(): Promise<FuncaoModel[]> { return await this.repo.listarAtivas(); }
-  async buscarPorId(id: number): Promise<FuncaoModel> { const f = await this.repo.buscarPorId(id); if (!f) throw new Error('Função não encontrada'); return f; }
-  async buscarPorNome(nome: string): Promise<FuncaoModel | null> { return await this.repo.buscarPorNome(nome); }
-  async criar(dados: any): Promise<FuncaoModel> { return await this.repo.criarGenerico(dados); }
-  async atualizar(id: number, dados: any): Promise<FuncaoModel | null> { return await this.repo.atualizarGenerico(id, dados); }
-  async deletar(id: number): Promise<boolean> { return await this.repo.deletarPorId(id); }
+// CORRIGIDO TS2611: sem 'get repository()' — BaseService ja declara 'repository' como propriedade.
+// Cada metodo especifico usa getRepo() com cast local.
+export class FuncaoService extends BaseService<FuncaoModel> {
+  constructor() { super(new FuncaoRepository()); }
+  async listarAtivas(): Promise<FuncaoModel[]> {
+    return await (this.getRepo() as FuncaoRepository).listarAtivas();
+  }
+  async buscarPorNome(nome: string): Promise<FuncaoModel | null> {
+    return await (this.getRepo() as FuncaoRepository).buscarPorNome(nome);
+  }
 }

@@ -1,12 +1,6 @@
-
+import { apiFetch } from '../utils/Api';
+// SEM fetch direto, SEM VITE_API_URL proprio, SEM fallback localhost.
 export class ExpansaoService {
-  private apiUrl: string;
-  constructor() { this.apiUrl = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3000/api'; }
-  async listar(): Promise<any[]> {
-    const token = localStorage.getItem('uaifrila_token');
-    const res = await fetch(`${this.apiUrl}/expansao`, { headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.erro || 'Erro expansao');
-    return data.cidades || data.data || [];
-  }
+  static async listar(): Promise<any[]> { const d = await apiFetch('/api/expansao'); return d.data || []; }
+  static async solicitar(body: any): Promise<any> { return apiFetch('/api/expansao/solicitar', { method: 'POST', body: JSON.stringify(body) }); }
 }

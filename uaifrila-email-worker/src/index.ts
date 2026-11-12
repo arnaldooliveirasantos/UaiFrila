@@ -1,120 +1,44 @@
-
 import { Pool } from 'pg';
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
 dotenv.config();
-
-const pool = new Pool({
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT) || 5432,
-  database: process.env.DB_NAME,
-  max: 5
-});
-
-const transportador = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT) || 587,
-  secure: false,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
-  }
-});
-
+import { WorkerLogger, mascararEmail } from './Logger';
+const pool = new Pool({ user: process.env.DB_USER, password: process.env.DB_PASSWORD, host: process.env.DB_HOST, port: Number(process.env.DB_PORT) || 5432, database: process.env.DB_NAME, max: 5 });
+const log = new WorkerLogger(pool);
+const transportador = nodemailer.createTransport({ host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT) || 587, secure: false, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } });
 const INTERVAL = Number(process.env.WORKER_INTERVAL_MS) || 10000;
 const BATCH = Number(process.env.WORKER_BATCH_SIZE) || 10;
-
-console.log(`Worker v16.1 - FIX: Não expira sem passar o tempo`);
-
+const MAX_TENTATIVAS = Number(process.env.MAX_TENTATIVAS) || 3;
 let isProcessing = false;
-
 async function tick() {
-  if (isProcessing) return;
+  if (isProcessing) { await log.warn('tick ignorado: anterior ainda em execucao'); return; }
   isProcessing = true;
   const client = await pool.connect();
   try {
-    // PASSO 1: Envia TODOS EM_ESPERA primeiro - mesmo que expira_em esteja perto
-    const emEspera = await client.query(`
-      WITH locked AS (
-        SELECT id FROM email_historico_disparos
-        WHERE status_id = (SELECT id FROM email_status WHERE chave='EM_ESPERA')
-          AND enviado_em IS NULL
-        ORDER BY criado_em ASC LIMIT $1::int FOR UPDATE SKIP LOCKED
-      )
-      SELECT h.id, h.email_destinatario, h.titulo_final, h.conteudo_final,
-             h.codigo_verificacao, h.expira_em, h.criado_em,
-             $2::text as email_remetente, COALESCE(t.nome_remetente, 'UaiFrila') as nome_remetente
-      FROM email_historico_disparos h
-      JOIN locked ON locked.id = h.id
-      LEFT JOIN email_templates t ON h.template_id = t.id
-    `, [BATCH, process.env.SMTP_USER || 'noreply@uaifrila.com.br']);
-
-    console.log(`[PASSO 1] ${emEspera.rows.length} EM_ESPERA para enviar`);
-
+    await log.info('tick inicio', { batch: BATCH });
+    // Trava + envio + marcacao dentro de UMA transacao por lote. Antes: FOR UPDATE fora de transacao (lock liberado) + retry infinito sem teto.
+    await client.query('BEGIN');
+    const emEspera = await client.query(`WITH locked AS (SELECT id FROM email_historico_disparos WHERE status_id=(SELECT id FROM email_status WHERE chave='EM_ESPERA') AND enviado_em IS NULL ORDER BY criado_em ASC LIMIT $1::int FOR UPDATE SKIP LOCKED) SELECT h.id,h.email_destinatario,h.titulo_final,h.conteudo_final,h.expira_em,h.criado_em,$2::text AS email_remetente,COALESCE(t.nome_remetente,'UaiFrila') AS nome_remetente FROM email_historico_disparos h JOIN locked ON locked.id=h.id LEFT JOIN email_templates t ON h.template_id=t.id`, [BATCH, process.env.SMTP_USER || 'noreply@uaifrila.com.br']);
+    await log.info('em_espera encontrados', { qtd: emEspera.rows.length });
     for (const linha of emEspera.rows) {
       try {
-        // Verifica se ainda é válido antes de enviar (expira_em > NOW())
-        const valido = await client.query(`SELECT $1::timestamp > NOW() as valido, EXTRACT(EPOCH FROM ($1::timestamp - NOW()))/60 as minutos`, [linha.expira_em]);
-        const minutosRaw = valido.rows[0].minutos;
-        const minutos = minutosRaw != null ? Number(minutosRaw) : null;
-        const minutosStr = minutos != null && !isNaN(minutos) ? Number(minutos).toFixed(1) : 'NULL';
-        
-        if (!valido.rows[0].valido) {
-          console.log(`   [${linha.id}] Código ${linha.codigo_verificacao} já expirou (expira:${linha.expira_em} rest:${minutosStr}min) - não envia, vai expirar no PASSO 2`);
-          continue;
-        }
-
-        console.log(`   [${linha.id}] Enviando para ${linha.email_destinatario} cod:${linha.codigo_verificacao} rest:${minutosStr}min`);
-        await transportador.sendMail({
-          from: `"${linha.nome_remetente}" <${linha.email_remetente}>`,
-          to: linha.email_destinatario,
-          subject: linha.titulo_final,
-          html: linha.conteudo_final
-        });
-
-        await client.query(`
-          UPDATE email_historico_disparos 
-          SET status_id = (SELECT id FROM email_status WHERE chave='ENVIADO'),
-              enviado_em = NOW(), atualizado_em = NOW(), ultima_tentativa = NOW(), tentativas = tentativas + 1, ultimo_erro = NULL
-          WHERE id = $1
-        `, [linha.id]);
-        console.log(`   ✅ [${linha.id}] ENVIADO marcado como ENVIADO`);
-
+        const v = await client.query(`SELECT $1::timestamp > NOW() AS valido`, [linha.expira_em]);
+        if (!v.rows[0].valido) { await log.info('expirado, nao envia', { id: linha.id, destinatario: mascararEmail(linha.email_destinatario) }); continue; }
+        await log.info('enviando', { id: linha.id, destinatario: mascararEmail(linha.email_destinatario) });
+        await transportador.sendMail({ from: `"${linha.nome_remetente}" <${linha.email_remetente}>`, to: linha.email_destinatario, subject: linha.titulo_final, html: linha.conteudo_final });
+        await client.query(`UPDATE email_historico_disparos SET status_id=(SELECT id FROM email_status WHERE chave='ENVIADO'), enviado_em=NOW(), atualizado_em=NOW(), ultima_tentativa=NOW(), tentativas=tentativas+1, ultimo_erro=NULL WHERE id=$1`, [linha.id]);
+        await log.info('enviado', { id: linha.id });
       } catch (err: any) {
-        console.error(`   ❌ [${linha.id}] Erro: ${err.message}`);
-        await client.query(`UPDATE email_historico_disparos SET tentativas = tentativas + 1, ultimo_erro = $1, ultima_tentativa = NOW() WHERE id = $2`, [err.message.substring(0,500), linha.id]);
+        await log.error('falha no envio', { id: linha.id, erro: String(err?.message || err).slice(0, 500) });
+        await client.query(`UPDATE email_historico_disparos SET tentativas=tentativas+1, ultimo_erro=$1, ultima_tentativa=NOW(), status_id=CASE WHEN tentativas+1 >= $3 THEN (SELECT id FROM email_status WHERE chave='FALHA') ELSE status_id END WHERE id=$2`, [String(err?.message || err).slice(0, 500), linha.id, MAX_TENTATIVAS]);
       }
     }
-
-    // PASSO 2: Expira só quem realmente passou do tempo COM MARGEM DE 5 MINUTOS + verifica criado_em
-    // Isso evita expirar "sem passar o tempo" por causa de diferença de relógio
-    const expirados = await client.query(`
-      UPDATE email_historico_disparos 
-      SET status_id = (SELECT id FROM email_status WHERE chave='EXPIRADO'),
-          atualizado_em = NOW(),
-          ultimo_erro = 'Expirado: criado_em < NOW() - 15min'
-      WHERE status_id = (SELECT id FROM email_status WHERE chave='EM_ESPERA')
-        AND criado_em < NOW() - INTERVAL '15 minutes'
-      RETURNING id, email_destinatario, codigo_verificacao, expira_em, criado_em
-    `);
-
-    if (expirados.rows.length > 0) {
-      console.log(`[PASSO 2] ${expirados.rows.length} expirados (expira_em < NOW() - 1min): ${expirados.rows.map(r=>r.codigo_verificacao).join(',')}`);
-    }
-
-    const status = await client.query(`SELECT s.chave, COUNT(*) as qtd FROM email_historico_disparos h JOIN email_status s ON s.id=h.status_id GROUP BY s.chave`);
-    console.log(`Status: ${status.rows.map(r=>`${r.chave}:${r.qtd}`).join(' | ')}`);
-
-  } catch (e: any) {
-    console.error('Erro:', e.message, e.stack);
-  } finally {
-    client.release();
-    isProcessing = false;
-  }
+    const expirados = await client.query(`UPDATE email_historico_disparos SET status_id=(SELECT id FROM email_status WHERE chave='EXPIRADO'), atualizado_em=NOW(), ultimo_erro='Expirado: criado_em < NOW() - 15min' WHERE status_id=(SELECT id FROM email_status WHERE chave='EM_ESPERA') AND criado_em < NOW() - INTERVAL '15 minutes' RETURNING id`);
+    if (expirados.rows.length) await log.info('expirados', { qtd: expirados.rows.length });
+    await client.query('COMMIT');
+    await log.info('tick fim ok');
+  } catch (e: any) { try { await client.query('ROLLBACK'); } catch {} await log.error('tick falhou, rollback', { erro: String(e?.message || e).slice(0, 500) }); }
+  finally { client.release(); isProcessing = false; }
 }
-
-console.log(`Worker v16.1 - Não expira sem passar o tempo (grace 1min)`);
-tick();
-setInterval(tick, INTERVAL);
+log.info('worker iniciado', { intervalMs: INTERVAL, batch: BATCH, maxTentativas: MAX_TENTATIVAS });
+tick(); setInterval(tick, INTERVAL);

@@ -730,7 +730,9 @@ INSERT INTO variaveis_sistema (chave, valor, valor_numerico, tipo, descricao, ca
 ('PRAZO_CANCELAMENTO_CANDIDATURA_HORAS', '24', 24, 'number',  'Prazo mínimo antes do início para freela aceito cancelar candidatura com motivo + notificação ao contratante. Se faltar menos, botão trava.', 'candidatura', true),
 ('PRAZO_CANCELAMENTO_VAGA_HORAS', '24', 24, 'number', 'Prazo mínimo antes do início para contratante cancelar vaga com freela aceito.', 'vagas', true),
 ('MOTIVO_CANCELAMENTO_MIN_CARACTERES', '10', 10, 'number',  'Tamanho mínimo do motivo de cancelamento quando já aceito.', 'candidatura', true),
-('NOTIFICAR_CANCELAMENTO', 'true', 1, 'boolean', 'Se true, envia notificação ao contratante/freela ao cancelar candidatura aceita.', 'candidatura', true)
+('NOTIFICAR_CANCELAMENTO', 'true', 1, 'boolean', 'Se true, envia notificação ao contratante/freela ao cancelar candidatura aceita.', 'candidatura', true),
+('CAMINHO_LOG_API', '/var/log/uaifrila/api', NULL, 'string', 'Diretorio dos logs em arquivo da uaifrila-api (um arquivo por dia). Dev Windows ex.: C:\logs\uaifrila\api', 'log', true),
+('CAMINHO_LOG_EMAIL_WORKER', '/var/log/uaifrila/email-worker', NULL, 'string', 'Diretorio dos logs em arquivo do uaifrila-email-worker (um arquivo por dia). Dev Windows ex.: C:\logs\uaifrila\email-worker', 'log', true)
 ON CONFLICT (chave) 
 DO UPDATE SET 
   valor = EXCLUDED.valor,

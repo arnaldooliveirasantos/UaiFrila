@@ -1,113 +1,47 @@
 import { BaseService } from './BaseService';
 import { UsuarioRepository } from '../repositories/UsuarioRepository';
 import { UsuarioModel } from '../models/UsuarioModel';
-import { BaseRepository } from '../repositories/BaseRepository';
-
-// CORREÇÃO DEFINITIVA tu.nome:
-// tipos_usuario NÃO tem coluna 'nome' - só: id, chave, descricao, nivel_permissao
-// status_usuario NÃO tem 'nome' garantido - só: id, chave, descricao
-// Por isso este arquivo NÃO usa JOIN com tu.nome / su.nome em lugar nenhum.
-// Busca usuario sozinho, depois busca tipo e status em queries SEPARADAS.
-// Se uma delas falhar, retorna o usuario mesmo assim - login NÃO pode quebrar por causa de JOIN.
-
+import { TipoUsuarioRepository } from '../repositories/TipoUsuarioRepository';
+import { StatusUsuarioRepository } from '../repositories/StatusUsuarioRepository';
+// SEM pool.query: tudo passa pelo repository (que usa a transacao do middleware).
+// SEM JOIN com tu.nome / su.nome (essas colunas nao existem).
 export class UsuarioService extends BaseService<UsuarioModel> {
+  private tipoRepo = new TipoUsuarioRepository();
+  private statusRepo = new StatusUsuarioRepository();
   constructor() { super(new UsuarioRepository()); }
-
+  protected get usuarioRepo(): UsuarioRepository { return this.getRepo() as UsuarioRepository; }
   async buscarPorEmail(email: string): Promise<any | null> {
-    try {
-      this.validateRequired({ email }, ['email']);
-      this.validateEmail(email);
-      const r = this.getRepo();
-      if (typeof r.buscarPorEmail === 'function') return await r.buscarPorEmail(email);
-      return await this.buscarPorCampo('email', String(email).trim().toLowerCase());
-    } catch (e: any) { this.handleError(e, 'UsuarioService.buscarPorEmail'); }
+    this.validateRequired({ email }, ['email']); this.validateEmail(email);
+    return await this.usuarioRepo.buscarPorEmail(String(email).trim().toLowerCase());
   }
-
-  async buscarPorCpf(cpf: string): Promise<any | null> {
-    try {
-      const r = this.getRepo();
-      if (typeof r.buscarPorCpf === 'function') return await r.buscarPorCpf(cpf);
-      return await this.buscarPorCampo('cpf', cpf);
-    } catch (e: any) { this.handleError(e, 'UsuarioService.buscarPorCpf'); }
+  async buscarPorEmailComStatus(email: string): Promise<any | null> {
+    return await this.usuarioRepo.buscarPorEmailComStatus(String(email).trim().toLowerCase());
   }
-
-  // SEM JOIN - 3 queries separadas, cada uma com try/catch próprio
+  async buscarPorCpf(cpf: string): Promise<any | null> { return await this.usuarioRepo.buscarPorCpf(cpf); }
   async buscarPorIdComRelacoes(id: number): Promise<any | null> {
+    const row: any = await this.usuarioRepo.buscarPorId(id);
+    if (!row) return null;
     try {
-      const pool = BaseRepository.getPool() as any;
-      if (!pool) return await this.getRepo().buscarPorId(id);
-
-      // 1. Usuario sozinho - se isso falhar, aí sim é erro real
-      const resUser = await pool.query(`SELECT * FROM usuarios WHERE id = $1 LIMIT 1`, [id]);
-      if (!resUser.rows[0]) return null;
-      const row: any = { ...resUser.rows[0] };
-
-      // 2. Tipo - só chave / descricao / nivel_permissao (NUNCA nome)
-      try {
-        if (row.tipo_usuario_id) {
-          const resTipo = await pool.query(
-            `SELECT chave, descricao, nivel_permissao FROM tipos_usuario WHERE id = $1 LIMIT 1`,
-            [row.tipo_usuario_id]
-          );
-          if (resTipo.rows[0]) {
-            row.tipo_chave = resTipo.rows[0].chave;
-            row.tipo_descricao = resTipo.rows[0].descricao;
-            row.nivel_permissao = resTipo.rows[0].nivel_permissao;
-            row.tipo_nivel_permissao = resTipo.rows[0].nivel_permissao;
-          }
-        }
-      } catch (e: any) {
-        console.warn('[UsuarioService] tipos_usuario falhou, seguindo só com usuario:', e.message);
-      }
-
-      // 3. Status - só chave / descricao (NUNCA nome)
-      try {
-        if (row.status_usuario_id) {
-          const resStatus = await pool.query(
-            `SELECT chave, descricao FROM status_usuario WHERE id = $1 LIMIT 1`,
-            [row.status_usuario_id]
-          );
-          if (resStatus.rows[0]) {
-            row.status_chave = resStatus.rows[0].chave;
-            row.status_descricao = resStatus.rows[0].descricao;
-          }
-        }
-      } catch (e: any) {
-        console.warn('[UsuarioService] status_usuario falhou, seguindo só com usuario:', e.message);
-      }
-
-      row.toRaw = () => row;
-      row.toPublic = () => { const { senha_hash, senhaHash, ...rest } = row; return rest; };
-      return row;
-    } catch (e: any) {
-      // NÃO deixa login quebrar: tenta buscar só o usuario via repository
-      console.warn('[UsuarioService.buscarPorIdComRelacoes] fallback para buscarPorId simples:', e.message);
-      try {
-        const simples: any = await this.getRepo().buscarPorId(id);
-        if (simples) {
-          const r = (simples as any).toRaw ? (simples as any).toRaw() : simples;
-          r.toRaw = () => r;
-          r.toPublic = () => { const { senha_hash, senhaHash, ...rest } = r; return rest; };
-          return r;
-        }
-      } catch {}
-      this.handleError(e, 'UsuarioService.buscarPorIdComRelacoes');
-    }
-  }
-
-  async buscarPorIdCompleto(id: number): Promise<any | null> {
-    return this.buscarPorIdComRelacoes(id);
-  }
-
-  async buscarCompletoPorId(id: number): Promise<any | null> {
-    return this.buscarPorIdComRelacoes(id);
-  }
-
-  async listarComFiltro(filtro: any): Promise<any[]> {
+      if (row.tipo_usuario_id) { const t: any = await this.tipoRepo.buscarPorId(row.tipo_usuario_id); if (t) { row.tipo_chave = t.chave; row.tipo_descricao = t.descricao; row.nivel_permissao = t.nivel_permissao ?? t.nivelPermissao; } }
+    } catch {}
     try {
-      const r = this.getRepo();
-      if (typeof r.listarComFiltro === 'function') return await r.listarComFiltro(filtro);
-      return await this.listar();
-    } catch (e: any) { this.handleError(e, 'UsuarioService.listarComFiltro'); }
+      if (row.status_usuario_id) { const s: any = await this.statusRepo.buscarPorId(row.status_usuario_id); if (s) { row.status_chave = s.chave; row.status_descricao = s.descricao; } }
+    } catch {}
+    row.toRaw = () => row;
+    row.toPublic = () => { const { senha_hash, senhaHash, ...rest } = row; return rest; };
+    return row;
+  }
+  async buscarPorIdCompleto(id: number): Promise<any | null> { return this.buscarPorIdComRelacoes(id); }
+  async buscarCompletoPorId(id: number): Promise<any | null> { return this.buscarPorIdComRelacoes(id); }
+  async listarComFiltro(filtro: any): Promise<any[]> { return await this.listar(); }
+  // ---- Fluxo de codigo ----
+  async criarCadastro(payload: any): Promise<any> { return await this.usuarioRepo.criarGenerico(payload); }
+  async atualizarCadastro(id: number, payload: any): Promise<any> { return await this.usuarioRepo.atualizarGenerico(id, payload); }
+  async ativar(id: number, statusAtivoId: number): Promise<void> { await this.usuarioRepo.atualizarStatus(id, statusAtivoId); }
+  async anonimizarCancelar(id: number, statusCanceladoId: number): Promise<void> { await this.usuarioRepo.anonimizarCancelar(id, statusCanceladoId); }
+  static semSenha(usuario: any): any {
+    if (!usuario) return null;
+    const { senha_hash, senha, senhaHash, ...resto } = usuario as any;
+    return resto;
   }
 }

@@ -1,15 +1,11 @@
-
+import { BaseService } from './BaseService';
 import { PaisRepository } from '../repositories/PaisRepository';
 import { PaisModel } from '../models/PaisModel';
-import { BaseService } from './BaseService';
-
+// CORRIGIDO TS2611: sem 'get repository()' — BaseService ja declara 'repository' como propriedade.
+// Cada metodo especifico usa getRepo() com cast local.
 export class PaisService extends BaseService<PaisModel> {
-  protected repository: PaisRepository;
-
-  constructor() {
-    super();
-    this.repository = new PaisRepository();
+  constructor() { super(new PaisRepository()); }
+  async buscarPorSigla(sigla: string): Promise<PaisModel | null> {
+    return await (this.getRepo() as PaisRepository).buscarPorSigla(sigla);
   }
-
-  
 }

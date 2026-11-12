@@ -1,13 +1,14 @@
+import { BaseService } from './BaseService';
 import { TipoEnderecoRepository } from '../repositories/TipoEnderecoRepository';
 import { TipoEnderecoModel } from '../models/TipoEnderecoModel';
-export class TipoEnderecoService {
-  private repo: TipoEnderecoRepository;
-  constructor() { this.repo = new TipoEnderecoRepository(); }
-  async listar(): Promise<TipoEnderecoModel[]> { return await this.repo.buscarTodos(); }
-  async listarAtivos(): Promise<TipoEnderecoModel[]> { return await this.repo.listarAtivos(); }
-  async buscarPorId(id: number): Promise<TipoEnderecoModel> { const t = await this.repo.buscarPorId(id); if (!t) throw new Error('Tipo endereço não encontrado'); return t; }
-  async buscarPorChave(chave: string): Promise<TipoEnderecoModel | null> { return await this.repo.buscarPorChave(chave); }
-  async criar(dados: any): Promise<TipoEnderecoModel> { return await this.repo.criarGenerico(dados); }
-  async atualizar(id: number, dados: any): Promise<TipoEnderecoModel | null> { return await this.repo.atualizarGenerico(id, dados); }
-  async deletar(id: number): Promise<boolean> { return await this.repo.deletarPorId(id); }
+// CORRIGIDO TS2611: sem 'get repository()' — BaseService ja declara 'repository' como propriedade.
+// Cada metodo especifico usa getRepo() com cast local.
+export class TipoEnderecoService extends BaseService<TipoEnderecoModel> {
+  constructor() { super(new TipoEnderecoRepository()); }
+  async listarAtivos(): Promise<TipoEnderecoModel[]> {
+    return await (this.getRepo() as TipoEnderecoRepository).listarAtivos();
+  }
+  async buscarPorChave(chave: string): Promise<TipoEnderecoModel | null> {
+    return await (this.getRepo() as TipoEnderecoRepository).buscarPorChave(chave);
+  }
 }
