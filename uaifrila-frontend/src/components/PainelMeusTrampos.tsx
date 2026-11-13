@@ -58,7 +58,7 @@ export default function PainelMeusTrampos({ usuario: usuarioProp, setTelaAtiva }
   const confirmarCancelarVaga = async (vaga: any) => {
     setCancelandoVagaId(vaga.id); setMsg('');
     try {
-      await apiFetch(`/api/vagas/${vaga.id}/cancelar`, { method: 'POST', body: JSON.stringify({ motivo: cancelandoVaga?.motivo || 'Cancelada pelo contratante' }) });
+      await apiFetch(`/api/vagas/${vaga.id}/cancelar`, { method: 'PUT', body: JSON.stringify({ motivo: cancelandoVaga?.motivo || 'Cancelada pelo contratante' }) });
       setVagas(prev => prev.filter(v => v.id !== vaga.id));
       setMsg('Vaga cancelada.');
       setCancelandoVaga(null);

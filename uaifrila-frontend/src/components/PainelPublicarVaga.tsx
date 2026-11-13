@@ -1,3 +1,4 @@
+import { apiFetch } from '../utils/Api';
 import React, { useState } from 'react';
 import { useTheme } from '../context/ThemeContext';
 
@@ -7,17 +8,14 @@ export default function PainelPublicarVaga() {
   const subtotal = form.horas * form.valorHora + form.uber;
   const totalCartao = subtotal * 1.14;
   const totalPix = subtotal * 1.10;
-  const API = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
-
+  
   const publicar = async () => {
     const token = localStorage.getItem('@UaiFrila:token');
-    const res = await fetch(`${API}/vagas/criar`, {
+    const data = await apiFetch('/vagas', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ funcao: form.funcao, data_hora: form.dataHora, horas_estimadas: form.horas, valor_hora_limpo: form.valorHora, ajuda_custo_transporte: form.uber, endereco_completo: form.endereco })
     });
-    const data = await res.json();
-    if (!res.ok) { alert(data.erro); return; }
     alert('Vaga publicada!');
   };
 

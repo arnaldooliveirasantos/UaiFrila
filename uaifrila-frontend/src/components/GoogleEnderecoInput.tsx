@@ -63,10 +63,7 @@ export default function GoogleEnderecoInput({ endereco, cidade, cidadeId, lat, l
     if (q.length < 3) { setSugestoes([]); return; }
     setCarregando(true);
     try {
-      if (GOOGLE_KEY) {
-        const data = await apiGetPublic(`/enderecos/buscar?q=${encodeURIComponent(q)}&cidade=${encodeURIComponent(cidadeSelecionada)}`);
-        setSugestoes(data.resultados || []);
-      } else {
+      {
         const cidadeObj = cidades.find(c => c.nome === cidadeSelecionada);
         const viewbox = cidadeObj ? `${cidadeObj.lng! - 0.2},${cidadeObj.lat! + 0.2},${cidadeObj.lng! + 0.2},${cidadeObj.lat! - 0.2}` : '';
         const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=br&q=${encodeURIComponent(q + ' ' + cidadeSelecionada)}&viewbox=${viewbox}&bounded=1&limit=5`);

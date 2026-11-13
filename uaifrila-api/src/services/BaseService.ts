@@ -51,10 +51,7 @@ export abstract class BaseService<T extends BaseModel = any> {
     return !isNaN(n) && n > 0;
   }
 
-  protected toNumber(v: any, fallback = 0): number {
-    const n = Number(v);
-    return isNaN(n) ? fallback : n;
-  }
+  protected toNumberObrigatorio(v: any, campo = 'valor'): number { const n = Number(v); if (isNaN(n)) throw new Error(`Valor numerico invalido: ${campo}`); return n; }
 
   protected now(): Date { return new Date(); }
 
@@ -79,7 +76,6 @@ export abstract class BaseService<T extends BaseModel = any> {
     try {
       const r = this.getRepo();
       if (typeof r.buscarPorIdComRelacoes === 'function') return await r.buscarPorIdComRelacoes(id);
-      // Fallback: busca simples + join via query direta (implementado em UsuarioService)
       return await r.buscarPorId(id);
     } catch (e: any) { this.handleError(e, `${this.constructor.name}.buscarPorIdComRelacoes`); }
   }

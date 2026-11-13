@@ -7,5 +7,5 @@ export class PermissaoService {
   async listar(): Promise<any[]> { return await this.repo.listar(); }
   async categorias(): Promise<string[]> { return await this.repo.categorias(); }
   async criar(dados: any): Promise<any> { return await this.repo.criar(dados); }
-  async atualizar(chaveAntiga: string, dados: any): Promise<any> { return await this.repo.atualizar(chaveAntiga, dados); }
+  async atualizar(id: number, dados: any): Promise<any> { return await this.repo.atualizar(Number(id), dados); }
 }

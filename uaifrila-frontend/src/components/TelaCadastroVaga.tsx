@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 import BlocoEndereco from './BlocoEndereco';
-import { apiFetch } from '../utils/Api';
+import { apiFetch, apiGetPublic } from '../utils/Api';
 
 type MeioPagamento = 'pix' | 'cartao';
 
@@ -60,17 +60,20 @@ export default function TelaCadastroVaga(props: any) {
   const styles = useUaiFrilaStyles();
   const propsSetTelaAtiva = props.setTelaAtiva;
 
+  // taxas ANTES do form: o estado inicial do form usa taxas.valor_minimo_vaga.
+  // Antes taxas era declarado DEPOIS (linha 73) -> "Cannot access 'taxas' before initialization" e a tela nem abria.
+  const [taxas, setTaxas] = useState(TAXAS_DEFAULT);
+
   const [form, setForm] = useState({
-    funcao: 'Garçom', titulo: '', descricao: '',
+    funcaoId: null as number | null, titulo: '', descricao: '',
     dataHoraInicio: '', dataHoraFim: '',
-    valorServicoStr: '75,00', valorServicoNum: 75.00,
+    valorServicoStr: taxas.valor_minimo_vaga.toFixed(2).replace('.', ','), valorServicoNum: taxas.valor_minimo_vaga,
     valorTransporteStr: '15,00', valorTransporteNum: 15,
     enderecoId: null as number | null,
     enderecoAtivo: null as any,
     meioPagamento: 'pix' as MeioPagamento,
   });
 
-  const [taxas, setTaxas] = useState(TAXAS_DEFAULT);
   const [antecedenciaMinutos, setAntecedenciaMinutos] = useState(30);
   const [minDateTime, setMinDateTime] = useState(getMinDateTimeLocal(30));
   const [isEditando, setIsEditando] = useState(false);
@@ -81,21 +84,44 @@ export default function TelaCadastroVaga(props: any) {
   const [calculoBackend, setCalculoBackend] = useState<CalculoBackend | null>(null);
   const [calculando, setCalculando] = useState(false);
   const [carregandoEnderecoAtivo, setCarregandoEnderecoAtivo] = useState(true);
+  const [funcoes, setFuncoes] = useState<any[]>([]);
+  const [carregandoFuncoes, setCarregandoFuncoes] = useState(true);
 
-  const carregarVariaveis = async () => {
+  // Funcoes: fonte unica GET /api/funcoes (publica). Sem lista fixa no front.
+  // Retorna a lista para o modo edicao resolver funcao_id a partir do nome antigo.
+  const carregarFuncoes = async (): Promise<any[]> => {
+    setCarregandoFuncoes(true);
+    try {
+      const data = await apiGetPublic('/api/funcoes');
+      const lista = (data.funcoes || data.data || data || []).filter((f: any) => f.ativa !== false && f.ativo !== false);
+      setFuncoes(lista);
+      if (lista.length && !form.funcaoId) setForm(f => ({ ...f, funcaoId: f.funcaoId ?? lista[0].id }));
+      return lista;
+    } catch (e: any) {
+      setErro('Nao foi possivel carregar as funcoes. Tente recarregar a pagina.');
+      return [];
+    } finally { setCarregandoFuncoes(false); }
+  };
+
+  // Retorna o VALOR_MINIMO_VAGA e, em vaga NOVA, aplica ele como valor inicial
+  // do campo Valor Servico. Antes o campo nascia fixo em 75,00, ignorando a variavel.
+  const carregarVariaveis = async (isEditandoVaga = false): Promise<number> => {
     try {
       const data = await apiFetch('/api/variaveis');
       const vars = data.variaveis || data.data || data || [];
       const find = (ch: string) => vars.find((x: any) => x.chave === ch);
+      const minimo = parseFloat(find('VALOR_MINIMO_VAGA')?.valor_numerico ?? find('VALOR_MINIMO_VAGA')?.valor ?? '75') || 75;
+      if (!isEditandoVaga) setForm(f => ({ ...f, valorServicoNum: minimo, valorServicoStr: minimo.toFixed(2).replace('.', ',') }));
       setTaxas({
-        valor_minimo_vaga: parseFloat(find('VALOR_MINIMO_VAGA')?.valor_numerico || '75'),
+        valor_minimo_vaga: minimo,
         taxa_pix_percentual: parseFloat(find('TAXA_PIX_PERCENTUAL')?.valor_numerico || '1'),
         taxa_cartao_percentual: parseFloat(find('TAXA_CARTAO_PERCENTUAL')?.valor_numerico || '4'),
         comissao_percentual: parseFloat((find('COMISSAO_APLICATIVO') || find('TAXA_PLATAFORMA_PERCENTUAL'))?.valor_numerico || '10'),
       });
       const ant = find('VAGA_ANTECEDENCIA_MINUTOS');
       if (ant) { const min = parseInt(ant.valor_numerico || ant.valor); if (min > 0) { setAntecedenciaMinutos(min); setMinDateTime(getMinDateTimeLocal(min)); } }
-    } catch {}
+      return minimo;
+    } catch { return TAXAS_DEFAULT.valor_minimo_vaga; }
   };
 
   const carregarEnderecoAtivoAutomatico = async () => {
@@ -148,6 +174,12 @@ export default function TelaCadastroVaga(props: any) {
       setCalculoBackend(null);
       return;
     }
+    // Fim <= inicio e erro de validacao do proprio form: nao chama o backend
+    // (antes gerava POST /vagas/calcular 500 a cada tecla enquanto o usuario digitava).
+    if (new Date(form.dataHoraFim).getTime() <= new Date(form.dataHoraInicio).getTime()) {
+      setCalculoBackend(null);
+      return;
+    }
     setCalculando(true);
     try {
       const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo';
@@ -180,38 +212,84 @@ export default function TelaCadastroVaga(props: any) {
   }, [form.valorServicoNum, form.valorTransporteNum, form.dataHoraInicio, form.dataHoraFim, form.meioPagamento]);
 
   useEffect(() => {
-    carregarVariaveis();
-    // Se não está editando, já busca ativo automaticamente
+    const init = async () => {
+    // Edicao e decidida ANTES de carregar as variaveis: em vaga nova o
+    // VALOR_MINIMO_VAGA vira o valor inicial do campo; em edicao, o valor da vaga vence.
+    let vagaLocal: any = null;
     const vagaStr = localStorage.getItem('uaifrila_vaga_editar');
     if (vagaStr) {
+      try { const parsed = JSON.parse(vagaStr); if (parsed?.id) vagaLocal = parsed; } catch {}
+    }
+    const minimo = await carregarVariaveis(!!vagaLocal);
+    // Se não está editando, já busca ativo automaticamente
+    if (vagaLocal) {
       try {
-        const vagaLocal = JSON.parse(vagaStr);
-        if (vagaLocal?.id) {
+        {
           setIsEditando(true); setVagaEdicao(vagaLocal);
           const inicioLocal = utcParaInputLocal(vagaLocal.data_inicio);
           const fimLocal = utcParaInputLocal(vagaLocal.data_fim);
-          const valorServ = Number(vagaLocal.valor_servico || 75);
+          const valorServ = Number(vagaLocal.valor_servico || minimo);
           const valorTransp = Number(vagaLocal.valor_transporte || 0);
+          const listaFuncoes = await carregarFuncoes();
+          const funcaoIdEdicao = Number(vagaLocal.funcao_id ?? vagaLocal.funcaoId) || listaFuncoes.find((f: any) => String(f.nome).toLowerCase() === String(vagaLocal.funcao || '').toLowerCase())?.id || listaFuncoes[0]?.id || null;
+          // Endereco da vaga em edicao: ANTES o setForm so preenchia enderecoId e
+          // enderecoAtivo ficava null, entao o card "Usando:" nunca aparecia.
+          // E se a vaga salva nao trouxesse endereco_id, enderecoId ficava null e
+          // o botao Atualizar ficava desabilitado. Resolve em 3 passos:
+          setCarregandoEnderecoAtivo(true);
+          let enderecoIdEdicao = Number(vagaLocal.endereco_id ?? vagaLocal.enderecoId) || null;
+          if (!enderecoIdEdicao) {
+            try {
+              const dv: any = await apiFetch(`/api/enderecos-vaga/vaga/${vagaLocal.id}`);
+              const links = dv.enderecos || dv.enderecos_vaga || dv.data || dv || [];
+              const primeiro = Array.isArray(links) ? (links.find((l: any) => l.ativo !== false) || links[0]) : null;
+              enderecoIdEdicao = Number(primeiro?.endereco_id ?? primeiro?.enderecoId) || null;
+            } catch {}
+          }
+          // Objeto completo do endereco, para o card "Usando:" renderizar.
+          let enderecoAtivoEdicao: any = null;
+          if (enderecoIdEdicao) {
+            try {
+              const d: any = await apiFetch(`/api/enderecos/${enderecoIdEdicao}`);
+              enderecoAtivoEdicao = d.data || d.endereco || d || null;
+            } catch {}
+            if (!enderecoAtivoEdicao) {
+              try {
+                const dm: any = await apiFetch('/api/enderecos/meus');
+                const lista = dm.enderecos || dm.data || dm || [];
+                enderecoAtivoEdicao = (Array.isArray(lista) ? lista : []).find((e: any) => Number(e.id) === enderecoIdEdicao) || null;
+              } catch {}
+            }
+          }
+          // Fallback: usa os campos que a propria vaga ja traz (endereco_completo, logradouro, cep...).
+          if (!enderecoAtivoEdicao && vagaLocal.endereco_completo) {
+            enderecoAtivoEdicao = { id: enderecoIdEdicao, endereco_completo: vagaLocal.endereco_completo, logradouro: vagaLocal.logradouro, numero: vagaLocal.numero, bairro: vagaLocal.bairro, cep: vagaLocal.cep, cidade_nome: vagaLocal.cidade_nome, cidade_estado: vagaLocal.cidade_estado, estado_sigla: vagaLocal.cidade_estado };
+          }
           setForm(f => ({
             ...f,
-            funcao: vagaLocal.funcao || 'Garçom',
+            funcaoId: funcaoIdEdicao,
             titulo: vagaLocal.titulo || '', descricao: vagaLocal.descricao || '',
             dataHoraInicio: inicioLocal, dataHoraFim: fimLocal,
             valorServicoStr: valorServ.toFixed(2).replace('.', ','), valorServicoNum: valorServ,
             valorTransporteStr: valorTransp.toFixed(2).replace('.', ','), valorTransporteNum: valorTransp,
             meioPagamento: vagaLocal.meio_pagamento || 'pix',
-            enderecoId: vagaLocal.endereco_id || null,
+            enderecoId: enderecoIdEdicao,
+            enderecoAtivo: enderecoAtivoEdicao,
           }));
           setCarregandoEnderecoAtivo(false);
           return;
         }
       } catch {}
     }
-    // Não está editando: carrega ativo
+    // Não está editando: carrega funcoes + ativo
+    carregarFuncoes();
     carregarEnderecoAtivoAutomatico();
+    };
+    init();
   }, []);
 
   const validar = () => {
+    if (!form.funcaoId) return 'Selecione a funcao';
     if (!form.titulo || form.titulo.trim().length < 5) return 'Titulo minimo 5 caracteres';
     if (!form.descricao || form.descricao.trim().length < 10) return 'Descricao minima 10 caracteres';
     if (!form.dataHoraInicio) return 'Horario de entrada obrigatorio';
@@ -221,6 +299,9 @@ export default function TelaCadastroVaga(props: any) {
     if (fim <= inicio) return 'Saida deve ser maior que entrada';
     const diffH = (fim.getTime() - inicio.getTime()) / (1000 * 60 * 60); if (diffH < 0.5) return 'Minimo 30 minutos'; if (diffH > 24) return 'Maximo 24 horas';
     if (calculoBackend && !calculoBackend.valor_minimo_valido) return calculoBackend.mensagem_validacao || `Valor mínimo R$ ${taxas.valor_minimo_vaga.toFixed(2)}`;
+    // Sem calculo do backend (ainda carregando): trava pelo valor do servico mesmo.
+    // O backend revalida pelo liquido (servico + transporte - taxas) e rejeita com 400 de qualquer forma.
+    if (!calculoBackend && form.valorServicoNum < taxas.valor_minimo_vaga) return `Valor do serviço abaixo do mínimo R$ ${taxas.valor_minimo_vaga.toFixed(2)}`;
     if (!form.enderecoId) return 'Selecione um endereço ativo - cadastre um endereço em Perfil se não tiver';
     return null;
   };
@@ -231,7 +312,7 @@ export default function TelaCadastroVaga(props: any) {
   const cancelarEdicao = () => {
     localStorage.removeItem('uaifrila_vaga_editar');
     setIsEditando(false); setVagaEdicao(null);
-    setForm({ funcao: 'Garçom', titulo: '', descricao: '', dataHoraInicio: '', dataHoraFim: '', valorServicoStr: '75,00', valorServicoNum: 75.00, valorTransporteStr: '15,00', valorTransporteNum: 15, enderecoId: null, enderecoAtivo: null, meioPagamento: 'pix' });
+    setForm({ funcaoId: funcoes[0]?.id ?? null, titulo: '', descricao: '', dataHoraInicio: '', dataHoraFim: '', valorServicoStr: taxas.valor_minimo_vaga.toFixed(2).replace('.', ','), valorServicoNum: taxas.valor_minimo_vaga, valorTransporteStr: '15,00', valorTransporteNum: 15, enderecoId: null, enderecoAtivo: null, meioPagamento: 'pix' });
     setErro(''); setSucesso('');
     carregarEnderecoAtivoAutomatico();
   };
@@ -243,7 +324,7 @@ export default function TelaCadastroVaga(props: any) {
       const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo';
       
       const payload = {
-        titulo: form.titulo, descricao: form.descricao, funcao: form.funcao,
+        titulo: form.titulo, descricao: form.descricao, funcaoId: Number(form.funcaoId),
         valor_servico: form.valorServicoNum, 
         valor_transporte: form.valorTransporteNum,
         data_inicio_local: form.dataHoraInicio,
@@ -253,7 +334,7 @@ export default function TelaCadastroVaga(props: any) {
         endereco_id: form.enderecoId,
       };
       
-      const url = isEditando && vagaEdicao?.id ? `/api/vagas/${vagaEdicao.id}` : `/api/vagas/criar`;
+      const url = isEditando && vagaEdicao?.id ? `/api/vagas/${vagaEdicao.id}` : `/api/vagas`;
       const method = isEditando ? 'PUT' : 'POST';
       
       const data = await apiFetch(url, { method, body: JSON.stringify(payload) });
@@ -285,8 +366,11 @@ export default function TelaCadastroVaga(props: any) {
           </div>
           <div className={styles.grid2Cols}>
             <div>
-              <label className={styles.label}>Funcao</label>
-              <select value={form.funcao} onChange={e => setForm({ ...form, funcao: e.target.value })} className={styles.select}><option>Garçom</option><option>Cozinheiro</option><option>Diarista</option><option>Segurança</option><option>Recepcionista</option><option>Barman</option><option>Cumim</option><option>Copeira</option></select>
+              <label className={styles.label}>Funcao *</label>
+              <select value={form.funcaoId ?? ''} onChange={e => setForm({ ...form, funcaoId: Number(e.target.value) || null })} disabled={carregandoFuncoes} className={styles.select}>
+                <option value="">{carregandoFuncoes ? 'Carregando funcoes...' : 'Selecione a funcao'}</option>
+                {funcoes.map((f: any) => (<option key={f.id} value={f.id}>{f.nome}</option>))}
+              </select>
             </div>
             <div>
               <label className={styles.label}>Meio Pagamento *</label>
@@ -354,7 +438,7 @@ export default function TelaCadastroVaga(props: any) {
             </div>
           )}
 
-          <button onClick={publicar} disabled={carregando || !form.enderecoId} className={styles.buttonPrimary(carregando || !form.enderecoId)}>
+          <button onClick={publicar} disabled={carregando || !form.enderecoId || !form.funcaoId} className={styles.buttonPrimary(carregando || !form.enderecoId)}>
             {carregando ? 'Publicando...' : isEditando ? 'Atualizar Vaga' : form.enderecoId ? `Publicar Vaga em ${form.enderecoAtivo?.bairro || form.enderecoAtivo?.cidade_nome || 'endereço ativo'}` : 'Selecione um endereço para publicar'}
           </button>
         </div>

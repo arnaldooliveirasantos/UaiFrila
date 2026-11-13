@@ -1,5 +1,5 @@
 import { apiFetch, apiGetPublic } from '../utils/Api';
-// UNICO VagaService do front. APAGAR VagaServiceo.ts (duplicado, importava '../utils/api' com 'a' minusculo — quebra no Linux).
+// UNICO VagaService do front. APAGAR VagaServiceo.ts (duplicado, importava '../utils/Api' com 'a' minusculo — quebra no Linux).
 // SEMPRE via API: sem calculo local de taxa, sem vinculo local de endereco em 2a chamada solta.
 export class VagaService {
   static async listar(): Promise<any[]> { const d = await apiGetPublic('/api/vagas/abertas'); return d.data || d.vagas || []; }

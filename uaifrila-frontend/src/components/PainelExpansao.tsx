@@ -1,4 +1,5 @@
 
+import { apiFetch, apiGetPublic } from '../utils/Api';
 import React, { useEffect, useState } from 'react';
 import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 
@@ -31,8 +32,7 @@ interface SolicitacaoExpansao {
 
 export default function PainelExpansao(props: any) {
   const styles = useUaiFrilaStyles();
-  const API = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3000/api';
-  const [cidades, setCidades] = useState<Cidade[]>([]);
+    const [cidades, setCidades] = useState<Cidade[]>([]);
   const [solicitacoes, setSolicitacoes] = useState<SolicitacaoExpansao[]>([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState('');
@@ -45,17 +45,12 @@ export default function PainelExpansao(props: any) {
     try {
       const token = localStorage.getItem('uaifrila_token');
       const [resCidades, resExpansao] = await Promise.all([
-        fetch(`${API}/cidades`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API}/expansao`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null)
+        apiGetPublic('/cidades'),
+        apiFetch('/expansao').catch(() => null)
       ]);
 
-      const dataCidades = await resCidades.json();
-      if (resCidades.ok) setCidades(dataCidades.cidades || dataCidades || []);
-
-      if (resExpansao && resExpansao.ok) {
-        const dataExp = await resExpansao.json();
-        setSolicitacoes(dataExp.solicitacoes || dataExp.expansao || dataExp || []);
-      }
+      setCidades(resCidades.cidades || resCidades || []);
+      if (resExpansao) setSolicitacoes(resExpansao.solicitacoes || resExpansao.expansao || resExpansao || []);
     } catch (e: any) {
       setErro(e.message);
     } finally {
@@ -71,7 +66,7 @@ export default function PainelExpansao(props: any) {
     setErro('');
     try {
       const token = localStorage.getItem('uaifrila_token');
-      const res = await fetch(`${API}/expansao/solicitar`, {
+      const data = await apiFetch('/expansao/solicitar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -80,8 +75,6 @@ export default function PainelExpansao(props: any) {
           motivo: novaSolicitacao.motivo
         })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.erro || 'Erro ao solicitar');
       setNovaSolicitacao({ cidade: '', estado: 'MG', motivo: '' });
       carregar();
     } catch (e: any) {

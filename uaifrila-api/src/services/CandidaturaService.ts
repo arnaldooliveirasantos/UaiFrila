@@ -22,12 +22,12 @@ export class CandidaturaService extends BaseService<any> {
   async listarMinhas(freelaId: number): Promise<any[]> {
     const pool = BaseRepository.getPool() as any;
     const r = await pool.query(
-      `SELECT c.*, v.titulo as vaga_titulo, v.funcao as vaga_funcao, v.descricao as vaga_descricao,
+      `SELECT c.*, v.titulo as vaga_titulo, f.nome as vaga_funcao, v.descricao as vaga_descricao,
               v.data_inicio as vaga_data_inicio, v.data_fim as vaga_data_fim,
               v.valor_servico as vaga_valor_servico, v.valor_transporte as vaga_valor_transporte,
               v.contratante_id as vaga_contratante_id,
               sv.chave as vaga_status_chave, sv.nome_exibicao as vaga_status_nome
-       FROM candidaturas c JOIN vagas v ON v.id = c.vaga_id
+       FROM candidaturas c JOIN vagas v ON v.id = c.vaga_id LEFT JOIN funcoes f ON f.id = v.funcao_id
        LEFT JOIN status_vaga sv ON sv.id = v.status_vaga_id
        WHERE c.freela_id = $1 OR c.usuario_id = $1 ORDER BY c.criado_em DESC`, [freelaId]);
     const lista = r.rows || [];

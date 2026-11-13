@@ -64,17 +64,17 @@ export class VagaService extends BaseService<VagaModel> {
   async calcular(dados: any): Promise<any> {
     try {
       this.validateRequired(dados, ['valor_servico']);
-      let vars: any[] = [];
-      try { vars = await this.variavelRepo.buscarTodos(); } catch { vars = []; }
+      const vars: any[] = await this.variavelRepo.buscarTodos();
       const findVar = (chave: string) => vars.find((v: any) => v.chave === chave);
       const getNum = (chave: string, def: number) => {
         const v = findVar(chave);
         if (!v) return def;
         const num = (v as any).valorNumerico ?? (v as any).valor_numerico ?? (v as any).valor;
         const parsed = parseFloat(num);
-        return isNaN(parsed) ? def : parsed;
+        if (isNaN(parsed)) throw new Error(`Variavel de sistema sem valor numerico: ${chave}`);
+        return parsed;
       };
-      const VALOR_MINIMO = getNum('VALOR_MINIMO_VAGA', 75);
+      const VALOR_MINIMO = getNum('VALOR_MINIMO_VAGA', 75); // VALOR_MINIMO_VAGA deve existir; getNum lanca se ausente/sem numero
       const TAXA_PIX = getNum('TAXA_PIX_PERCENTUAL', 1);
       const TAXA_CARTAO = getNum('TAXA_CARTAO_PERCENTUAL', 4);
       const COMISSAO = getNum('COMISSAO_APLICATIVO', getNum('TAXA_PLATAFORMA_PERCENTUAL', 10));
@@ -85,7 +85,7 @@ export class VagaService extends BaseService<VagaModel> {
       if (iniStr && fimStr) {
         const diffMs = new Date(fimStr).getTime() - new Date(iniStr).getTime();
         horas = Math.round((diffMs / (1000 * 60 * 60)) * 100) / 100;
-        if (horas <= 0) throw new Error('Data fim deve ser maior que início');
+        if (horas <= 0) throw { status: 400, message: 'Data fim deve ser maior que início' };
       }
       const base = Number(dados.valor_servico) + Number(dados.valor_transporte || 0);
       const taxaPercent = dados.meio_pagamento === 'cartao' ? TAXA_CARTAO : TAXA_PIX;
@@ -113,7 +113,7 @@ export class VagaService extends BaseService<VagaModel> {
         freela_recebe_bruto: base, freela_recebe_liquido, valor_a_receber,
         valor_servico_liquido: valor_a_receber - Number(dados.valor_transporte || 0),
         valor_servico_liquido_cartao: valor_a_receber - Number(dados.valor_transporte || 0),
-        valor_hora_liquido: valor_hora_final, valor_hora_final, valor_minimo_valido,
+        valor_hora_liquido: valor_hora_final, valor_hora_final, valor_minimo_valido, valor_minimo: VALOR_MINIMO,
         mensagem_validacao: valor_minimo_valido ? undefined : `Valor mínimo R$ ${VALOR_MINIMO.toFixed(2)} - aumente o valor do serviço`,
         meio_pagamento: 'cartao',
       };
@@ -122,12 +122,12 @@ export class VagaService extends BaseService<VagaModel> {
 
   async listarMuralParaUsuario(usuarioId: number): Promise<any[]> {
     const pool = BaseRepository.getPool() as any;
-    const cfg = await this.variavelSvc.getConfigCancelamento().catch(() => ({ prazoHoras: 24 }));
+    const cfg = await this.variavelSvc.getConfigCancelamento();
     let vagas: any[] = [];
     try {
       // Mural: vagas com início anterior a hoje NÃO aparecem.
       // DATE(v.data_inicio) >= CURRENT_DATE (só a data, ignora a hora).
-      const r = await pool.query(`SELECT v.*, sv.chave as status_chave, sv.nome_exibicao as status_nome, sv.cor_hex as status_cor, sv.permite_editar, sv.permite_cancelar, sv.permite_candidatar FROM vagas v JOIN status_vaga sv ON sv.id = v.status_vaga_id WHERE sv.chave IN ('AGUARDANDO_CANDIDATURA','AGUARDANDO_ACEITE') AND (v.data_inicio IS NULL OR DATE(v.data_inicio) >= CURRENT_DATE) ORDER BY v.criado_em DESC`);
+      const r = await pool.query(`SELECT v.*, f.nome as funcao, sv.chave as status_chave, sv.nome_exibicao as status_nome, sv.cor_hex as status_cor, sv.permite_editar, sv.permite_cancelar, sv.permite_candidatar FROM vagas v LEFT JOIN funcoes f ON f.id = v.funcao_id JOIN status_vaga sv ON sv.id = v.status_vaga_id WHERE sv.chave IN ('AGUARDANDO_CANDIDATURA','AGUARDANDO_ACEITE') AND (v.data_inicio IS NULL OR DATE(v.data_inicio) >= CURRENT_DATE) ORDER BY v.criado_em DESC`);
       vagas = r.rows;
     } catch { vagas = await this.listarAbertas(); }
 
@@ -143,7 +143,7 @@ export class VagaService extends BaseService<VagaModel> {
       const calculo = await this.calcular(v);
       let enderecoVaga: any = null;
       if (pool) {
-        try { const re = await pool.query(`SELECT e.*, c.nome as cidade_nome, c.estado as cidade_estado FROM enderecos_vaga ev JOIN enderecos e ON e.id=ev.endereco_id LEFT JOIN cidades c ON c.id=e.cidade_id WHERE ev.vaga_id=$1 AND ev.ativo=true LIMIT 1`, [v.id]); enderecoVaga = re.rows[0] || null; } catch {}
+        try { const re = await pool.query(`SELECT e.*, c.nome as cidade_nome, e2.sigla as cidade_estado FROM enderecos_vaga ev JOIN enderecos e ON e.id=ev.endereco_id LEFT JOIN cidades c ON c.id=e.cidade_id LEFT JOIN estados e2 ON e2.id=c.estado_id WHERE ev.vaga_id=$1 AND ev.ativo=true LIMIT 1`, [v.id]); enderecoVaga = re.rows[0] || null; } catch {}
       }
       // Vaga em que o usuario ja se candidatou (PENDENTE/ACEITA/EM_ANALISE) NAO
       // aparece no Mural — ela e acompanhada em Meus Trampos.
@@ -250,11 +250,19 @@ export class VagaService extends BaseService<VagaModel> {
     if (dataFim.getTime() <= dataInicio.getTime()) throw new Error('Data fim deve ser maior que início');
     // Reusa o calculo (valida horas e devolve totais) com as mesmas datas.
     const calculo = await this.calcular({ ...dados, data_inicio_local: iniWall, data_fim_local: fimWall });
+    // VALOR_MINIMO_VAGA: o calculo ja calculava valor_minimo_valido, mas o criar
+    // IGNORAVA e criava a vaga mesmo assim. Agora rejeita (400) - backend e fonte da verdade.
+    // Regra sobre o VALOR DO SERVICO (bruto): o seed define a variavel como "valor minimo
+    // que contratante pode solicitar um servico". Se fosse sobre o liquido, o proprio valor
+    // padrao (= minimo) seria rejeitado quando o transporte e 0.
+    if (valorServico < Number(calculo.valor_minimo ?? 0)) throw { status: 400, message: `Valor do serviço abaixo do mínimo R$ ${Number(calculo.valor_minimo).toFixed(2)} - aumente o valor do serviço` };
+    const funcaoId = Number(dados.funcao_id ?? dados.funcaoId);
+    if (!funcaoId || isNaN(funcaoId)) throw new Error('funcao_id obrigatorio (use /api/funcoes para listar; nao existe coluna funcao em vagas)');
     const payload = {
       contratante_id: contratanteId,
       titulo: String(dados.titulo).trim(),
       descricao: dados.descricao || '',
-      funcao: dados.funcao || '',
+      funcao_id: funcaoId,
       valor_servico: valorServico,
       valor_transporte: Number(dados.valor_transporte ?? dados.valorTransporte ?? 0) || 0,
       valor_hora: Number(calculo.valor_hora_bruto || 0),
@@ -285,7 +293,7 @@ export class VagaService extends BaseService<VagaModel> {
     const patch: any = {};
     if (dados.titulo !== undefined) patch.titulo = String(dados.titulo).trim();
     if (dados.descricao !== undefined) patch.descricao = dados.descricao || '';
-    if (dados.funcao !== undefined) patch.funcao = dados.funcao || '';
+    if (dados.funcao_id !== undefined || dados.funcaoId !== undefined) patch.funcao_id = Number(dados.funcao_id ?? dados.funcaoId);
     if (dados.valor_servico !== undefined || dados.valor_transporte !== undefined) {
       const vs = Number(dados.valor_servico ?? existente.valorServico ?? existente.valor_servico ?? 0);
       const vt = Number(dados.valor_transporte ?? existente.valorTransporte ?? existente.valor_transporte ?? 0);
@@ -299,9 +307,14 @@ export class VagaService extends BaseService<VagaModel> {
       const dataFim = this.paredeParaUTC(fimAtual, tz);
       if (dataFim.getTime() <= dataInicio.getTime()) throw new Error('Data fim deve ser maior que início');
       const calculo = await this.calcular({ ...dados, valor_servico: patch.valor_servico ?? existente.valorServico, valor_transporte: patch.valor_transporte ?? existente.valorTransporte, data_inicio_local: iniAtual, data_fim_local: fimAtual });
+      if (Number(patch.valor_servico ?? existente.valorServico ?? 0) < Number(calculo.valor_minimo ?? 0)) throw { status: 400, message: `Valor do serviço abaixo do mínimo R$ ${Number(calculo.valor_minimo).toFixed(2)} - aumente o valor do serviço` };
       patch.data_inicio = dataInicio; patch.data_fim = dataFim;
       patch.valor_hora = Number(calculo.valor_hora_bruto || 0);
       patch.total_freela = Number(calculo.freela_recebe_liquido || 0);
+    }
+    if (patch.valor_servico !== undefined && !iniWall && !fimWall) {
+      const calculoSemData = await this.calcular({ valor_servico: patch.valor_servico, valor_transporte: patch.valor_transporte ?? existente.valorTransporte, data_inicio_local: this.isoParaParede(existente.dataInicio || existente.data_inicio, tz), data_fim_local: this.isoParaParede(existente.dataFim || existente.data_fim, tz) });
+      if (Number(patch.valor_servico) < Number(calculoSemData.valor_minimo ?? 0)) throw { status: 400, message: `Valor do serviço abaixo do mínimo R$ ${Number(calculoSemData.valor_minimo).toFixed(2)} - aumente o valor do serviço` };
     }
     const atualizada: any = await this.getRepo().atualizarGenerico(id, patch);
     const enderecoId = Number(dados.endereco_id || dados.enderecoId);

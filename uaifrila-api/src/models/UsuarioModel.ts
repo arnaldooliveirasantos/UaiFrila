@@ -73,6 +73,12 @@ export class UsuarioModel extends BaseModel {
   @Column({ name: 'atualizado_em', type: 'timestamp', description: 'Data atualização' })
   atualizadoEm?: Date;
 
+  @Column({ name: 'cancelado_em', type: 'timestamp', description: 'Data cancelamento' })
+  canceladoEm?: Date;
+
+  @Column({ name: 'cancelado_por', description: 'Quem cancelou' })
+  canceladoPor?: string;
+
   @BelongsTo(() => TipoUsuarioModel, 'tipo_usuario_id', { description: 'Tipo de usuário' })
   tipoUsuario?: TipoUsuarioModel;
 

@@ -135,7 +135,7 @@ export default function CadastroEndereco({ onEnderecoSelecionado, modoSelecao = 
   };
 
   const ativar = async (end: any) => {
-    await apiFetch(`/api/enderecos/${end.id}/ativar`, { method: 'POST' });
+    await apiFetch(`/api/enderecos/${end.id}/ativo`, { method: 'PUT' });
     await carregarEnderecos();
     onSalvo?.();
     // Em modo selecao (Trocar, na tela de Publicar Vaga): ativar TAMBEM seleciona

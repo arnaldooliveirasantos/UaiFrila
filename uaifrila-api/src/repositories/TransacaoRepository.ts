@@ -19,6 +19,7 @@ export class TransacaoRepository extends BaseRepository<TransacaoModel> {
     return this.mapRows(result.rows || result);
   }
 
+  async buscarPorTrampo(trampoId: number): Promise<TransacaoModel | null> { const r = await this.query(`SELECT * FROM transacoes WHERE trampo_id = $1 LIMIT 1`, [trampoId]); const rows = r.rows || []; return rows[0] ? this.mapRow(rows[0]) : null; }
   async relatorioPorCidade(cidadeId: number): Promise<any> {
     const result = await this.query(`
       SELECT COUNT(*) as total, SUM(valor_base) as total_base, SUM(taxa_valor) as total_taxa

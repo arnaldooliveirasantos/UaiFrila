@@ -31,7 +31,7 @@ export default function PainelGerenciarCandidatos() {
   const carregarCandidatos = async (id: number) => {
     setCarregandoCandidatos(true); setErro('');
     try {
-      const data = await apiFetch(`/api/candidatos/vaga/${id}`).catch(() => apiFetch(`/api/candidaturas/vaga/${id}`));
+      const data = await apiFetch(`/api/candidaturas/vaga/${id}`);
       const lista = data.candidaturas || data.data || (Array.isArray(data) ? data : []);
       setCandidatos(lista);
     } catch (e: any) { setErro(e.message || 'Erro ao carregar candidatos'); setCandidatos([]); } finally { setCarregandoCandidatos(false); }

@@ -33,7 +33,7 @@ export class PermissaoController extends BaseController {
   atualizar = async (req: AuthRequest, res: Response) => {
     try {
       this.checkRole(req, ['ADMIN', 'SUPER_ADMIN']);
-      // :id da rota e a chave antiga da permissao (nao ha tabela permissoes com id).
+      // :id da rota = id da linha em permissoes.
       const permissao = await this.service.atualizar(req.params.id, req.body || {});
       return res.json({ success: true, sucesso: true, data: permissao, permissao });
     } catch (e: any) { return this.handleError(res, e); }

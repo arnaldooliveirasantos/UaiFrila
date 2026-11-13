@@ -25,76 +25,72 @@
 CREATE EXTENSION pgcrypto;
 CREATE EXTENSION "uuid-ossp";
 
--- =====================================================================
--- 1. PAISES, ESTADOS, CIDADES, BAIRROS, EXPANSAO
--- =====================================================================
-CREATE TABLE paises (
+-- ============================================================
+-- SEÇÃO 1 — PAISES / ESTADOS / CIDADES / EXPANSÃO
+-- Colunas EXATAS do seu trecho: sigla='BRA', regiao, ativo, lat/lng,
+-- raio_km, populacao, status_expansao, demanda_score, cidade_nome...
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS paises (
   id SERIAL PRIMARY KEY,
   nome VARCHAR(100) NOT NULL,
-  sigla VARCHAR(3) UNIQUE NOT NULL,
-  codigo_ibge INT,
-  ativo BOOLEAN DEFAULT true,
-  criado_em TIMESTAMP DEFAULT NOW()
+  sigla VARCHAR(5) NOT NULL,
+  codigo_ibge INTEGER,
+  ativo BOOLEAN NOT NULL DEFAULT TRUE,
+  criado_em TIMESTAMP NOT NULL DEFAULT NOW(),
+  atualizado_em TIMESTAMP NOT NULL DEFAULT NOW()
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uq_paises_sigla ON paises (sigla);
 
-CREATE TABLE estados (
+CREATE TABLE IF NOT EXISTS estados (
   id SERIAL PRIMARY KEY,
-  pais_id INT NOT NULL REFERENCES paises(id),
+  pais_id INTEGER NOT NULL REFERENCES paises(id),
   nome VARCHAR(100) NOT NULL,
   sigla VARCHAR(2) NOT NULL,
-  codigo_ibge INT,
-  regiao VARCHAR(20),
-  ativo BOOLEAN DEFAULT true,
-  criado_em TIMESTAMP DEFAULT NOW(),
-  UNIQUE(sigla, pais_id)
+  codigo_ibge INTEGER,
+  regiao VARCHAR(30),
+  ativo BOOLEAN NOT NULL DEFAULT FALSE,
+  criado_em TIMESTAMP NOT NULL DEFAULT NOW(),
+  atualizado_em TIMESTAMP NOT NULL DEFAULT NOW()
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uq_estados_sigla_pais ON estados (sigla, pais_id);
+CREATE INDEX IF NOT EXISTS idx_estados_pais ON estados (pais_id);
 
-create table cidades (
-  id SERIAL primary key,
-nome VARCHAR(100) not null,
-estado VARCHAR(2) default 'MG' not null,
-codigo_ibge VARCHAR(10),
-ativa BOOLEAN default true not null,
-lat DOUBLE precision,
-lng DOUBLE precision,
-raio_km INT default 20 not null,
-populacao INT,
-regiao VARCHAR(50),
-pais_id INT,
-estado_id INT,
-cep_prefixo VARCHAR(10),
-status_expansao VARCHAR(20) default 'ATIVA',
-demanda_score INT default 0,
-vagas_abertas INT default 0,
-freelas_ativos INT default 0,
-criado_em TIMESTAMP default NOW(),
-atualizado_em TIMESTAMP default NOW(),
-unique(nome, estado)
-);
-
-CREATE INDEX idx_cidades_nome ON cidades(nome);
-CREATE INDEX idx_cidades_ativa ON cidades(ativa);
-
-
-CREATE TABLE expansao_cidades (
+CREATE TABLE IF NOT EXISTS cidades (
   id SERIAL PRIMARY KEY,
-  cidade_nome VARCHAR(100) NOT NULL,
-  estado_sigla VARCHAR(2) NOT NULL,
-  pais_sigla VARCHAR(3) DEFAULT 'BRA',
-  populacao INT,
-  demanda_solicitacoes INT DEFAULT 0,
-  demanda_vagas INT DEFAULT 0,
-  status VARCHAR(20) DEFAULT 'SOLICITADA',
-  prioridade INT DEFAULT 0,
-  solicitado_por INT,
-  analisado_por INT,
-  motivo TEXT,
-  data_solicitacao TIMESTAMP DEFAULT NOW(),
-  data_analise TIMESTAMP,
-  data_ativacao TIMESTAMP,
-  criado_em TIMESTAMP DEFAULT NOW(),
-  atualizado_em TIMESTAMP DEFAULT NOW()
+  nome VARCHAR(150) NOT NULL,
+  estado_id INTEGER NOT NULL REFERENCES estados(id),
+  ativa BOOLEAN NOT NULL DEFAULT FALSE,
+  lat NUMERIC(10,7),
+  lng NUMERIC(10,7),
+  raio_km NUMERIC(6,2) DEFAULT 20,
+  regiao VARCHAR(100),
+  codigo_ibge VARCHAR(10),
+  populacao INTEGER,
+  status_expansao VARCHAR(20) DEFAULT 'INATIVA',
+  demanda_score INTEGER DEFAULT 0,
+  criado_em TIMESTAMP NOT NULL DEFAULT NOW(),
+  atualizado_em TIMESTAMP NOT NULL DEFAULT NOW()
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uq_cidades_codigo_ibge ON cidades (codigo_ibge);
+CREATE INDEX IF NOT EXISTS idx_cidades_estado ON cidades (estado_id);
+CREATE INDEX IF NOT EXISTS idx_cidades_nome ON cidades (nome);
+
+-- Expansão: no seu trecho é por nome/sigla (não cidade_id) — mantido.
+CREATE TABLE IF NOT EXISTS expansao_cidades (
+  id SERIAL PRIMARY KEY,
+  cidade_nome VARCHAR(150) NOT NULL,
+  estado_sigla VARCHAR(2) NOT NULL,
+  populacao INTEGER,
+  demanda_solicitacoes INTEGER DEFAULT 0,
+  demanda_vagas INTEGER DEFAULT 0,
+  status VARCHAR(20) NOT NULL DEFAULT 'SOLICITADA',
+  prioridade INTEGER DEFAULT 1,
+  motivo TEXT,
+  criado_em TIMESTAMP NOT NULL DEFAULT NOW(),
+  atualizado_em TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_expansao_cidade_nome ON expansao_cidades (cidade_nome, estado_sigla);
 
 -- =====================================================================
 -- 2. TIPOS_USUARIO - FONTE ÚNICA DE PERMISSÃO
@@ -227,7 +223,7 @@ CREATE TABLE vagas (
   contratante_id INT NOT NULL REFERENCES usuarios(id),
   titulo VARCHAR(150) NOT NULL,
   descricao TEXT,
-  funcao VARCHAR(50),
+  funcao_id INTEGER REFERENCES funcoes(id),
   valor_hora NUMERIC(10,2) NOT NULL,
   valor_servico NUMERIC(10,2) ,
   valor_transporte NUMERIC(10,2) ,
@@ -267,9 +263,18 @@ CREATE TABLE candidaturas (
   freela_id INT REFERENCES usuarios(id),
   status VARCHAR(20) DEFAULT 'PENDENTE',
   mensagem TEXT,
+  motivo_cancelamento TEXT,
+  data_cancelamento TIMESTAMP,
+  cancelado_por INT REFERENCES usuarios(id),
   criado_em TIMESTAMP DEFAULT NOW(),
   atualizado_em TIMESTAMP DEFAULT NOW(),
   UNIQUE(vaga_id, usuario_id)
+);
+CREATE TABLE IF NOT EXISTS candidatos (
+  id SERIAL PRIMARY KEY,
+  usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  vaga_id INTEGER REFERENCES vagas(id) ON DELETE CASCADE,
+  criado_em TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE trampos (
@@ -286,7 +291,10 @@ CREATE TABLE trampos (
   atualizado_em TIMESTAMP DEFAULT NOW()
 );
 
-CREATE TABLE transacoes (
+-- ============================================================
+-- SEÇÃO 7 — TRANSAÇÕES
+-- ============================================================
+CREATE TABLE IF NOT EXISTS transacoes (
   id SERIAL PRIMARY KEY,
   codigo VARCHAR(30) UNIQUE NOT NULL,
   vaga_id INT REFERENCES vagas(id),
@@ -315,7 +323,8 @@ CREATE TABLE transacoes (
   usuario_id INT REFERENCES usuarios(id),
   criado_em TIMESTAMP DEFAULT NOW(),
   atualizado_em TIMESTAMP DEFAULT NOW()
-);
+  );
+
 
 CREATE INDEX idx_transacoes_freela ON transacoes(freela_id);
 CREATE INDEX idx_transacoes_status ON transacoes(status);
@@ -425,7 +434,62 @@ CREATE TABLE IF NOT EXISTS usuario_funcoes (
 CREATE INDEX IF NOT EXISTS idx_usuario_funcoes_usuario ON usuario_funcoes(usuario_id);
 CREATE INDEX IF NOT EXISTS idx_usuario_funcoes_funcao ON usuario_funcoes(funcao_id);
 
+-- ============================================================
+-- SEÇÃO 9 — ITEM 4: CHAT + NOTIFICAÇÕES
+-- ============================================================
+CREATE TABLE IF NOT EXISTS conversas (
+  id SERIAL PRIMARY KEY,
+  trampo_id INTEGER NOT NULL REFERENCES trampos(id),
+  contratante_id INTEGER NOT NULL REFERENCES usuarios(id),
+  freela_id INTEGER NOT NULL REFERENCES usuarios(id),
+  ultima_mensagem_at TIMESTAMP,
+  criado_em TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_conversa_trampo ON conversas (trampo_id);
 
+CREATE TABLE IF NOT EXISTS mensagens (
+  id SERIAL PRIMARY KEY,
+  conversa_id INTEGER NOT NULL REFERENCES conversas(id) ON DELETE CASCADE,
+  remetente_id INTEGER REFERENCES usuarios(id),
+  texto TEXT NOT NULL,
+  anexo_url VARCHAR(500),
+  tipo VARCHAR(20) NOT NULL DEFAULT 'TEXTO',
+  lida_em TIMESTAMP,
+  criado_em TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_mensagens_conversa ON mensagens (conversa_id, criado_em);
+
+CREATE TABLE IF NOT EXISTS notificacoes (
+  id SERIAL PRIMARY KEY,
+  usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  tipo VARCHAR(50) NOT NULL,
+  titulo VARCHAR(200) NOT NULL,
+  mensagem TEXT NOT NULL,
+  referencia_tipo VARCHAR(30),
+  referencia_id INTEGER,
+  lida BOOLEAN NOT NULL DEFAULT FALSE,
+  criado_em TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_notif_usuario ON notificacoes (usuario_id, lida, criado_em);
+
+-- =====================================================================
+-- PERMISSOES (14B) - tabela propria. Antes vivia so em usuarios.permissoes (JSONB),
+-- o que impedia listar/matriz por tipo sem varrer todos os usuarios.
+-- usuarios.permissoes continua existindo (compat), mas a fonte passa a ser esta tabela.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS permissoes (
+  id SERIAL PRIMARY KEY,
+  chave VARCHAR(100) NOT NULL,
+  nome VARCHAR(150) NOT NULL,
+  categoria VARCHAR(100) NOT NULL DEFAULT 'geral',
+  descricao TEXT,
+  tipo_usuario_id INT NOT NULL REFERENCES tipos_usuario(id) ON DELETE CASCADE,
+  criado_em TIMESTAMP NOT NULL DEFAULT NOW(),
+  atualizado_em TIMESTAMP NOT NULL DEFAULT NOW(),
+  UNIQUE(chave, tipo_usuario_id)
+);
+CREATE INDEX IF NOT EXISTS idx_permissoes_tipo ON permissoes(tipo_usuario_id);
+CREATE INDEX IF NOT EXISTS idx_permissoes_categoria ON permissoes(categoria);
 -- =====================================================================
 -- 8. FUNÇÕES E VIEWS
 -- =====================================================================
@@ -521,16 +585,20 @@ LEFT JOIN usuarios u2 ON u2.id = t.contratante_id;
 CREATE OR REPLACE VIEW vw_experiencia_comprovada AS
 SELECT
   t.freela_id AS usuario_id,
-  v.funcao AS funcao_nome,
+  f.nome AS funcao_nome,
+  v.funcao_id,
   COUNT(*) AS trampos_concluidos,
   COALESCE(AVG(a.nota), NULL) AS media_avaliacao_funcao,
   MAX(t.data_fim) AS ultimo_trampo_em
 FROM trampos t
 JOIN vagas v ON v.id = t.vaga_id
+join funcoes f on f.id = v.funcao_id
 JOIN status_vaga sv ON sv.id = v.status_vaga_id AND sv.chave = 'FINALIZADA'
 LEFT JOIN avaliacoes a ON a.trampo_id = t.id AND a.avaliado_id = t.freela_id
 WHERE t.status = 'FINALIZADO'
-GROUP BY t.freela_id, v.funcao;
+ GROUP BY t.freela_id ,
+  f.nome,
+  v.funcao_id;
 
 -- 2.6 Histórico geral do freela no app (presença / cancelamentos)
 CREATE OR REPLACE VIEW vw_historico_freela AS
@@ -548,7 +616,7 @@ GROUP BY u.id, u.avaliacao_media;
 -- =====================================================================
 -- INSERTS - TODOS NECESSÁRIOS PARA APP FUNCIONAR NORMAL
 -- =====================================================================
-
+begin;
 INSERT INTO paises (nome, sigla, codigo_ibge) VALUES
 ('Brasil', 'BRA', 76);
 
@@ -586,12 +654,12 @@ ON CONFLICT (sigla, pais_id) DO UPDATE SET
   regiao = EXCLUDED.regiao,
   ativo = CASE WHEN EXCLUDED.sigla = 'MG' THEN true ELSE false END;
 
-INSERT INTO cidades (pais_id,nome, estado,estado_id, ativa, lat, lng, raio_km, regiao, codigo_ibge, populacao, status_expansao, demanda_score) VALUES
-((SELECT id FROM paises WHERE sigla='BRA'), 'Uberlândia', 'MG', (SELECT id FROM estados WHERE sigla='MG'), true, -18.9186, -48.2772, 25, 'Triângulo Mineiro', '3170206', 713232, 'ATIVA', 100),
-((SELECT id FROM paises WHERE sigla='BRA'),'Uberaba', 'MG',(SELECT id FROM estados WHERE sigla='MG'),  false, -19.7476, -47.9381, 20, 'Triângulo Mineiro', '3170107', 337836, 'ATIVA', 80),
-((SELECT id FROM paises WHERE sigla='BRA'),'Araguari', 'MG',(SELECT id FROM estados WHERE sigla='MG'),  false, -18.6455, -48.1873, 15, 'Triângulo Mineiro', '3103504', 117825, 'ATIVA', 60),
-((SELECT id FROM paises WHERE sigla='BRA'), 'Ituiutaba', 'MG', (SELECT id FROM estados WHERE sigla='MG'), false, -18.9689, -49.4656, 15, 'Triângulo Mineiro', '3134202', 105818, 'INATIVA', 20),
-((SELECT id FROM paises WHERE sigla='BRA'),'Patrocínio', 'MG',(SELECT id FROM estados WHERE sigla='MG'),  false, -18.9443, -46.9936, 15, 'Triângulo Mineiro', '3144607', 91995, 'INATIVA', 15);
+INSERT INTO cidades (nome, estado_id, ativa, lat, lng, raio_km, regiao, codigo_ibge, populacao, status_expansao, demanda_score) VALUES
+( 'Uberlândia',  (SELECT id FROM estados WHERE sigla='MG'), true, -18.9186, -48.2772, 25, 'Triângulo Mineiro', '3170206', 713232, 'ATIVA', 100),
+('Uberaba', (SELECT id FROM estados WHERE sigla='MG'),  false, -19.7476, -47.9381, 20, 'Triângulo Mineiro', '3170107', 337836, 'ATIVA', 80),
+('Araguari', (SELECT id FROM estados WHERE sigla='MG'),  false, -18.6455, -48.1873, 15, 'Triângulo Mineiro', '3103504', 117825, 'ATIVA', 60),
+( 'Ituiutaba',  (SELECT id FROM estados WHERE sigla='MG'), false, -18.9689, -49.4656, 15, 'Triângulo Mineiro', '3134202', 105818, 'INATIVA', 20),
+('Patrocínio', (SELECT id FROM estados WHERE sigla='MG'),  false, -18.9443, -46.9936, 15, 'Triângulo Mineiro', '3144607', 91995, 'INATIVA', 15);
 
 
 --'Em dev'
@@ -781,13 +849,11 @@ INSERT INTO email_templates (chave_uso, titulo_assunto, conteudo_corpo, email_re
 
 INSERT INTO variaveis_sistema (chave, valor, valor_numerico, tipo, descricao, categoria, editavel) VALUES
 ('EMAIL_EXPIRACAO_MINUTOS', '5', 5, 'number', 'Tempo expiração código e-mail em minutos', 'email', true),
-('TAXA_PLATAFORMA_PERCENTUAL', '10', 10, 'number', 'Taxa da plataforma % - legado', 'financeiro', true),
-('TAXA_CANCELAMENTO', '40', 40, 'number', 'Taxa cancelamento R$ - legado', 'financeiro', true),
+('TAXA_PLATAFORMA_PERCENTUAL', '15', 15, 'number', 'Taxa da plataforma % - CANONICA (unifica TAXA_INTERMEDIACAO_PERCENTUAL)', 'financeiro', true),
 ('VALOR_MINIMO_HORA', '15', 15, 'number', 'Valor mínimo hora', 'financeiro', true),
 ('RAIO_MAXIMO_CIDADE_KM', '30', 30, 'number', 'Raio máximo cidade km - legado', 'cidade', true),
 ('PAGAMENTO_ANTECEDENCIA_MINUTOS', '60', 60, 'number', 'Minutos de antecedência para pagamento antes do trampo', 'pagamento', true),
 ('PAGAMENTO_EXPIRA_AUTO_MINUTOS', '30', 30, 'number', 'Minutos para expirar pagamento não confirmado (início + 30min)', 'pagamento', true),
-('TAXA_INTERMEDIACAO_PERCENTUAL', '15', 15, 'number', 'Taxa de intermediação da plataforma em %', 'financeiro', true),
 ('TAXA_CANCELAMENTO_VALOR', '40', 40, 'number', 'Multa por cancelamento < 4h em R$', 'financeiro', true),
 ('TAXA_CANCELAMENTO_LIMITE_MINUTOS', '240', 240, 'number', 'Limite em minutos para aplicar multa de cancelamento (4h)', 'financeiro', true),
 ('FREELA_CANCELAMENTO_LIMITE_MINUTOS', '240', 240, 'number', 'Tempo mínimo antes do trampo que freela pode cancelar sem multa', 'freela', true),
@@ -843,6 +909,17 @@ INSERT INTO usuarios (
 INSERT INTO enderecos (usuario_id,cep, logradouro,numero, bairro, cidade_id,  latitude, longitude, ativo) VALUES
 (1,'38400-698', 'Av. Floriano Peixoto', 1000, 'Centro', 1, -18.9186, -48.2772, true);
 
+INSERT INTO permissoes (chave, nome, categoria, descricao, tipo_usuario_id) VALUES
+('VER_MURAL','Ver mural','vagas','Ver vagas abertas no mural',(SELECT id FROM tipos_usuario WHERE chave='FREELA')),
+('CANDIDATAR','Candidatar-se','vagas','Candidatar-se a vagas',(SELECT id FROM tipos_usuario WHERE chave='FREELA')),
+('PUBLICAR_VAGA','Publicar vaga','vagas','Publicar vagas',(SELECT id FROM tipos_usuario WHERE chave='CONTRATANTE')),
+('GERENCIAR_CANDIDATOS','Gerenciar candidatos','vagas','Aceitar/recusar candidatos',(SELECT id FROM tipos_usuario WHERE chave='CONTRATANTE')),
+('VER_TRANSACOES','Ver transacoes','financeiro','Ver transacoes e escrow',(SELECT id FROM tipos_usuario WHERE chave='FINANCEIRO')),
+('GERENCIAR_CIDADES','Gerenciar cidades','admin','Gerenciar cidades e expansao',(SELECT id FROM tipos_usuario WHERE chave='ADMIN')),
+('GERENCIAR_VARIAVEIS','Gerenciar variaveis','admin','Gerenciar variaveis do sistema',(SELECT id FROM tipos_usuario WHERE chave='ADMIN')),
+('GERENCIAR_PERMISSOES','Gerenciar permissoes','admin','Gerenciar permissoes e matriz RBAC',(SELECT id FROM tipos_usuario WHERE chave='SUPER_ADMIN'))
+ON CONFLICT (chave, tipo_usuario_id) DO UPDATE SET nome=EXCLUDED.nome, categoria=EXCLUDED.categoria, descricao=EXCLUDED.descricao;
+
 -- GRANTS - USUARIOS DE BANCO PARA APLICAÇÃO
 CREATE ROLE uaifrila_app_dev WITH LOGIN PASSWORD 'UaiFrila@App2024!';
 CREATE ROLE uaifrila_readonly_dev WITH LOGIN PASSWORD 'UaiFrila@ead2024!';
@@ -875,4 +952,8 @@ GRANT ALL ON SCHEMA public TO PUBLIC;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO PUBLIC;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO PUBLIC;
 
----
+---rollback; 
+---commit;
+
+
+

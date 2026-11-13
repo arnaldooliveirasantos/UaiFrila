@@ -17,7 +17,7 @@ export class UsuarioFuncaoRepository extends BaseRepository<UsuarioFuncaoModel> 
     const meses = Math.max(0, Number(dados.tempo_experiencia_meses ?? dados.tempoExperienciaMeses ?? 0) || 0);
     const r = await this.query(`INSERT INTO usuario_funcoes (usuario_id, funcao_id, tempo_experiencia_meses, onde_trabalhou, ainda_trabalha, origem, atualizado_em)
       VALUES ($1,$2,$3,$4,$5,'DECLARADA',NOW())
-      ON CONFLICT (usuario_id, funcao_id) DO UPDATE SET tempo_experiencia_meses=EXCLUDED.tempo_experiencia_meses, onde_trabalhou=EXCLUDED.onde_trabalhou, ainda_trabalha=EXCLUDED.ainda_trabalha, atualizado_em=NOW() RETURNING *`,
+      RETURNING *`,
       [usuarioId, funcaoId, meses, dados.onde_trabalhou ?? dados.ondeTrabalhou ?? null, dados.ainda_trabalha ?? dados.aindaTrabalha ?? true]);
     return r.rows?.[0] || null;
   }

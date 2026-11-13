@@ -1,15 +1,15 @@
 import { BaseModel, Column } from './BaseModel';
-// IMPORTANTE: NAO existe tabela `permissoes` no SQL 00. As permissoes vivem no
-// JSONB `usuarios.permissoes` (array de strings ou de objetos {chave, nome, categoria}).
-// Este model e so a forma de uma entrada de permissao; o repository le/escreve
-// no JSONB de usuarios, agrupando por tipo_usuario (a matriz RBAC real).
+// Tabela permissoes (14B). Antes tableName='' e a fonte era usuarios.permissoes (JSONB).
+// Colunas: id, chave, nome, categoria, descricao, tipo_usuario_id, criado_em, atualizado_em.
 export class PermissaoModel extends BaseModel {
   static tableName = 'permissoes';
-  @Column({ name: 'id' }) id!: number;
-  @Column({ name: 'nome' }) nome!: string;
+  @Column({ name: 'id', primaryKey: true, autoIncrement: true }) id!: number;
   @Column({ name: 'chave' }) chave!: string;
+  @Column({ name: 'nome' }) nome!: string;
   @Column({ name: 'categoria' }) categoria?: string;
-  @Column({ name: 'descricao' }) descricao?: string;
-  @Column({ name: 'tipo_id' }) tipoId?: number;
+  @Column({ name: 'descricao', type: 'text' }) descricao?: string;
+  @Column({ name: 'tipo_usuario_id' }) tipoId?: number;
+  @Column({ name: 'criado_em', type: 'timestamp' }) criadoEm?: Date;
+  @Column({ name: 'atualizado_em', type: 'timestamp' }) atualizadoEm?: Date;
   constructor(data?: any) { super(); this.fill(data); }
 }

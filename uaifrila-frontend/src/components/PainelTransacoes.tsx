@@ -1,6 +1,6 @@
 
 import { useEffect, useState } from 'react';
-import { apiFetch } from '../utils/api';
+import { apiFetch } from '../utils/Api';
 
 export function PainelTransacoes() {
   const [transacoes, setTransacoes] = useState<any[]>([]);

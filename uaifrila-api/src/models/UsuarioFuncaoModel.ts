@@ -8,5 +8,7 @@ export class UsuarioFuncaoModel extends BaseModel {
   @Column({ name: 'onde_trabalhou' }) ondeTrabalhou?: string;
   @Column({ name: 'ainda_trabalha', type: 'boolean' }) aindaTrabalha: boolean = true;
   @Column({ name: 'origem' }) origem: string = 'DECLARADA';
+  @Column({ name: 'criado_em', type: 'timestamp' }) criadoEm?: Date;
+  @Column({ name: 'atualizado_em', type: 'timestamp' }) atualizadoEm?: Date;
   constructor(data?: any) { super(); this.fill(data); }
 }

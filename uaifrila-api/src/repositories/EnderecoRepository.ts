@@ -5,17 +5,12 @@ import { EnderecoModel } from '../models/EnderecoModel';
 export class EnderecoRepository extends BaseRepository<EnderecoModel> {
   constructor() { super('enderecos', EnderecoModel); }
   async listarBrutosPorUsuario(usuarioId: number): Promise<any[]> {
-    try {
-      const r = await this.query(
-        `SELECT e.*, c.nome AS cidade_nome, c.estado AS cidade_estado_sigla, c.estado_id
-         FROM enderecos e LEFT JOIN cidades c ON c.id = e.cidade_id
+    const r = await this.query(
+      `SELECT e.*, c.nome AS cidade_nome, e2.sigla AS cidade_estado_sigla, c.estado_id
+         FROM enderecos e LEFT JOIN cidades c ON c.id = e.cidade_id LEFT JOIN estados e2 ON e2.id = c.estado_id
          WHERE e.usuario_id = $1 ORDER BY e.ativo DESC NULLS LAST, e.criado_em DESC NULLS LAST, e.id DESC`,
-        [usuarioId]);
-      return r.rows || [];
-    } catch {
-      const r = await this.query(`SELECT * FROM enderecos WHERE usuario_id = $1 ORDER BY id DESC`, [usuarioId]);
-      return r.rows || [];
-    }
+      [usuarioId]);
+    return r.rows || [];
   }
   async listarPorUsuario(usuarioId: number): Promise<EnderecoModel[]> {
     const r = await this.query(`SELECT * FROM enderecos WHERE usuario_id = $1 ORDER BY ativo DESC, criado_em DESC`, [usuarioId]);
@@ -33,8 +28,8 @@ export class EnderecoRepository extends BaseRepository<EnderecoModel> {
   }
   async buscarCompletoPorId(id: number): Promise<EnderecoModel | null> {
     const r = await this.query(
-      `SELECT e.*, c.nome AS cidade_nome, c.estado AS cidade_estado_sigla
-       FROM enderecos e LEFT JOIN cidades c ON c.id = e.cidade_id WHERE e.id = $1 LIMIT 1`, [id]);
+      `SELECT e.*, c.nome AS cidade_nome, e2.sigla AS cidade_estado_sigla
+       FROM enderecos e LEFT JOIN cidades c ON c.id = e.cidade_id LEFT JOIN estados e2 ON e2.id = c.estado_id WHERE e.id = $1 LIMIT 1`, [id]);
     const rows = r.rows || r;
     return rows[0] ? this.mapRow(rows[0]) : null;
   }

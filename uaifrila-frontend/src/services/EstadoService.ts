@@ -1,5 +1,5 @@
 
-import { apiGetPublic } from '../utils/api';
+import { apiGetPublic } from '../utils/Api';
 export class EstadoService {
   static async listarTodos(): Promise<any[]> {
     const data = await apiGetPublic('/api/estados');

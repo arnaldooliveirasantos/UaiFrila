@@ -45,7 +45,7 @@ export function PainelMural({ usuario, setTelaAtiva }: { usuario?: any; setTelaA
       try {
         setLoading(true); setErro(null);
         let data;
-        try { data = await apiGetPublic('/api/vagas/mural'); } catch { data = await apiGetPublic('/api/vagas/abertas'); }
+        data = await apiGetPublic('/api/vagas/abertas');
         const lista = data?.vagas || data?.data || data?.mural || data || [];
         const arr = Array.isArray(lista) ? lista : [];
         // Filtro 2: tira vagas com início < hoje (defesa no front; backend também filtra)

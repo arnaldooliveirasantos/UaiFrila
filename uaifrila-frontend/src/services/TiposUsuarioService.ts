@@ -1,5 +1,5 @@
 
-import { apiGetPublic } from '../utils/api';
+import { apiGetPublic } from '../utils/Api';
 
 export class TiposUsuarioService {
   static async listar(): Promise<any[]> {

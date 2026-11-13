@@ -16,7 +16,6 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
   const [etapa, setEtapa] = useState<'form'|'codigo'>('form');
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState('');
-  const API = (import.meta as any).env?.VITE_API_URL;
 
   const getTipoChave = () => UsuarioService.getTipoChave(queroTrampar, queroContratar);
   const tipoAtual = (usuarioProp?.tipo_chave||'').toUpperCase();
@@ -39,7 +38,7 @@ export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, mo
       setQueroContratar(checks.contratar);
     }
     // /api/cidades ja devolve SO ativas (a rota /api/cidades/ativas nao existia e caia no /:id). A lista serve p/ o select e p/ resolver o estado pela cidade.
-    fetch(`${API}/api/cidades`).then(r=>r.json()).then(d=>setCidades(d.cidades||d.data||[])).catch(()=>{});
+    apiGetPublic('/api/cidades').then((d: any)=>setCidades(d.cidades||d.data||[])).catch(()=>{});
   }, []);
 
   useEffect(()=>{

@@ -1,5 +1,5 @@
 
-import { apiFetch } from '../utils/api';
+import { apiFetch } from '../utils/Api';
 
 export class TransacaoService {
   static async listar(): Promise<any[]> {

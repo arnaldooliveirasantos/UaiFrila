@@ -32,6 +32,10 @@ import { apiFetch, apiGetPublic, setToken, clearAuth, getToken } from './utils/A
 
 function AppContent() {
   const [telaAtiva, setTelaAtiva] = useState('home');
+  // Remonta TelaCadastroVaga a cada navegacao para 'publicar': sem isso, clicar
+  // em Publicar no menu com a tela ja aberta nao rodava o init de novo e o form
+  // velho (edicao) continuava na tela mesmo com a chave ja apagada pelo Navbar.
+  const [publicarKey, setPublicarKey] = useState(0);
   const [usuario, setUsuario] = useState<any>(null);
   const [codigoFromUrl, setCodigoFromUrl] = useState<string | null>(null);
   const [emailFromUrl, setEmailFromUrl] = useState<string | null>(null);
@@ -72,7 +76,7 @@ function AppContent() {
     })();
   }, []);
 
-  const navegar = (t: string) => { setTelaAtiva(t); window.scrollTo(0, 0); };
+  const navegar = (t: string) => { if (t === 'publicar') setPublicarKey((k) => k + 1); setTelaAtiva(t); window.scrollTo(0, 0); };
   const handleLogin = (data: any) => {
     // Validar devolve { token, usuario, data: { token, usuario } } - aceita os dois níveis
     const token = data?.token || data?.data?.token;
@@ -95,7 +99,7 @@ function AppContent() {
       {telaAtiva === 'validar-login' && <ValidacaoCodigo email={emailFromUrl || undefined} tipo="login" codigoInicial={codigoFromUrl || undefined} autoValidarDoLink={!!codigoFromUrl} onValidado={handleLogin} onVoltar={() => navegar('login')} />}
       {telaAtiva === 'mural' && (usuario ? <PainelMural usuario={usuario} setTelaAtiva={navegar} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'perfil' && (usuario ? <PerfilUsuario usuario={usuario} onAtualizado={setUsuario} onIrParaFuncoes={() => navegar('minhas-funcoes')} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
-      {telaAtiva === 'publicar' && (usuario ? <TelaCadastroVaga usuario={usuario} setTelaAtiva={navegar} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
+      {telaAtiva === 'publicar' && (usuario ? <TelaCadastroVaga key={publicarKey} usuario={usuario} setTelaAtiva={navegar} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'trampos' && (usuario ? <PainelMeusTrampos usuario={usuario} setTelaAtiva={navegar} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'transacoes' && (usuario ? <PainelTransacoes usuario={usuario} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'cidades' && (usuario ? <PainelConfiguracaoCidades /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}

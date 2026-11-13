@@ -5,7 +5,7 @@ export class EnderecoVagaRepository extends BaseRepository<EnderecoVagaModel> {
   constructor() { super('enderecos_vaga', EnderecoVagaModel); }
 
   async buscarAtivoPorVaga(vagaId: number): Promise<any> {
-    const r = await this.query(`SELECT ev.*, e.*, c.nome as cidade_nome, c.estado as cidade_estado FROM enderecos_vaga ev JOIN enderecos e ON e.id = ev.endereco_id LEFT JOIN cidades c ON c.id = e.cidade_id WHERE ev.vaga_id = $1 AND ev.ativo = true LIMIT 1`, [vagaId]);
+    const r = await this.query(`SELECT ev.*, e.*, c.nome as cidade_nome, e2.sigla as cidade_estado FROM enderecos_vaga ev JOIN enderecos e ON e.id = ev.endereco_id LEFT JOIN cidades c ON c.id = e.cidade_id LEFT JOIN estados e2 ON e2.id = c.estado_id WHERE ev.vaga_id = $1 AND ev.ativo = true LIMIT 1`, [vagaId]);
     const rows = r.rows || r;
     return rows[0] || null;
   }

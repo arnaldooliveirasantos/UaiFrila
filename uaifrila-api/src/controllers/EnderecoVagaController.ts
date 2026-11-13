@@ -10,7 +10,7 @@ export class EnderecoVagaController extends BaseController {
     this.service = new EnderecoVagaService();
   }
 
-  // POST /api/enderecos-vaga ou /api/enderecos/vincular-vaga
+  // POST /api/enderecos-vaga (fonte unica - 15A)
   vincular = async (req: AuthRequest, res: Response) => {
     try {
       const { vaga_id, vagaId, endereco_id, enderecoId } = req.body;

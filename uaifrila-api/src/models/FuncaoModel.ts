@@ -1,22 +1,12 @@
 import { BaseModel, Column } from './BaseModel';
-
+// Banco: funcoes(id,nome,ativa,criado_em,categoria_id -> categorias_funcao.id)
+// Nao existe coluna `categoria` em funcoes.
 export class FuncaoModel extends BaseModel {
   static tableName = 'funcoes';
-
-  @Column({ name: 'id', primaryKey: true, autoIncrement: true, description: 'ID único da função' })
-  id!: number;
-
-  @Column({ name: 'nome', description: 'Nome: Garçom, Cozinheiro, Bartender' })
-  nome!: string;
-
-  @Column({ name: 'categoria', description: 'Categoria: Atendimento, Cozinha' })
-  categoria?: string;
-
-  @Column({ name: 'ativa', type: 'boolean', description: 'Se ativa' })
-  ativa: boolean = true;
-
-  @Column({ name: 'criado_em', type: 'timestamp', description: 'Data criação' })
-  criadoEm?: Date;
-
+  @Column({ name: 'id', primaryKey: true, autoIncrement: true }) id!: number;
+  @Column({ name: 'nome' }) nome!: string;
+  @Column({ name: 'categoria_id' }) categoriaId?: number;
+  @Column({ name: 'ativa', type: 'boolean' }) ativa: boolean = true;
+  @Column({ name: 'criado_em', type: 'timestamp' }) criadoEm?: Date;
   constructor(data?: any) { super(); this.fill(data); }
 }
