@@ -85,6 +85,17 @@ function AppContent() {
     if (usuario) setUsuario(usuario);
     setTelaAtiva('mural');
   };
+  // Cadastro validado NAO entra logado: vai para a tela de login.
+  // ANTES o validar-cadastro usava o mesmo handleLogin do validar-login: salvava
+  // o token que o backend devolve e ia direto para o mural.
+  // Agora ignora o token, limpa qualquer sessao residual e o cadastro pendente.
+  // O e-mail ja esta em emailFromUrl e a TelaLogin pre-preenche com ele.
+  const handleCadastroValidado = (_data: any) => {
+    clearAuth();
+    setUsuario(null);
+    localStorage.removeItem('uaifrila_cadastro_pendente');
+    navegar('login');
+  };
   const handleLogout = () => { clearAuth(); setUsuario(null); setTelaAtiva('home'); };
   if (cancelarFromUrl) return <CancelarCadastro email={emailFromUrl || ''} codigo={codigoFromUrl || ''} onConcluido={() => { window.history.replaceState({}, '', '/'); setCancelarFromUrl(false); setTelaAtiva('home'); }} onVoltar={() => { window.history.replaceState({}, '', '/'); setCancelarFromUrl(false); setTelaAtiva('home'); }} />;
   if (carregandoSessao) return <div className="min-h-screen pt-[72px] flex items-center justify-center text-xs font-black">Carregando sessão da API...</div>;
@@ -95,7 +106,7 @@ function AppContent() {
       {telaAtiva === 'codigoFreela' && <CodigoFreela setTelaAtiva={navegar} />}
       {telaAtiva === 'cadastro' && <CadastroUnificado onCadastro={(email?: string) => { if (email) { setEmailFromUrl(email); setTelaAtiva('validar-cadastro'); } else setTelaAtiva('login'); }} />}
       {telaAtiva === 'login' && <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} emailInicial={emailFromUrl} />}
-      {telaAtiva === 'validar-cadastro' && <ValidacaoCodigo email={emailFromUrl || undefined} tipo="cadastro" codigoInicial={codigoFromUrl || undefined} autoValidarDoLink={!!codigoFromUrl} dadosCadastro={(() => { try { const raw = localStorage.getItem('uaifrila_cadastro_pendente'); return raw ? JSON.parse(raw) : undefined; } catch { return undefined; } })()} onValidado={handleLogin} onVoltar={() => navegar('cadastro')} />}
+      {telaAtiva === 'validar-cadastro' && <ValidacaoCodigo email={emailFromUrl || undefined} tipo="cadastro" codigoInicial={codigoFromUrl || undefined} autoValidarDoLink={!!codigoFromUrl} dadosCadastro={(() => { try { const raw = localStorage.getItem('uaifrila_cadastro_pendente'); return raw ? JSON.parse(raw) : undefined; } catch { return undefined; } })()} onValidado={handleCadastroValidado} onVoltar={() => navegar('cadastro')} />}
       {telaAtiva === 'validar-login' && <ValidacaoCodigo email={emailFromUrl || undefined} tipo="login" codigoInicial={codigoFromUrl || undefined} autoValidarDoLink={!!codigoFromUrl} onValidado={handleLogin} onVoltar={() => navegar('login')} />}
       {telaAtiva === 'mural' && (usuario ? <PainelMural usuario={usuario} setTelaAtiva={navegar} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'perfil' && (usuario ? <PerfilUsuario usuario={usuario} onAtualizado={setUsuario} onIrParaFuncoes={() => navegar('minhas-funcoes')} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}

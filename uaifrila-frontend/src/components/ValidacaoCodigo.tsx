@@ -1,8 +1,11 @@
 
-import { apiFetch, apiGetPublic } from '../utils/Api';
 import React, { useState, useEffect, useRef } from 'react';
 import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 
+const _API_RAW = (import.meta as any).env?.VITE_API_URL || 'http://192.168.24.11:3000/api';
+// Normaliza: garante /api no fim. Se VITE_API_URL vier sem /api, o fetch direto
+// `${API}/auth/...` daria 404 igual ao bug do Api.ts. Com a normalização, os dois funcionam.
+const API = _API_RAW.replace(/\/$/, '').endsWith('/api') ? _API_RAW.replace(/\/$/, '') : _API_RAW.replace(/\/$/, '') + '/api';
 
 const STORAGE_KEY = 'uaifrila_validacao_pendente';
 
@@ -167,14 +170,16 @@ export default function ValidacaoCodigo({ email: emailProp, tipo: tipoProp, onVa
         console.warn('[Validacao] Sem dadosCadastro no front (prop + localStorage vazios) - validando mesmo assim, backend ativa o usuário já criado no Cadastrar');
         dadosParaEnviar = null;
       }
-      const data = await apiGetPublic('/auth/validar-codigo', {
+      const res = await fetch(`${API}/auth/validar-codigo`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: em, codigo: cod, tipo, ...(dadosParaEnviar ? { dadosCadastro: dadosParaEnviar, ...dadosParaEnviar } : {}) })
       });
-      console.log('[Validacao] Resposta API:', data);
+      const data = await res.json();
+      console.log('[Validacao] Resposta API:', res.status, data);
+      if (!res.ok) throw new Error(data.erro || 'Código inválido');
       
-      setSucesso('Código validado com sucesso!');
+      setSucesso(tipo === 'cadastro' ? 'Cadastro confirmado! Redirecionando para o login...' : 'Código validado com sucesso!');
       localStorage.removeItem(STORAGE_KEY);
       
       setTimeout(() => onValidado(data), 800);
@@ -194,12 +199,13 @@ export default function ValidacaoCodigo({ email: emailProp, tipo: tipoProp, onVa
     setCarregando(true);
     setErro('');
     try {
-      const data = await apiGetPublic('/auth/reenviar-codigo', {
+      const res = await fetch(`${API}/auth/reenviar-codigo`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, tipo, ...(tipo === 'cadastro' ? { dadosCadastro: dadosCadastro || (() => { try { const raw = localStorage.getItem('uaifrila_cadastro_pendente'); return raw ? JSON.parse(raw) : undefined; } catch { return undefined; } })() } : {}) })
       });
-
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.erro || 'Erro ao reenviar');
       setSucesso('Novo código enviado! Verifique seu e-mail.');
       setTempoRestante(300);
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
@@ -217,12 +223,13 @@ export default function ValidacaoCodigo({ email: emailProp, tipo: tipoProp, onVa
     if (!confirm('Tem certeza que deseja cancelar?')) return;
     try {
       // Cancelar exige email + codigo (o controller valida o código antes de cancelar)
-      const dataCancel = await apiGetPublic('/auth/cancelar-cadastro', {
+      const resCancel = await fetch(`${API}/auth/cancelar-cadastro`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, codigo })
       });
-
+      const dataCancel = await resCancel.json().catch(() => ({}));
+      if (!resCancel.ok) throw new Error(dataCancel.erro || dataCancel.message || 'Erro ao cancelar');
       localStorage.removeItem(STORAGE_KEY);
       localStorage.removeItem('uaifrila_cadastro_pendente');
       alert('Cadastro cancelado.');
