@@ -138,6 +138,11 @@ export default function CadastroEndereco({ onEnderecoSelecionado, modoSelecao = 
     await apiFetch(`/api/enderecos/${end.id}/ativar`, { method: 'POST' });
     await carregarEnderecos();
     onSalvo?.();
+    // Em modo selecao (Trocar, na tela de Publicar Vaga): ativar TAMBEM seleciona
+    // o endereco para a vaga. Antes, Ativar so marcava no backend e a tela de
+    // Publicar Vaga continuava com "Nenhum endereco ativo encontrado", mesmo
+    // depois de trocar o endereco.
+    if (modoSelecao) onEnderecoSelecionado?.(end.id, { ...end, ativo: true });
   };
 
   const cidadeDe = (end: any) => end.cidade || null;
@@ -172,7 +177,7 @@ export default function CadastroEndereco({ onEnderecoSelecionado, modoSelecao = 
                   </div>
                 </div>
                 <div className="flex flex-col gap-1 shrink-0">
-                  {!end.ativo && <button type="button" onClick={() => ativar(end)} className={styles.buttonSecondary}>Ativar</button>}
+                  {!end.ativo && <button type="button" onClick={() => ativar(end)} className={styles.buttonSecondary}>{modoSelecao ? 'Ativar e usar nesta Vaga' : 'Ativar'}</button>}
                   {modoSelecao && <button type="button" onClick={() => onEnderecoSelecionado?.(end.id, end)} className={styles.buttonSecondary}>Usar nesta Vaga</button>}
                   <button type="button" onClick={() => iniciarEdicao(end)} className={styles.buttonSecondary}>Editar</button>
                 </div>

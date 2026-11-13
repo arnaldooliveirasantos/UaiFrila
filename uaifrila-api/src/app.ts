@@ -173,9 +173,6 @@ export class App {
     this.expressApp.put('/api/usuarios/:id', (req, res) => usuarioCtrl.atualizar(req, res));
     this.expressApp.delete('/api/usuarios/:id', (req, res) => usuarioCtrl.deletar(req, res));
 
-    // Alias: /api/cidades/ativas nao existia — quem chamava caia no /:id com id='ativas' e dava erro.
-    // listar() ja devolve SO ativas. DEVE ficar antes de /api/cidades/:id.
-    this.expressApp.get('/api/cidades/ativas', optionalAuthMiddleware, (req, res) => cidadeCtrl.listar(req, res));
     this.expressApp.get('/api/cidades', optionalAuthMiddleware, (req, res) => cidadeCtrl.listar(req, res));
     this.expressApp.get('/api/cidades/todas', optionalAuthMiddleware, (req, res) => cidadeCtrl.listarTodas(req, res));
     this.expressApp.get('/api/cidades/:id', (req, res) => cidadeCtrl.buscarPorId(req, res));
@@ -228,6 +225,8 @@ export class App {
     this.expressApp.delete('/api/vagas/:id', (req, res) => vagaCtrl.deletar(req, res));
     this.expressApp.put('/api/vagas/:id/fechar', (req, res) => vagaCtrl.fecharVaga(req, res));
     this.expressApp.post('/api/vagas/:id/fechar', (req, res) => vagaCtrl.fecharVaga(req, res));
+    this.expressApp.put('/api/vagas/:id/cancelar', (req, res) => vagaCtrl.cancelarVaga(req, res));
+    this.expressApp.post('/api/vagas/:id/cancelar', (req, res) => vagaCtrl.cancelarVaga(req, res));
 
     this.expressApp.get('/api/candidaturas/minhas', (req, res) => candidaturaCtrl.minhasCandidaturas(req, res));
     this.expressApp.get('/api/candidaturas/vaga/:vagaId', (req, res) => candidaturaCtrl.listarPorVaga(req, res));

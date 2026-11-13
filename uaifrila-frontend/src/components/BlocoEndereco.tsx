@@ -64,7 +64,10 @@ export default function BlocoEndereco({ form, setForm, cidades: cidadesProp, tit
       else if (data?.data) lista = [data.data];
       else if (data?.endereco) lista = [data.endereco];
       else if (data) lista = [data];
-      const end = lista.find((e: any) => e.ativo) || lista[0] || null;
+      // So o endereco com ativo=true e o ativo. Sem ele, mostra "Nenhum endereco
+      // ativo" — antes caia para lista[0] e exibia um endereco INATIVO como se
+      // fosse o ativo, enquanto a tela de Publicar Vaga mostrava o erro.
+      const end = lista.find((e: any) => e.ativo) || null;
       setAtivo(end);
       if (end) onEnderecoChange?.(end);
     } catch { /* sem endereço ativo - normal em perfil novo, não é erro */ }
