@@ -3,12 +3,13 @@ import { apiFetch } from '../utils/Api';
 import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 import CadastroUnificado from './CadastroUnificado';
 import { useTiposUsuario } from './useTiposUsuario';
+import FotoPerfil from './FotoPerfil';
 
 // ANTES (mock/fallback): se GET /usuarios/me falhasse, usava prop ou localStorage 'uaifrila_usuario' como se fosse dado real.
 // AGORA (API real): a ÚNICA fonte é GET /api/auth/me. Se falhar, mostra erro da API e NÃO mostra perfil velho.
 // localStorage só guarda token, nunca é fonte de verdade do usuário.
 
-export default function PerfilUsuario({ usuario: usuarioProp, onAtualizado }: { usuario?: any; onAtualizado?: (u: any) => void }) {
+export default function PerfilUsuario({ usuario: usuarioProp, onAtualizado, onIrParaFuncoes }: { usuario?: any; onAtualizado?: (u: any) => void; onIrParaFuncoes?: () => void }) {
   const styles = useUaiFrilaStyles();
   const { getTipoUsuario, getBadgeVariant } = useTiposUsuario();
   const [usuario, setUsuario] = useState<any>(null);
@@ -40,7 +41,12 @@ export default function PerfilUsuario({ usuario: usuarioProp, onAtualizado }: { 
       <div className="flex flex-col gap-4 mb-6">
         <div className="flex items-center justify-between"><h1 className={styles.typography.h1}>Meu Perfil</h1><span className={styles.badge(getBadgeVariant(usuario))}>{tipoChave}</span></div>
       </div>
-      <div className={styles.card}><CadastroUnificado usuario={usuario} modoEdicao={true} onAtualizado={(u: any) => { setUsuario(u); onAtualizado?.(u); }} /></div>
+      {/* A FOTO SÓ APARECE PORQUE ESTE BLOCO EXISTE: antes não havia nenhum <img> nem FotoPerfil aqui. */}
+      <div className={styles.card}>
+        <FotoPerfil usuario={usuario} onSalvo={(foto: string | null) => { const u = { ...usuario, foto }; setUsuario(u); onAtualizado?.(u); }} />
+        {onIrParaFuncoes && <button type="button" onClick={onIrParaFuncoes} className="mt-4 px-4 py-2 text-xs font-black uppercase bg-black text-white rounded">Minhas funções e experiência →</button>}
+      </div>
+      <div className={`${styles.card} mt-4`}><CadastroUnificado usuario={usuario} modoEdicao={true} onAtualizado={(u: any) => { setUsuario(u); onAtualizado?.(u); }} /></div>
       {usuario && <div className="mt-6 flex gap-2 flex-wrap"><span className={styles.badge('default')}>{usuario.email || 'sem e-mail'}</span>{usuario.endereco_ativo_cidade && <span className={styles.badge('default')}>📍 {usuario.endereco_ativo_cidade} - {usuario.endereco_ativo_bairro}</span>}<span className="text-[10px] font-mono opacity-50">ID {usuario.id} | Endereço ID {usuario.endereco_ativo_id || 'sem'}</span></div>}
     </div>
   );

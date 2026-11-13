@@ -18,6 +18,9 @@ export class UsuarioModel extends BaseModel {
   @Column({ name: 'email', description: 'E-mail único', sensitive: true, mask: 'email' })
   email!: string;
 
+  @Column({ name: 'foto', description: 'Foto de perfil (URL ou base64 data:)' })
+  foto?: string;
+
   @Hidden('Hash da senha - NUNCA expor')
   @Column({ name: 'senha_hash', hidden: true, description: 'Hash bcrypt' })
   senhaHash!: string;

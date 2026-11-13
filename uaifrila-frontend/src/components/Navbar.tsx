@@ -58,6 +58,7 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
   const menuBase = [
     { id: 'mural', label: 'Mural', icon: '🏠', show: () => !!usuario },
     { id: 'perfil', label: 'Meu Perfil', icon: '👤', show: () => !!usuario },
+    { id: 'minhas-funcoes', label: 'Minhas Funções', icon: '🛠️', show: () => !!usuario && checkFreelaOuDual() },
     { id: 'publicar', label: 'Publicar Vaga', icon: '➕', show: () => !!usuario && checkContratante() },
     { id: 'trampos', label: 'Meus Trampos', icon: '💼', show: () => !!usuario },
     { id: 'transacoes', label: 'Transações', icon: '💰', show: () => !!usuario && checkContratanteOuAdmin() },

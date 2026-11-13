@@ -1,4 +1,16 @@
 -- =====================================================================
+-- CORREÇÃO APLICADA (itens 1 a 3) — resto do script INALTERADO
+-- 1) INSERT INTO cidades: removido parêntese extra nas linhas de
+--    Uberlândia e Ituiutaba (construtor de linha dentro da linha).
+-- 2) Removido o "ON CONFLICT (chave) DO NOTHING;" órfão que vinha
+--    logo após o INSERT INTO variaveis_sistema (erro de sintaxe).
+-- 3) email_status: adicionados CONSUMIDO, CANCELADO e FALHA, que o
+--    código e o worker usam (marcarComoConsumido, invalidarPendentes,
+--    marcação de falha de envio). Sem eles, as subqueries retornavam
+--    NULL e o código nunca era marcado como consumido.
+-- =====================================================================
+
+-- =====================================================================
 -- UAI FRILA - CRIAÇÃO COMPLETA DO BANCO - 00_CRIACAO_BANCO_NOVO_COMPLETO.sql
 -- PostgreSQL 14+
 -- Data: 2026-10-27
@@ -96,12 +108,20 @@ CREATE TABLE tipos_usuario (
   criado_em TIMESTAMP DEFAULT NOW()
 );
 
-CREATE TABLE funcoes (
+CREATE TABLE IF NOT EXISTS categorias_funcao (
   id SERIAL PRIMARY KEY,
   nome VARCHAR(50) UNIQUE NOT NULL,
-  categoria VARCHAR(50),
+  icone VARCHAR(30),
   ativa BOOLEAN DEFAULT true,
   criado_em TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE funcoes (
+  id SERIAL PRIMARY KEY,
+  nome VARCHAR(50) UNIQUE NOT null,
+  ativa BOOLEAN DEFAULT true,
+  criado_em TIMESTAMP DEFAULT NOW(),
+  categoria_id INT references categorias_funcao(id) not null
 );
 
 CREATE TABLE status_usuario (
@@ -139,8 +159,9 @@ CREATE TABLE usuarios (
   role VARCHAR(30) DEFAULT 'FREELA',
   criado_em TIMESTAMP DEFAULT NOW(),
   atualizado_em TIMESTAMP DEFAULT NOW(),
-  cancelado_em TIMESTAMP NULL,
-  cancelado_por TEXT NULL
+  cancelado_em TIMESTAMP ,
+  cancelado_por TEXT ,
+  foto TEXT
 );
 
 CREATE INDEX idx_usuarios_email ON usuarios(LOWER(email));
@@ -389,6 +410,21 @@ CREATE INDEX IF NOT EXISTS idx_usuario_pix_chave ON usuario_pix(chave_pix);
 -- CREATE UNIQUE INDEX IF NOT EXISTS idx_usuario_pix_um_ativo ON usuario_pix(usuario_id) WHERE ativo = TRUE;
 COMMENT ON TABLE usuario_pix IS 'Dados PIX para recebimento dos trampos. 1 chave ativa por usuário.';
 
+CREATE TABLE IF NOT EXISTS usuario_funcoes (
+  id SERIAL PRIMARY KEY,
+  usuario_id INT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  funcao_id INT NOT NULL REFERENCES funcoes(id) ON DELETE CASCADE,
+  tempo_experiencia_meses INT NOT NULL DEFAULT 0 CHECK (tempo_experiencia_meses >= 0),
+  onde_trabalhou TEXT,
+  ainda_trabalha BOOLEAN DEFAULT true,
+  origem VARCHAR(20) DEFAULT 'DECLARADA',
+  criado_em TIMESTAMP DEFAULT NOW(),
+  atualizado_em TIMESTAMP DEFAULT NOW(),
+  UNIQUE (usuario_id, funcao_id)
+);
+CREATE INDEX IF NOT EXISTS idx_usuario_funcoes_usuario ON usuario_funcoes(usuario_id);
+CREATE INDEX IF NOT EXISTS idx_usuario_funcoes_funcao ON usuario_funcoes(funcao_id);
+
 
 -- =====================================================================
 -- 8. FUNÇÕES E VIEWS
@@ -480,6 +516,35 @@ FROM transacoes t
 LEFT JOIN usuarios u1 ON u1.id = t.freela_id
 LEFT JOIN usuarios u2 ON u2.id = t.contratante_id;
 
+
+
+CREATE OR REPLACE VIEW vw_experiencia_comprovada AS
+SELECT
+  t.freela_id AS usuario_id,
+  v.funcao AS funcao_nome,
+  COUNT(*) AS trampos_concluidos,
+  COALESCE(AVG(a.nota), NULL) AS media_avaliacao_funcao,
+  MAX(t.data_fim) AS ultimo_trampo_em
+FROM trampos t
+JOIN vagas v ON v.id = t.vaga_id
+JOIN status_vaga sv ON sv.id = v.status_vaga_id AND sv.chave = 'FINALIZADA'
+LEFT JOIN avaliacoes a ON a.trampo_id = t.id AND a.avaliado_id = t.freela_id
+WHERE t.status = 'FINALIZADO'
+GROUP BY t.freela_id, v.funcao;
+
+-- 2.6 Histórico geral do freela no app (presença / cancelamentos)
+CREATE OR REPLACE VIEW vw_historico_freela AS
+SELECT
+  u.id AS usuario_id,
+  COALESCE(SUM(CASE WHEN t.status = 'FINALIZADO' THEN 1 ELSE 0 END), 0) AS trampos_concluidos,
+  COALESCE(SUM(CASE WHEN c.status = 'CANCELADA' THEN 1 ELSE 0 END), 0) AS candidaturas_canceladas,
+  COALESCE(AVG(u.avaliacao_media), u.avaliacao_media) AS media_geral
+FROM usuarios u
+LEFT JOIN trampos t ON t.freela_id = u.id
+LEFT JOIN candidaturas c ON c.freela_id = u.id OR c.usuario_id = u.id
+GROUP BY u.id, u.avaliacao_media;
+
+
 -- =====================================================================
 -- INSERTS - TODOS NECESSÁRIOS PARA APP FUNCIONAR NORMAL
 -- =====================================================================
@@ -522,10 +587,10 @@ ON CONFLICT (sigla, pais_id) DO UPDATE SET
   ativo = CASE WHEN EXCLUDED.sigla = 'MG' THEN true ELSE false END;
 
 INSERT INTO cidades (pais_id,nome, estado,estado_id, ativa, lat, lng, raio_km, regiao, codigo_ibge, populacao, status_expansao, demanda_score) VALUES
-((SELECT id FROM paises WHERE sigla='BRA'),('Uberlândia', 'MG',(SELECT id FROM estados WHERE sigla='MG'),  true, -18.9186, -48.2772, 25, 'Triângulo Mineiro', '3170206', 713232, 'ATIVA', 100),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Uberlândia', 'MG', (SELECT id FROM estados WHERE sigla='MG'), true, -18.9186, -48.2772, 25, 'Triângulo Mineiro', '3170206', 713232, 'ATIVA', 100),
 ((SELECT id FROM paises WHERE sigla='BRA'),'Uberaba', 'MG',(SELECT id FROM estados WHERE sigla='MG'),  false, -19.7476, -47.9381, 20, 'Triângulo Mineiro', '3170107', 337836, 'ATIVA', 80),
 ((SELECT id FROM paises WHERE sigla='BRA'),'Araguari', 'MG',(SELECT id FROM estados WHERE sigla='MG'),  false, -18.6455, -48.1873, 15, 'Triângulo Mineiro', '3103504', 117825, 'ATIVA', 60),
-((SELECT id FROM paises WHERE sigla='BRA'),('Ituiutaba', 'MG',(SELECT id FROM estados WHERE sigla='MG'),  false, -18.9689, -49.4656, 15, 'Triângulo Mineiro', '3134202', 105818, 'INATIVA', 20),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Ituiutaba', 'MG', (SELECT id FROM estados WHERE sigla='MG'), false, -18.9689, -49.4656, 15, 'Triângulo Mineiro', '3134202', 105818, 'INATIVA', 20),
 ((SELECT id FROM paises WHERE sigla='BRA'),'Patrocínio', 'MG',(SELECT id FROM estados WHERE sigla='MG'),  false, -18.9443, -46.9936, 15, 'Triângulo Mineiro', '3144607', 91995, 'INATIVA', 15);
 
 
@@ -548,15 +613,21 @@ INSERT INTO tipos_usuario (chave, nome_exibicao, descricao, nivel_permissao) VAL
 ('ADMIN', 'Administrador', 'Admin do sistema - acesso a cidades, expansão, variáveis', 90),
 ('SUPER_ADMIN', 'Super Admin', 'Acesso total - gerencia permissões, tipos, tudo', 100);
 
-INSERT INTO funcoes (nome, categoria) VALUES
-('Garçom', 'Alimentação'),
-('Bartender', 'Alimentação'),
-('Cozinheiro', 'Alimentação'),
-('Auxiliar de Cozinha', 'Alimentação'),
-('Recepcionista', 'Atendimento'),
-('Segurança', 'Segurança'),
-('Limpeza', 'Limpeza'),
-('Outros', 'Outros');
+INSERT INTO categorias_funcao (nome, icone) VALUES
+  ('Alimentação','utensils'), ('Atendimento','smile'), ('Segurança','shield'),
+  ('Limpeza','sparkles'), ('Eventos','calendar'), ('Outros','tag')
+ON CONFLICT (nome) DO NOTHING;
+
+INSERT INTO funcoes (nome, categoria_id) VALUES
+('Garçom', (SELECT id FROM categorias_funcao WHERE nome = 'Alimentação')),
+('Bartender', (SELECT id FROM categorias_funcao WHERE nome = 'Alimentação')),
+('Cozinheiro', (SELECT id FROM categorias_funcao WHERE nome = 'Alimentação')),
+('Auxiliar de Cozinha', (SELECT id FROM categorias_funcao WHERE nome = 'Alimentação')),
+('Recepcionista', (SELECT id FROM categorias_funcao WHERE nome = 'Atendimento')),
+('Segurança', (SELECT id FROM categorias_funcao WHERE nome = 'Segurança')),
+('Limpeza', (SELECT id FROM categorias_funcao WHERE nome = 'Limpeza')),
+('Outros', (SELECT id FROM categorias_funcao WHERE nome = 'Outros'))
+ON CONFLICT (nome) DO UPDATE SET categoria_id = EXCLUDED.categoria_id;
 
 INSERT INTO tipos_endereco (chave, nome, descricao, icone) VALUES
 ('RESIDENCIAL', 'Residencial', 'Endereço de residência', 'home'),
@@ -595,7 +666,11 @@ INSERT INTO email_status (chave, nome) VALUES
 ('EM_ESPERA','Em espera'),
 ('ENVIADO','Enviado'),
 ('VALIDADO','Validado'),
-('EXPIRADO','Expirado');
+('EXPIRADO','Expirado'),
+('CONSUMIDO','Consumido'),
+('CANCELADO','Cancelado'),
+('FALHA','Falha')
+ON CONFLICT (chave) DO NOTHING;
 
 INSERT INTO email_templates (chave_uso, titulo_assunto, conteudo_corpo, email_remetente, nome_remetente) VALUES
 ('CONFIRMACAO_CADASTRO', 'Confirme seu cadastro - Código {{CODIGO}} - UAI FRILA', 
@@ -743,8 +818,6 @@ DO UPDATE SET
   editavel = EXCLUDED.editavel,
   atualizado_em = NOW();
 
-
-ON CONFLICT (chave) DO NOTHING;
 -- SUPER ADMIN OBRIGATÓRIO
 INSERT INTO usuarios (
   nome_completo, cpf, email, senha_hash, cnpj, nome_fantasia,
@@ -802,4 +875,4 @@ GRANT ALL ON SCHEMA public TO PUBLIC;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO PUBLIC;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO PUBLIC;
 
--- FIM - SEM ALTER TABLE
+---

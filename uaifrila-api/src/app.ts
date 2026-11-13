@@ -22,6 +22,8 @@ import { ExpansaoCidadeController } from './controllers/ExpansaoCidadeController
 import { PermissaoController } from './controllers/PermissaoController';
 import { GanhosController } from './controllers/GanhosController';
 import { CandidatoController } from './controllers/CandidatoController';
+import { CategoriaFuncaoController } from './controllers/CategoriaFuncaoController';
+import { UsuarioFuncaoController } from './controllers/UsuarioFuncaoController';
 
 // @ts-ignore - pode ser CatalogosController ou TiposUsuarioController
 let PaisController: any, TipoUsuarioController: any, StatusUsuarioController: any, FuncaoController: any, TipoEnderecoController: any;
@@ -131,6 +133,8 @@ export class App {
     const permissaoCtrl: any = new PermissaoController();
     const ganhosCtrl: any = new GanhosController();
     const candidatoCtrl: any = new CandidatoController();
+    const categoriaFuncaoCtrl: any = new CategoriaFuncaoController();
+    const usuarioFuncaoCtrl: any = new UsuarioFuncaoController();
 
     this.expressApp.post('/api/auth/register', (req, res) => authCtrl.register(req, res));
     this.expressApp.post('/api/auth/login', (req, res) => authCtrl.login(req, res));
@@ -276,6 +280,12 @@ export class App {
 
     this.expressApp.get('/api/ganhos/meus', (req, res) => ganhosCtrl.meusGanhos(req, res));
     this.expressApp.get('/api/candidatos/vaga/:vagaId', (req, res) => candidatoCtrl.listarCandidatosPorVaga(req, res));
+    // Funções / categorias / experiência do freela
+    this.expressApp.get('/api/categorias-funcao', (req, res) => categoriaFuncaoCtrl.listar(req, res));
+    this.expressApp.get('/api/categorias-funcao/com-funcoes', (req, res) => categoriaFuncaoCtrl.listarComFuncoes(req, res));
+    this.expressApp.get('/api/minhas-funcoes', (req, res) => usuarioFuncaoCtrl.minhas(req, res));
+    this.expressApp.post('/api/minhas-funcoes', (req, res) => usuarioFuncaoCtrl.salvar(req, res));
+    this.expressApp.delete('/api/minhas-funcoes/:funcaoId', (req, res) => usuarioFuncaoCtrl.remover(req, res));
     this.expressApp.get('/api/permissoes', (req, res) => permissaoCtrl.listar(req, res));
     this.expressApp.get('/api/permissoes/categorias', (req, res) => permissaoCtrl.categorias(req, res));
     this.expressApp.get('/api/permissoes/matriz', (req, res) => permissaoCtrl.matriz(req, res));
