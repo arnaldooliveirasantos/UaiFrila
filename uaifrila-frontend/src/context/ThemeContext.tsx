@@ -48,14 +48,14 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
 
   const pageBackgroundStyle: React.CSSProperties = theme === 'dark' ? {
     backgroundColor: '#000000',
-    backgroundImage: `linear-gradient(to right, rgba(0,102,255,0.22) 1.2px, transparent 1.2px), linear-gradient(to bottom, rgba(0,102,255,0.22) 1.2px, transparent 1.2px)`,
+    backgroundImage: `linear-gradient(to right, rgba(0,102,255,0.6) 1.2px, transparent 1.2px), linear-gradient(to bottom, rgba(0,102,255,0.6) 1.2px, transparent 1.2px)`,
     backgroundSize: '40px 40px',
     backgroundPosition: '0 0',
     backgroundAttachment: 'fixed',
     minHeight: '100vh',
   } : {
-    backgroundColor: '#FFFFFF',
-    backgroundImage: `linear-gradient(to right, rgba(204,153,0,0.22) 1.2px, transparent 1.2px), linear-gradient(to bottom, rgba(204,153,0,0.22) 1.2px, transparent 1.2px)`,
+    backgroundColor: '#CC990038',
+    backgroundImage: `linear-gradient(to right, rgba(255,255,255,0.6) 1.2px, transparent 1.2px), linear-gradient(to bottom, rgba(255,255,255,0.6) 1.2px, transparent 1.2px)`,
     backgroundSize: '36px 36px',
     backgroundPosition: '0 0',
     backgroundAttachment: 'fixed',

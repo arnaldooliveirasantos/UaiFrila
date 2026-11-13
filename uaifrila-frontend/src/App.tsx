@@ -10,6 +10,8 @@ import TelaCadastroVaga from './components/TelaCadastroVaga';
 import CadastroUnificado from './components/CadastroUnificado';
 import PerfilUsuario from './components/PerfilUsuario';
 import MinhasFuncoes from './components/MinhasFuncoes';
+import MeusGanhos from './components/MeusGanhos';
+import DadosPix from './components/DadosPix';
 import PainelTransacoes from './components/PainelTransacoes';
 import PainelConfiguracaoCidades from './components/PainelConfiguracaoCidades';
 import PainelVariaveisAmbiente from './components/PainelVariaveisAmbiente';
@@ -110,6 +112,9 @@ function AppContent() {
       {telaAtiva === 'validar-login' && <ValidacaoCodigo email={emailFromUrl || undefined} tipo="login" codigoInicial={codigoFromUrl || undefined} autoValidarDoLink={!!codigoFromUrl} onValidado={handleLogin} onVoltar={() => navegar('login')} />}
       {telaAtiva === 'mural' && (usuario ? <PainelMural usuario={usuario} setTelaAtiva={navegar} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'perfil' && (usuario ? <PerfilUsuario usuario={usuario} onAtualizado={setUsuario} onIrParaFuncoes={() => navegar('minhas-funcoes')} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
+      {telaAtiva === 'minhas-funcoes' && (usuario ? <MinhasFuncoes /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
+      {telaAtiva === 'ganhos' && (usuario ? <MeusGanhos /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
+      {telaAtiva === 'pix' && (usuario ? <DadosPix /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'publicar' && (usuario ? <TelaCadastroVaga key={publicarKey} usuario={usuario} setTelaAtiva={navegar} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'trampos' && (usuario ? <PainelMeusTrampos usuario={usuario} setTelaAtiva={navegar} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'transacoes' && (usuario ? <PainelTransacoes usuario={usuario} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
