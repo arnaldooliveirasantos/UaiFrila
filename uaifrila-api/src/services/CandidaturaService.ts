@@ -77,8 +77,34 @@ export class CandidaturaService extends BaseService<any> {
     await pool.query(`UPDATE candidaturas SET status = 'ACEITA' WHERE id = $1`, [candidaturaId]);
     const rs = await pool.query(`SELECT id FROM status_vaga WHERE chave='ACEITA'`);
     if (rs.rows[0]) await pool.query(`UPDATE vagas SET status_vaga_id = $1 WHERE id = $2`, [rs.rows[0].id, cand.vaga_id]);
-    await this.notificacaoService.criarNotificacao({ usuario_id: cand.freela_id || cand.usuario_id, tipo: 'CANDIDATURA_ACEITA', titulo: `Sua candidatura foi aceita - Vaga #${cand.vaga_id}`, mensagem: `Você foi aceito para "${cand.titulo}". Aguarde o início.`, vaga_id: cand.vaga_id, candidatura_id: candidaturaId });
+    // Notificacao NAO tem colunas vaga_id / candidatura_id (só referencia_tipo + referencia_id).
+    // ANTES passava vaga_id/candidatura_id e o mapToDbColumns deixava passar -> Postgres:
+    // "column \"vaga_id\" of relation \"notificacoes\" does not exist" ao aceitar/recusar.
+    await this.notificacaoService.criarNotificacao({ usuario_id: cand.freela_id || cand.usuario_id, tipo: 'CANDIDATURA_ACEITA', titulo: `Sua candidatura foi aceita - Vaga #${cand.vaga_id}`, mensagem: `Você foi aceito para "${cand.titulo}". Aguarde o início.`, referencia_tipo: 'CANDIDATURA', referencia_id: candidaturaId });
     return { ...cand, status: 'ACEITA' };
+  }
+
+  // Recusar: so o dono da vaga, so candidatura PENDENTE. O front manda status RECUSADA,
+  // mas o controller so aceitava ACEITA/CANCELADA -> Recusar caia em 400 "Status invalido".
+  async recusar(candidaturaId: number, contratanteId: number): Promise<any> {
+    const pool = BaseRepository.getPool() as any;
+    const rc = await pool.query(`SELECT c.*, v.contratante_id, v.titulo FROM candidaturas c JOIN vagas v ON v.id = c.vaga_id WHERE c.id = $1`, [candidaturaId]);
+    const cand = rc.rows[0];
+    if (!cand) throw new Error('Candidatura não encontrada');
+    if (Number(cand.contratante_id) !== Number(contratanteId)) throw new Error('Só o dono da vaga pode recusar');
+    const statusCand = (cand.status || '').toUpperCase();
+    if (statusCand === 'RECUSADA') throw new Error('Candidatura já recusada');
+    if (statusCand === 'ACEITA') throw new Error('Candidatura já aceita - cancele a vaga para recusar.');
+    if (statusCand !== 'PENDENTE') throw new Error(`Não é possível recusar candidatura com status ${statusCand}`);
+    await pool.query(`UPDATE candidaturas SET status = 'RECUSADA' WHERE id = $1`, [candidaturaId]);
+    await this.notificacaoService.criarNotificacao({ usuario_id: cand.freela_id || cand.usuario_id, tipo: 'CANDIDATURA_RECUSADA', titulo: `Candidatura não selecionada - Vaga #${cand.vaga_id}`, mensagem: `Você não foi selecionado para "${cand.titulo}". Continue se candidatando a outras vagas.`, referencia_tipo: 'CANDIDATURA', referencia_id: candidaturaId });
+    // Sem mais candidatos pendentes/aceitos, a vaga volta a aguardar candidatura.
+    const rOutros = await pool.query(`SELECT COUNT(*) as total FROM candidaturas WHERE vaga_id=$1 AND status IN ('PENDENTE','ACEITA')`, [cand.vaga_id]);
+    if (Number(rOutros.rows[0].total) === 0) {
+      const rs = await pool.query(`SELECT id FROM status_vaga WHERE chave='AGUARDANDO_CANDIDATURA'`);
+      if (rs.rows[0]) await pool.query(`UPDATE vagas SET status_vaga_id = $1 WHERE id = $2`, [rs.rows[0].id, cand.vaga_id]);
+    }
+    return { ...cand, status: 'RECUSADA' };
   }
 
   async cancelar(candidaturaId: number, usuarioId: number, motivo?: string): Promise<any> {

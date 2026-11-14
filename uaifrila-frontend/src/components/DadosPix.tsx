@@ -3,7 +3,8 @@ import { apiFetch } from '../utils/Api';
 import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 // Dados PIX - CORRIGIDO: 404 / sem pix = tela vazia p/ preencher, NÃO erro.
 // Antes: qualquer 404 caía em setErro e a tela ficava sem nada visível.
-// GET/POST/DELETE /api/usuario/pix (rotas criadas no App.ts - ver App.patch.txt)
+// GET/POST/DELETE /api/usuario/pix.
+// NO PADRAO DO SISTEMA: caixas e botoes via useUaiFrilaStyles() - sem bg-yellow-50/bg-red-100/bg-green-100/bg-black hardcoded.
 const TIPOS = ['CPF', 'CNPJ', 'EMAIL', 'TELEFONE', 'ALEATORIA'];
 const FORM_VAZIO = { tipo_chave: 'CPF', chave_pix: '', nome_titular: '', cpf_cnpj_titular: '', banco: '', agencia: '', conta: '', tipo_conta: 'CORRENTE' };
 export default function DadosPix() {
@@ -31,9 +32,9 @@ export default function DadosPix() {
   const excluir = async () => { if (!confirm('Remover seus dados PIX?')) return; try { await apiFetch('/api/usuario/pix', { method: 'DELETE' }); setForm({ ...FORM_VAZIO }); setTemPix(false); setOk('Dados PIX removidos.'); } catch (e: any) { setErro(e.message); } };
   if (carregando) return <div className={styles.pageContainer}><div className={styles.card}><p className="animate-pulse">Carregando dados PIX...</p></div></div>;
   return (<div className={styles.pageContainer}><h1 className={styles.typography.h1}>Meus Dados PIX</h1><p className={styles.typography.body + ' mt-2'}>Para receber o pagamento dos trampos realizados. 1 chave ativa por usuário.</p>
-    {!temPix && <div className="mt-4 p-3 text-xs bg-yellow-50 border border-yellow-200 rounded">Você ainda não cadastrou sua chave PIX. Preencha abaixo — sem ela você não recebe os trampos.</div>}
-    {erro && <div className="mt-4 p-3 text-xs bg-red-100 text-red-700 rounded">{erro}</div>}
-    {ok && <div className="mt-4 p-3 text-xs bg-green-100 text-green-700 rounded">{ok}</div>}
+    {!temPix && <div className={styles.cardSmall + ' mt-4'}><span className={styles.badge('warning')}>Sem chave PIX</span><p className={styles.typography.bodySmall + ' mt-2'}>Você ainda não cadastrou sua chave PIX. Preencha abaixo — sem ela você não recebe os trampos.</p></div>}
+    {erro && <div className={styles.errorBox + ' mt-4'}>{erro}</div>}
+    {ok && <div className={styles.successBox + ' mt-4'}>{ok}</div>}
     <div className={styles.card + ' mt-4'}><div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div><label className={styles.label}>Tipo da chave *</label><select value={form.tipo_chave} onChange={e => setForm({ ...form, tipo_chave: e.target.value })} className={styles.select}>{TIPOS.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
       <div><label className={styles.label}>Chave PIX *</label><input value={form.chave_pix} onChange={e => setForm({ ...form, chave_pix: e.target.value })} className={styles.input} placeholder={form.tipo_chave === 'EMAIL' ? 'voce@email.com' : form.tipo_chave === 'CPF' ? '00000000000' : 'Sua chave'} /></div>
@@ -44,5 +45,5 @@ export default function DadosPix() {
       <div><label className={styles.label}>Conta</label><input value={form.conta} onChange={e => setForm({ ...form, conta: e.target.value })} className={styles.input} placeholder="000000-0" /></div>
       <div><label className={styles.label}>Tipo da conta</label><select value={form.tipo_conta} onChange={e => setForm({ ...form, tipo_conta: e.target.value })} className={styles.select}><option value="CORRENTE">Corrente</option><option value="POUPANCA">Poupança</option></select></div>
     </div>
-    <div className="flex gap-2 mt-4"><button onClick={salvar} disabled={salvando} className="px-4 py-2 bg-black text-white text-sm font-bold rounded disabled:opacity-50">{salvando ? 'Salvando...' : 'Salvar dados PIX'}</button>{temPix && <button onClick={excluir} className="px-4 py-2 border text-sm rounded">Remover</button>}</div></div></div>);
+    <div className="flex gap-2 mt-4"><button onClick={salvar} disabled={salvando} className={styles.buttonPrimary(salvando)}>{salvando ? 'Salvando...' : 'Salvar dados PIX'}</button>{temPix && <button onClick={excluir} className={styles.buttonDanger}>Remover</button>}</div></div></div>);
 }

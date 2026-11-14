@@ -19,6 +19,12 @@ export class NotificacaoRepository extends BaseRepository<NotificacaoModel> {
     referencia_tipo?: string;
     referencia_id?: number;
   }): Promise<NotificacaoModel> {
-    return await this.criarGenerico(dados);
+    // WHITELIST: notificacoes so tem essas colunas. O mapToDbColumns deixa passar
+    // chaves desconhecidas (vaga_id, candidatura_id, ...) direto para o INSERT ->
+    // Postgres "column \"vaga_id\" of relation \"notificacoes\" does not exist".
+    // Quem chamar com vaga_id/candidatura_id tem o campo ignorado aqui; o certo e
+    // passar referencia_tipo + referencia_id (ver CandidaturaService.aceitar/recusar).
+    const { usuario_id, tipo, titulo, mensagem, referencia_tipo, referencia_id } = dados as any;
+    return await this.criarGenerico({ usuario_id, tipo, titulo, mensagem, referencia_tipo, referencia_id });
   }
 }

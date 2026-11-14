@@ -57,10 +57,12 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
 
   const menuBase = [
     { id: 'mural', label: 'Mural', icon: '🏠', show: () => !!usuario },
+    { id: 'notificacoes', label: 'Notificações', icon: '🔔', show: () => !!usuario },
     { id: 'perfil', label: 'Meu Perfil', icon: '👤', show: () => !!usuario },
     { id: 'minhas-funcoes', label: 'Minhas Funções', icon: '🛠️', show: () => !!usuario && checkFreelaOuDual() },
     { id: 'publicar', label: 'Publicar Vaga', icon: '➕', show: () => !!usuario && checkContratante() },
     { id: 'trampos', label: 'Meus Trampos', icon: '💼', show: () => !!usuario },
+    { id: 'candidatos', label: 'Candidatos', icon: '👥', show: () => !!usuario && checkContratante() },
     { id: 'transacoes', label: 'Transações', icon: '💰', show: () => !!usuario && checkContratanteOuAdmin() },
     { id: 'ganhos', label: 'Meus Ganhos', icon: '💵', show: () => !!usuario && checkFreelaOuDual() },
     { id: 'pix', label: 'Meus Dados PIX', icon: '🔑', show: () => !!usuario }, // FREELA recebe por PIX; CONTRATANTE também pode cadastrar

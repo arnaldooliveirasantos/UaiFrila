@@ -10,6 +10,8 @@ import TelaCadastroVaga from './components/TelaCadastroVaga';
 import CadastroUnificado from './components/CadastroUnificado';
 import PerfilUsuario from './components/PerfilUsuario';
 import MinhasFuncoes from './components/MinhasFuncoes';
+import TelaNotificacoes from './components/TelaNotificacoes';
+import PainelGerenciarCandidatos from './components/PainelGerenciarCandidatos';
 import MeusGanhos from './components/MeusGanhos';
 import DadosPix from './components/DadosPix';
 import PainelTransacoes from './components/PainelTransacoes';
@@ -115,8 +117,10 @@ function AppContent() {
       {telaAtiva === 'minhas-funcoes' && (usuario ? <MinhasFuncoes /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'ganhos' && (usuario ? <MeusGanhos /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'pix' && (usuario ? <DadosPix /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
+      {telaAtiva === 'notificacoes' && (usuario ? <TelaNotificacoes /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'publicar' && (usuario ? <TelaCadastroVaga key={publicarKey} usuario={usuario} setTelaAtiva={navegar} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'trampos' && (usuario ? <PainelMeusTrampos usuario={usuario} setTelaAtiva={navegar} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
+      {telaAtiva === 'candidatos' && (usuario ? <PainelGerenciarCandidatos /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'transacoes' && (usuario ? <PainelTransacoes usuario={usuario} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'cidades' && (usuario ? <PainelConfiguracaoCidades /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'variaveis' && (usuario ? <PainelVariaveisAmbiente /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}

@@ -31,7 +31,7 @@ export default function PainelGerenciarCandidatos() {
   const carregarCandidatos = async (id: number) => {
     setCarregandoCandidatos(true); setErro('');
     try {
-      const data = await apiFetch(`/api/candidaturas/vaga/${id}`);
+      const data = await apiFetch(`/api/candidatos/vaga/${id}`).catch(() => apiFetch(`/api/candidaturas/vaga/${id}`));
       const lista = data.candidaturas || data.data || (Array.isArray(data) ? data : []);
       setCandidatos(lista);
     } catch (e: any) { setErro(e.message || 'Erro ao carregar candidatos'); setCandidatos([]); } finally { setCarregandoCandidatos(false); }
@@ -49,9 +49,9 @@ export default function PainelGerenciarCandidatos() {
 
   if (carregando) return <div className={styles.pageContainer}>Carregando vagas...</div>;
   return (
-    <div className="max-w-6xl mx-auto px-4 py-8">
-      <h2 className="text-2xl font-black uppercase">Gerenciar Candidatos</h2>
-      <p className="text-xs mt-1 opacity-70">Selecione uma vaga para ver os candidatos reais da API.</p>
+    <div className={styles.pageContainer}>
+      <h1 className={styles.typography.h1}>Gerenciar Candidatos</h1>
+      <p className={styles.typography.body + ' mt-2'}>Selecione uma vaga para ver os candidatos reais da API.</p>
       {erro && <div className={`${styles.errorBox} mt-4`}>{erro}</div>}
       <div className="mt-4">
         <label className={styles.label}>Vaga</label>
@@ -70,11 +70,11 @@ export default function PainelGerenciarCandidatos() {
           return (
             <div key={c.id} className={`p-5 ${styles.cardSmall}`}>
               <div className="flex gap-4">
-                <div className="w-16 h-16 rounded-full overflow-hidden bg-black text-white flex items-center justify-center text-xl font-black shrink-0">
+                <div className={`w-16 h-16 rounded-full overflow-hidden flex items-center justify-center text-xl font-black shrink-0 ${styles.isDark ? 'bg-white text-black' : 'bg-black text-white'}`}>
                   {(u.foto || c.foto) ? <img src={u.foto || c.foto} alt={u.nome_completo || u.nome} className="w-full h-full object-cover" /> : inicial}
                 </div>
                 <div className="flex-1">
-                  <p className="font-black">{u.nome_completo || u.nome || `Freela #${c.freela_id || c.usuario_id}`} {c.match_vaga != null && <span className="ml-1 px-2 py-0.5 text-xs bg-yellow-400 rounded-full">Match {c.match_vaga}%</span>}</p>
+                  <p className="font-black">{u.nome_completo || u.nome || `Freela #${c.freela_id || c.usuario_id}`} {c.match_vaga != null && <span className={'ml-1 ' + styles.badge('warning')}>Match {c.match_vaga}%</span>}</p>
                   <p className="text-xs">⭐ Avaliação geral: {u.media_avaliacao || c.media_avaliacao || '—'} {c.total_avaliacoes ? `(${c.total_avaliacoes} avaliações)` : ''}</p>
                   <p className="text-xs">📍 {u.endereco_ativo_bairro || u.bairro || ''} {u.endereco_ativo_cidade ? `- ${u.endereco_ativo_cidade}` : ''}</p>
                   <p className="text-xs mt-2"><b>Na função desta vaga{c.funcao_vaga ? ` (${c.funcao_vaga})` : ''}:</b> {exp.trampos_comprovados > 0 ? `${exp.trampos_comprovados} trampos comprovados no app` : 'sem trampos comprovados'} {exp.meses_declarados ? `• ${exp.meses_declarados >= 60 ? 'mais de 5 anos' : exp.meses_declarados >= 36 ? '3 a 5 anos' : exp.meses_declarados >= 12 ? '1 a 2 anos' : 'menos de 1 ano'} declarados` : ''} {exp.media_funcao ? `• nota ${exp.media_funcao} nessa função` : ''}</p>
