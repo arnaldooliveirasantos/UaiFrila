@@ -1,8 +1,9 @@
+import { BaseService } from './BaseService';
 import { CidadeRepository } from '../repositories/CidadeRepository';
 import { CidadeModel } from '../models/CidadeModel';
-export class CidadeService {
+export class CidadeService extends BaseService {
   private repo: CidadeRepository;
-  constructor() { this.repo = new CidadeRepository(); }
+  constructor() { super(new CidadeRepository()); this.repo = this.getRepo(); }
   async listar(): Promise<CidadeModel[]> { return await this.repo.buscarTodos(); }
   async listarAtivas(): Promise<CidadeModel[]> { return await this.repo.listarAtivas(); }
   async listarTodas(): Promise<CidadeModel[]> { return await this.listar(); }

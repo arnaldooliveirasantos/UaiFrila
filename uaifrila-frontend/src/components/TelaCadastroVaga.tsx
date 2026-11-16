@@ -257,7 +257,10 @@ export default function TelaCadastroVaga(props: any) {
           }));
           // Agenda da edicao: turnos salvos, ou o intervalo unico convertido em 1 turno.
           if (Array.isArray(vagaLocal.turnos) && vagaLocal.turnos.length) {
-            setTurnos(vagaLocal.turnos.map((x: any) => ({ data: String(x.data).slice(0, 10), hora_inicio: String(x.hora_inicio).slice(0, 5), hora_fim: String(x.hora_fim).slice(0, 5), valor_servico: Number(x.valor_servico || 0) })));
+            setTurnos(vagaLocal.turnos.map((x: any) => {
+        const raw = x.data; const iso = raw instanceof Date ? raw.toISOString().slice(0, 10) : String(raw ?? '').match(/^\d{4}-\d{2}-\d{2}/)?.[0] || String(raw ?? '').slice(0, 10);
+        return { data: iso, hora_inicio: String(x.hora_inicio ?? x.horaInicio ?? '').slice(0, 5), hora_fim: String(x.hora_fim ?? x.horaFim ?? '').slice(0, 5), valor_servico: Number(x.valor_servico ?? x.valorServico ?? 0) };
+      }));
           } else if (vagaLocal.data_inicio && vagaLocal.data_fim) {
             setTurnos([{ data: inicioLocal.slice(0, 10), hora_inicio: inicioLocal.slice(11, 16), hora_fim: fimLocal.slice(11, 16), valor_servico: valorServ }]);
           }

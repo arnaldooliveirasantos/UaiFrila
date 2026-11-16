@@ -3,6 +3,7 @@ import { EmailHistoricoRepository } from '../repositories/EmailHistoricoReposito
 import { EmailStatusRepository } from '../repositories/EmailStatusRepository';
 import { EmailTemplateRepository } from '../repositories/EmailTemplateRepository';
 import { BaseService } from './BaseService';
+import { registrarErro } from '../utils/registrarErro';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
@@ -16,7 +17,6 @@ function gerarCodigo(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-const codigosMemoria = new Map<string, { codigo: string, expira: number, tipo: string }>();
 
 export class AuthService extends BaseService {
   private usuarioRepo: UsuarioRepository;
@@ -68,7 +68,6 @@ export class AuthService extends BaseService {
   async solicitarCodigo(dados: { email: string, tipo: string }) {
     if (!dados.email) throw new Error('E-mail obrigatório');
     const emailNorm = String(dados.email).trim().toLowerCase();
-    console.log(`[AuthService.solicitarCodigo] email=${emailNorm} tipo=${dados.tipo}`);
 
     if (dados.tipo === 'login') {
       const u = await this.usuarioRepo.buscarPorEmail(emailNorm);
@@ -76,69 +75,34 @@ export class AuthService extends BaseService {
     }
 
     const codigo = gerarCodigo();
-
+    // UNICA fonte do codigo: o banco (email_historico_disparos). SEM Map em memoria,
+    // SEM fallback, SEM devolver o codigo na resposta, SEM logar o codigo.
+    let templateId = null;
+    try { const tmpl = await this.emailTemplateRepo.buscarPorChave(dados.tipo === 'cadastro' ? 'codigo_cadastro' : 'codigo_login'); templateId = (tmpl as any)?.id || null; }
+    catch (e: any) { registrarErro('AuthService.solicitarCodigo.template', e, { tipo: dados.tipo }); throw e; }
+    let statusId = null;
+    try { const st = await this.emailStatusRepo.buscarPorChave('EM_ESPERA'); statusId = (st as any)?.id || null; }
+    catch (e: any) { registrarErro('AuthService.solicitarCodigo.status', e); throw e; }
     try {
-      let templateId = null;
-      try {
-        const tmpl = await this.emailTemplateRepo.buscarPorChave(dados.tipo === 'cadastro' ? 'codigo_cadastro' : 'codigo_login');
-        templateId = (tmpl as any)?.id || null;
-      } catch {}
-
-      let statusId = null;
-      try {
-        const st = await this.emailStatusRepo.buscarPorChave('EM_ESPERA');
-        statusId = (st as any)?.id || null;
-      } catch {}
-
-      await this.emailHistRepo.criarCodigo({
-        emailDestinatario: emailNorm,
-        templateId,
-        statusId,
-        codigoVerificacao: codigo,
-        tituloFinal: dados.tipo === 'cadastro' ? 'Código de cadastro UaiFrila' : 'Código de acesso UaiFrila',
-        conteudoFinal: `<h1>${codigo}</h1>`,
-      });
-    } catch (e: any) {
-      console.warn('[AuthService] Falha ao salvar código no banco, usando memória:', e.message);
-    }
-
-    codigosMemoria.set(emailNorm, { codigo, expira: Date.now() + 5 * 60 * 1000, tipo: dados.tipo });
-    console.log(`[AuthService] Código para ${emailNorm}: ${codigo}`);
-
-    const isDev = process.env.NODE_ENV !== 'production';
-    return { codigo, isDev, message: 'Código enviado' };
+      await this.emailHistRepo.criarCodigo({ emailDestinatario: emailNorm, templateId, statusId, codigoVerificacao: codigo, tituloFinal: dados.tipo === 'cadastro' ? 'Código de cadastro UaiFrila' : 'Código de acesso UaiFrila', conteudoFinal: `<h1>${codigo}</h1>` });
+    } catch (e: any) { registrarErro('AuthService.solicitarCodigo.salvarCodigo', e, { email: emailNorm }); throw e; }
+    return { message: 'Código enviado' };
   }
 
   async validarCodigo(dados: { email: string, codigo: string, tipo: string }) {
     if (!dados.email || !dados.codigo) throw new Error('E-mail e código obrigatórios');
     const emailNorm = String(dados.email).trim().toLowerCase();
     const codigoStr = String(dados.codigo).trim();
-    console.log(`[AuthService.validarCodigo] ${emailNorm} codigo ${codigoStr}`);
 
+    // UNICA fonte: o banco. Sem Map em memoria.
+    const row = await this.emailHistRepo.buscarCodigoValido(emailNorm, codigoStr).catch((e: any) => { registrarErro('AuthService.validarCodigo.buscarCodigo', e, { email: emailNorm }); throw e; });
     let valido = false;
-    let usuarioIdFromEmail: number | null = null;
-
-    const mem = codigosMemoria.get(emailNorm);
-    if (mem && mem.codigo === codigoStr && mem.expira > Date.now()) {
+    if (row) {
       valido = true;
-      codigosMemoria.delete(emailNorm);
+      usuarioIdFromEmail = (row as any).usuario_id || null;
+      try { await this.emailHistRepo.marcarComoConsumido((row as any).id); }
+      catch (e: any) { registrarErro('AuthService.validarCodigo.marcarComoConsumido', e, { email: emailNorm }); throw e; }
     }
-
-    if (!valido) {
-      try {
-        const row = await this.emailHistRepo.buscarCodigoValido(emailNorm, codigoStr);
-        if (row) {
-          valido = true;
-          usuarioIdFromEmail = (row as any).usuario_id || null;
-          try {
-            await this.emailHistRepo.marcarComoConsumido((row as any).id);
-          } catch {}
-        }
-      } catch (e: any) {
-        console.warn('[AuthService] Erro ao buscar código no banco:', e.message);
-      }
-    }
-
     if (!valido) throw new Error('Código inválido ou expirado');
 
     let usuario = null;

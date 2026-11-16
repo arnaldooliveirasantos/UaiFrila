@@ -1,15 +1,13 @@
 import { TrampoRepository } from '../repositories/TrampoRepository';
 import { VariavelSistemaRepository } from '../repositories/VariavelSistemaRepository';
+import { VARIAVEIS } from '../config/VariaveisSistema';
 export class GanhosService {
   private trampoRepo = new TrampoRepository();
   private variavelRepo = new VariavelSistemaRepository();
   async meusGanhos(usuarioId: number, filtros: any): Promise<{ ganhos: any[]; resumo: any; comissao_percentual: number }> {
     const id = Number(usuarioId); if (!id || isNaN(id)) throw new Error('Usuario invalido');
     let comissaoPct: number | null = null;
-    for (const chave of ['COMISSAO_APLICATIVO', 'TAXA_PLATAFORMA_PERCENTUAL', 'INTERMEDIACAO_PERCENTUAL']) {
-      try { comissaoPct = await this.variavelRepo.buscarNumeroObrigatorio(chave); break; } catch { continue; }
-    }
-    if (comissaoPct == null) throw new Error('Variavel de sistema nao encontrada: COMISSAO_APLICATIVO / TAXA_PLATAFORMA_PERCENTUAL / INTERMEDIACAO_PERCENTUAL');
+    comissaoPct = await this.variavelRepo.buscarNumeroObrigatorio(VARIAVEIS.TAXA_PLATAFORMA_PERCENTUAL);;
     const rows = await this.trampoRepo.listarGanhosRaw(id, filtros || {});
     const ganhos = rows.map((row: any) => {
       const bruto = Number(row.total_freela ?? row.valor_servico ?? 0) || 0;

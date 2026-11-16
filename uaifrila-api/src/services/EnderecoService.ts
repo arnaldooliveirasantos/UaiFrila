@@ -1,3 +1,4 @@
+import { BaseService } from './BaseService';
 import { EnderecoRepository } from '../repositories/EnderecoRepository';
 import { EnderecoModel } from '../models/EnderecoModel';
 import { CidadeRepository } from '../repositories/CidadeRepository';
@@ -5,16 +6,17 @@ import { EstadoRepository } from '../repositories/EstadoRepository';
 import { geocodificarEndereco } from './GeocodificacaoService';
 // listarBrutosPorUsuario e o metodo usado pelo AuthController.me (linhas cruas snake_case).
 // Os demais metodos sao os mesmos da entrega 2.
-export class EnderecoService {
+export class EnderecoService extends BaseService {
+  constructor() { super(new EnderecoRepository()); }
   private repo = new EnderecoRepository();
-  async listar(): Promise<EnderecoModel[]> { try { return await this.repo.buscarTodos(); } catch { return []; } }
+  async listar(): Promise<EnderecoModel[]> { return await this.repo.buscarTodos(); }
   async listarBrutosPorUsuario(usuarioId: number): Promise<any[]> {
     const id = Number(usuarioId); if (!id || isNaN(id)) return [];
-    try { return await this.repo.listarBrutosPorUsuario(id); } catch { return []; }
+    return await this.repo.listarBrutosPorUsuario(id);
   }
   async listarPorUsuario(usuarioId: number): Promise<EnderecoModel[]> {
     const id = Number(usuarioId); if (!id || isNaN(id)) return [];
-    try { return await this.repo.listarPorUsuario(id); } catch { return []; }
+    return await this.repo.listarPorUsuario(id);
   }
   // Fonte unica do cidade do endereco: o JOIN com cidades (listarBrutosPorUsuario).
   // O front le end.cidade.estadoId — direto, sem fallback, sem cadeia de alternativas.
@@ -27,7 +29,7 @@ export class EnderecoService {
   }
   async buscarAtivoPorUsuario(usuarioId: number): Promise<EnderecoModel | null> {
     const id = Number(usuarioId); if (!id || isNaN(id)) return null;
-    try { return await this.repo.buscarAtivoPorUsuario(id); } catch { return null; }
+    return await this.repo.buscarAtivoPorUsuario(id);
   }
   async buscarPorId(id: number): Promise<EnderecoModel> {
     const idNum = Number(id); if (!idNum || isNaN(idNum)) throw new Error('ID invalido');

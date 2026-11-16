@@ -1,3 +1,4 @@
+import { BaseService } from './BaseService';
 import { UsuarioFuncaoRepository } from '../repositories/UsuarioFuncaoRepository';
 export function faixaExperiencia(meses: number): string {
   if (meses < 12) return 'Menos de 1 ano'; if (meses < 36) return '1 a 2 anos'; if (meses <= 60) return '3 a 5 anos'; return 'Mais de 5 anos';
@@ -8,7 +9,8 @@ export function nivelExperiencia(meses: number, tramposComprovados: number): str
   if (tramposComprovados >= 1 || meses >= 12) return 'Intermediário';
   return 'Iniciante';
 }
-export class UsuarioFuncaoService {
+export class UsuarioFuncaoService extends BaseService {
+  constructor() { super(new UsuarioFuncaoRepository()); }
   private repo = new UsuarioFuncaoRepository();
   async listarMinhas(usuarioId: number): Promise<any[]> {
     const rows = await this.repo.listarPorUsuario(usuarioId);

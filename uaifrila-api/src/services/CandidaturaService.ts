@@ -1,4 +1,5 @@
 import { BaseService } from './BaseService';
+import { registrarErro } from '../utils/registrarErro';
 import { CandidaturaRepository } from '../repositories/CandidaturaRepository';
 import { VariavelSistemaService } from './VariavelSistemaService';
 import { NotificacaoService } from './NotificacaoService';
@@ -18,11 +19,14 @@ export class CandidaturaService extends BaseService<any> {
   private notificacaoService = new NotificacaoService();
   constructor() { super(new CandidaturaRepository()); }
 
+  // SEM FALLBACK: variavel ausente = erro que sobe, com log. Antes retornava 24 / 5 silenciosamente.
   private async prazoConfirmacaoHoras(): Promise<number> {
-    try { return await this.variavelSvc.buscarNumeroObrigatorio('PRAZO_CONFIRMACAO_SELECAO_HORAS'); } catch { return 24; }
+    try { return await this.variavelSvc.buscarNumeroObrigatorio('PRAZO_CONFIRMACAO_SELECAO_HORAS'); }
+    catch (e: any) { registrarErro('CandidaturaService.prazoConfirmacaoHoras', e, { variavel: 'PRAZO_CONFIRMACAO_SELECAO_HORAS' }); throw e; }
   }
   private async limitePendentes(): Promise<number> {
-    try { return await this.variavelSvc.buscarNumeroObrigatorio('LIMITE_CANDIDATURAS_PENDENTES'); } catch { return 5; }
+    try { return await this.variavelSvc.buscarNumeroObrigatorio('LIMITE_CANDIDATURAS_PENDENTES'); }
+    catch (e: any) { registrarErro('CandidaturaService.limitePendentes', e, { variavel: 'LIMITE_CANDIDATURAS_PENDENTES' }); throw e; }
   }
   private async vagaDe(vagaId: number): Promise<any> {
     const pool = BaseRepository.getPool() as any;
@@ -76,7 +80,7 @@ export class CandidaturaService extends BaseService<any> {
     await this.renumerarFila(vagaId);
     await this.atualizarStatusVaga(vagaId);
     const freelaId = cand.freela_id || cand.usuario_id;
-    try { await this.notificacaoService.criarNotificacao({ usuario_id: freelaId, tipo: 'SELECAO_CHAMADA_FILA', titulo: `Sua vez! Vaga #${vagaId}`, mensagem: `Uma vaga abriu em "${vaga.titulo}". Você foi chamado da lista de espera — confirme em até ${prazoHoras}h.`, vaga_id: vagaId, candidatura_id: cand.id }); } catch {}
+    try { await this.notificacaoService.criarNotificacao({ usuario_id: freelaId, tipo: 'SELECAO_CHAMADA_FILA', titulo: `Sua vez! Vaga #${vagaId}`, mensagem: `Uma vaga abriu em "${vaga.titulo}". Você foi chamado da lista de espera — confirme em até ${prazoHoras}h.`, vaga_id: vagaId, candidatura_id: cand.id }); } catch (e: any) { registrarErro('CandidaturaService', e); }
     return { ...cand, status: 'SELECIONADO', prazo_resposta_ate: prazo, posicao_lista_espera: null };
   }
   private async buscarCandidatura(id: number): Promise<any> {
@@ -86,7 +90,7 @@ export class CandidaturaService extends BaseService<any> {
   }
 
   async listarPorVaga(vagaId: number): Promise<any[]> {
-    try { await this.processarPrazos(); } catch {}
+    try { await this.processarPrazos(); } catch (e: any) { registrarErro('CandidaturaService', e); }
     const r = this.getRepo() as CandidaturaRepository;
     if (typeof (r as any).listarPorVaga === 'function') return await (r as any).listarPorVaga(vagaId);
     return await this.listarPorCampo('vaga_id', vagaId);
@@ -108,7 +112,7 @@ export class CandidaturaService extends BaseService<any> {
   // Candidaturas do freela ENRIQUECIDAS com os dados da vaga (titulo, datas,
   // valores) + calculo (valor a receber, mesma regra de exibicao do mural).
   async listarMinhas(freelaId: number): Promise<any[]> {
-    try { await this.processarPrazos(); } catch {}
+    try { await this.processarPrazos(); } catch (e: any) { registrarErro('CandidaturaService', e); }
     const pool = BaseRepository.getPool() as any;
     const r = await pool.query(
       `SELECT c.*, v.titulo as vaga_titulo, f.nome as vaga_funcao, v.descricao as vaga_descricao,
@@ -196,7 +200,7 @@ export class CandidaturaService extends BaseService<any> {
     for (const c of validas) {
       await pool.query(`UPDATE candidaturas SET status = 'SELECIONADO', posicao_lista_espera = NULL, prazo_resposta_ate = $2 WHERE id = $1`, [c.id, prazo]);
       const freelaId = c.freela_id || c.usuario_id;
-      try { await this.notificacaoService.criarNotificacao({ usuario_id: freelaId, tipo: 'CANDIDATURA_SELECIONADA', titulo: `Você foi selecionado! Vaga #${vagaId}`, mensagem: `Você foi selecionado para "${vaga.titulo}". Confirme em até ${prazoHoras}h — sem confirmar, a vaga chama o próximo da fila.`, vaga_id: vagaId, candidatura_id: c.id }); } catch {}
+      try { await this.notificacaoService.criarNotificacao({ usuario_id: freelaId, tipo: 'CANDIDATURA_SELECIONADA', titulo: `Você foi selecionado! Vaga #${vagaId}`, mensagem: `Você foi selecionado para "${vaga.titulo}". Confirme em até ${prazoHoras}h — sem confirmar, a vaga chama o próximo da fila.`, vaga_id: vagaId, candidatura_id: c.id }); } catch (e: any) { registrarErro('CandidaturaService', e); }
       selecionados.push({ ...c, status: 'SELECIONADO', prazo_resposta_ate: prazo, posicao_lista_espera: null });
     }
     // Quem ficou PENDENTE vira fila (ordem de chegada).
@@ -225,9 +229,9 @@ export class CandidaturaService extends BaseService<any> {
     await pool.query(`UPDATE candidaturas SET status = 'ACEITA', prazo_resposta_ate = NULL WHERE id = $1`, [candidaturaId]);
     const trampoSvc = new TrampoService();
     const trampo: any = await trampoSvc.criar({ vaga_id: cand.vaga_id, freela_id: dono, contratante_id: cand.contratante_id });
-    try { await new TrampoTurnoService().gerarParaTrampo(Number(trampo.id ?? trampo.trampoId), Number(dono)); } catch {}
+    try { await new TrampoTurnoService().gerarParaTrampo(Number(trampo.id ?? trampo.trampoId), Number(dono)); } catch (e: any) { registrarErro('CandidaturaService', e); }
     await this.atualizarStatusVaga(cand.vaga_id);
-    try { await this.notificacaoService.criarNotificacao({ usuario_id: cand.contratante_id, tipo: 'SELECAO_CONFIRMADA', titulo: `Seleção confirmada — Vaga #${cand.vaga_id}`, mensagem: `O freela confirmou a seleção em "${cand.vaga_titulo}". O trampo foi gerado.`, vaga_id: cand.vaga_id, candidatura_id: candidaturaId }); } catch {}
+    try { await this.notificacaoService.criarNotificacao({ usuario_id: cand.contratante_id, tipo: 'SELECAO_CONFIRMADA', titulo: `Seleção confirmada — Vaga #${cand.vaga_id}`, mensagem: `O freela confirmou a seleção em "${cand.vaga_titulo}". O trampo foi gerado.`, vaga_id: cand.vaga_id, candidatura_id: candidaturaId }); } catch (e: any) { registrarErro('CandidaturaService', e); }
     return { ...cand, status: 'ACEITA', prazo_resposta_ate: null, trampo_id: trampo.id ?? trampo.trampoId };
   }
 
@@ -242,7 +246,7 @@ export class CandidaturaService extends BaseService<any> {
     await pool.query(`UPDATE candidaturas SET status = 'RECUSADA', motivo_recusa = $2, prazo_resposta_ate = NULL WHERE id = $1`, [candidaturaId, String(motivo || 'Recusada pelo freela').slice(0, 100)]);
     const chamado = await this.promoverProximo(cand.vaga_id);
     await this.atualizarStatusVaga(cand.vaga_id);
-    try { await this.notificacaoService.criarNotificacao({ usuario_id: cand.contratante_id, tipo: 'SELECAO_RECUSADA', titulo: `Seleção recusada — Vaga #${cand.vaga_id}`, mensagem: `O freela recusou a seleção em "${cand.vaga_titulo}".${chamado ? ' O próximo da fila foi chamado.' : ''}`, vaga_id: cand.vaga_id, candidatura_id: candidaturaId }); } catch {}
+    try { await this.notificacaoService.criarNotificacao({ usuario_id: cand.contratante_id, tipo: 'SELECAO_RECUSADA', titulo: `Seleção recusada — Vaga #${cand.vaga_id}`, mensagem: `O freela recusou a seleção em "${cand.vaga_titulo}".${chamado ? ' O próximo da fila foi chamado.' : ''}`, vaga_id: cand.vaga_id, candidatura_id: candidaturaId }); } catch (e: any) { registrarErro('CandidaturaService', e); }
     return { candidatura_id: candidaturaId, vaga_id: cand.vaga_id, novo_status: 'RECUSADA', chamado_da_fila: chamado ? { candidatura_id: chamado.id, prazo_resposta_ate: chamado.prazo_resposta_ate } : null };
   }
 
@@ -253,7 +257,7 @@ export class CandidaturaService extends BaseService<any> {
     const chamado = await this.promoverProximo(cand.vaga_id);
     await this.atualizarStatusVaga(cand.vaga_id);
     const freelaId = cand.freela_id || cand.usuario_id;
-    try { await this.notificacaoService.criarNotificacao({ usuario_id: freelaId, tipo: 'SELECAO_EXPIRADA', titulo: `Prazo expirado — Vaga #${cand.vaga_id}`, mensagem: `O prazo para confirmar a seleção em "${cand.vaga_titulo}" expirou.`, vaga_id: cand.vaga_id, candidatura_id: cand.id }); } catch {}
+    try { await this.notificacaoService.criarNotificacao({ usuario_id: freelaId, tipo: 'SELECAO_EXPIRADA', titulo: `Prazo expirado — Vaga #${cand.vaga_id}`, mensagem: `O prazo para confirmar a seleção em "${cand.vaga_titulo}" expirou.`, vaga_id: cand.vaga_id, candidatura_id: cand.id }); } catch (e: any) { registrarErro('CandidaturaService', e); }
     return chamado;
   }
 
@@ -302,7 +306,7 @@ export class CandidaturaService extends BaseService<any> {
     try {
       trampo = await trampoSvc.criar({ vaga_id: cand.vaga_id, freela_id: cand.freela_id || cand.usuario_id, contratante_id: cand.contratante_id });
       await new TrampoTurnoService().gerarParaTrampo(Number(trampo.id ?? trampo.trampoId), Number(cand.freela_id || cand.usuario_id));
-    } catch {}
+    } catch (e: any) { registrarErro('CandidaturaService', e); }
     await this.notificacaoService.criarNotificacao({ usuario_id: cand.freela_id || cand.usuario_id, tipo: 'CANDIDATURA_ACEITA', titulo: `Sua candidatura foi aceita - Vaga #${cand.vaga_id}`, mensagem: `Você foi aceito para "${cand.titulo}". Aguarde o início.`, vaga_id: cand.vaga_id, candidatura_id: candidaturaId });
     return { ...cand, status: 'ACEITA', trampo_id: trampo?.id ?? trampo?.trampoId ?? null };
   }
@@ -322,7 +326,7 @@ export class CandidaturaService extends BaseService<any> {
     if (status === 'SELECIONADO') chamado = await this.promoverProximo(cand.vaga_id);
     await this.atualizarStatusVaga(cand.vaga_id);
     const freelaId = cand.freela_id || cand.usuario_id;
-    try { await this.notificacaoService.criarNotificacao({ usuario_id: freelaId, tipo: 'CANDIDATURA_RECUSADA', titulo: `Candidatura não aprovada — Vaga #${cand.vaga_id}`, mensagem: `Sua candidatura em "${cand.vaga_titulo}" não foi aprovada.${motivo ? ` Motivo: ${motivo}` : ''}`, vaga_id: cand.vaga_id, candidatura_id: candidaturaId }); } catch {}
+    try { await this.notificacaoService.criarNotificacao({ usuario_id: freelaId, tipo: 'CANDIDATURA_RECUSADA', titulo: `Candidatura não aprovada — Vaga #${cand.vaga_id}`, mensagem: `Sua candidatura em "${cand.vaga_titulo}" não foi aprovada.${motivo ? ` Motivo: ${motivo}` : ''}`, vaga_id: cand.vaga_id, candidatura_id: candidaturaId }); } catch (e: any) { registrarErro('CandidaturaService', e); }
     return { candidatura_id: candidaturaId, vaga_id: cand.vaga_id, novo_status: 'RECUSADA', chamado_da_fila: chamado ? chamado.id : null };
   }
 

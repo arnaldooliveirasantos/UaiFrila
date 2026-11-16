@@ -102,18 +102,44 @@ export function PainelMural({ usuario, setTelaAtiva }: { usuario?: any; setTelaA
   // parser do Babel quebrava com "Adjacent JSX elements must be wrapped".
   // Com turnos: uma linha por dia (dia + horários com valor). Sem turnos:
   // cai para a data/hora única da vaga (compatibilidade com vagas antigas).
+  // Normaliza a data do turno para YYYY-MM-DD, seja ela string, Date ou ISO.
+  // Sem isso, "Thu Nov 19 ..." vira NaN e o card mostra "Invalid Date".
+  const dataTurnoISO = (v: any): string => {
+    if (!v) return '';
+    if (v instanceof Date) return v.toISOString().slice(0, 10);
+    const s = String(v);
+    const m = s.match(/^\d{4}-\d{2}-\d{2}/);
+    if (m) return m[0];
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+    return '';
+  };
   const diasHorarios = (vaga: any, dt: Date | null, hora: string) => {
-    if (Array.isArray(vaga.turnos) && vaga.turnos.length) {
+    // Aceita turnos em snake_case (API), camelCase ou string JSON.
+    let turnos: any[] = [];
+    const bruto = vaga.turnos ?? vaga.vaga_turnos;
+    if (Array.isArray(bruto)) turnos = bruto;
+    else if (typeof bruto === 'string') { try { const p = JSON.parse(bruto); if (Array.isArray(p)) turnos = p; } catch {} }
+    if (turnos.length) {
       const g: Record<string, any[]> = {};
-      for (const x of vaga.turnos) {
-        const d = String(x.data).slice(0, 10);
-        (g[d] = g[d] || []).push(x);
+      for (const x of turnos) {
+        const d = dataTurnoISO(x.data ?? x.dia);
+        if (!d) continue;
+        if (d) (g[d] = g[d] || []).push(x);
       }
-      return Object.keys(g).sort().map((d) => {
-        const [y, m, dd] = d.split('-').map(Number);
-        const dt2 = new Date(y, m - 1, dd);
-        return (<div key={d} className="font-black capitalize">{dt2.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })} — {g[d].map((x: any) => `${String(x.hora_inicio).slice(0, 5)}–${String(x.hora_fim).slice(0, 5)} (R$ ${(Number(x.valor_servico) || 0).toFixed(2)})`).join(' • ')}</div>);
-      });
+      const dias = Object.keys(g).sort();
+      if (dias.length) {
+        return dias.map((d) => {
+          const [y, m, dd] = d.split('-').map(Number);
+          const dt2 = new Date(y, m - 1, dd);
+          return (<div key={d} className="font-black capitalize">{dt2.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })} — {g[d].map((x: any) => `${String(x.hora_inicio ?? x.horaInicio ?? x.inicio ?? '').slice(0, 5)}–${String(x.hora_fim ?? x.horaFim ?? x.fim ?? '').slice(0, 5)} (R$ ${(Number(x.valor_servico ?? x.valorServico ?? x.valor ?? 0) || 0).toFixed(2)})`).join(' • ')}</div>);
+        });
+      }
+    }
+    // Sem turnos: fallback mostra o INTERVALO (antes mostrava so o 1o dia).
+    const fim = vaga.data_fim ? new Date(vaga.data_fim) : null;
+    if (dt && fim && dt.toDateString() !== fim.toDateString()) {
+      return (<div><div className="font-black">{dt.toLocaleDateString('pt-BR')} — {fim.toLocaleDateString('pt-BR')}</div>{hora && <div className={styles.typography.caption}>a partir das {hora}</div>}</div>);
     }
     return (<div><div className="font-black">{dt ? dt.toLocaleDateString('pt-BR') : '—'}</div>{hora && <div className={styles.typography.caption}>às {hora}</div>}</div>);
   };

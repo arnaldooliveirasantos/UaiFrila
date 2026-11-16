@@ -193,6 +193,9 @@ CREATE TABLE IF NOT EXISTS enderecos (
   longitude DECIMAL(11,8),
   apelido VARCHAR(100),
   ativo BOOLEAN DEFAULT false,
+  geocodificacao_tentativas INTEGER NOT NULL DEFAULT 0,
+  geocodificacao_ultima_tentativa TIMESTAMP NULL,
+  geocodificacao_erro VARCHAR(100) NULL,
   criado_em TIMESTAMP DEFAULT NOW(),
   atualizado_em TIMESTAMP DEFAULT NOW()
 );
@@ -952,12 +955,15 @@ INSERT INTO variaveis_sistema (chave, valor, valor_numerico, tipo, descricao, ca
 ('TAXA_CARTAO_PERCENTUAL', '4', 4.00, 'number', 'Taxa Cartao 4% sobre subtotal servico', 'financeiro', true),
 ('COMISSAO_APLICATIVO', '10', 10.00, 'number', 'Comissao aplicativo 10% sobre subtotal', 'financeiro', true),
 ('VAGA_ANTECEDENCIA_MINUTOS', '30', 30.00, 'number', 'Antecedencia minima para criar vaga em minutos', 'vagas', true),
-('PRAZO_CANCELAMENTO_CANDIDATURA_HORAS', '24', 24, 'number',  'Prazo mínimo antes do início para freela aceito cancelar candidatura com motivo + notificação ao contratante. Se faltar menos, botão trava.', 'candidatura', true),
-('PRAZO_CANCELAMENTO_VAGA_HORAS', '24', 24, 'number', 'Prazo mínimo antes do início para contratante cancelar vaga com freela aceito.', 'vagas', true),
+--('PRAZO_CANCELAMENTO_CANDIDATURA_HORAS', '24', 24, 'number',  'Prazo mínimo antes do início para freela aceito cancelar candidatura com motivo + notificação ao contratante. Se faltar menos, botão trava.', 'candidatura', true),
+('PRAZO_CANCELAMENTO_CANDIDATURA_MINUTOS', '1440', 1440, 'number',  'Prazo mínimo antes do início para freela aceito cancelar candidatura com motivo + notificação ao contratante. Se faltar menos, botão trava.', 'candidatura', true),
+--('PRAZO_CANCELAMENTO_VAGA_HORAS', '24', 24, 'number', 'Prazo mínimo antes do início para contratante cancelar vaga com freela aceito.', 'vagas', true),
+('PRAZO_CANCELAMENTO_VAGA_MINUTOS', '1440', 1440, 'number', 'Prazo mínimo antes do início para contratante cancelar vaga com freela aceito.', 'vagas', true),
 ('MOTIVO_CANCELAMENTO_MIN_CARACTERES', '10', 10, 'number',  'Tamanho mínimo do motivo de cancelamento quando já aceito.', 'candidatura', true),
 ('NOTIFICAR_CANCELAMENTO', 'true', 1, 'boolean', 'Se true, envia notificação ao contratante/freela ao cancelar candidatura aceita.', 'candidatura', true),
 ('CAMINHO_LOG_API', '/var/logs/uaifrila/api', NULL, 'string', 'Diretorio dos logs em arquivo da uaifrila-api (um arquivo por dia). Dev Windows ex.: C:\logs\uaifrila\api', 'log', true),
 ('CAMINHO_LOG_EMAIL_WORKER', '/var/logs/uaifrila/email-worker', NULL, 'string', 'Diretorio dos logs em arquivo do uaifrila-email-worker (um arquivo por dia). Dev Windows ex.: C:\logs\uaifrila\email-worker', 'log', true),
+('CAMINHO_LOG_GEOCODIFICACAO_WORKER', '/var/logs/uaifrila/geocodificacao-worker', NULL, 'string', 'Diretorio dos logs em arquivo do uaifrila-geocodificacao-worker (um arquivo por dia). Dev Windows ex.: C:\logs\uaifrila\geocodificacao-worker', 'log', true),
 ('PRAZO_CONFIRMACAO_SELECAO_HORAS', '24', 24, 'number', 'Prazo em horas para o freela confirmar a seleção. Sem confirmar, a vaga chama o próximo da lista de espera.', 'CANDIDATURA', true),
  ('LIMITE_CANDIDATURAS_PENDENTES', '5', 5, 'number', 'Máximo de candidaturas PENDENTES por freela ao mesmo tempo. Evita freela que se candidata em 30 vagas e some.', 'CANDIDATURA', true)
 ON CONFLICT (chave) 

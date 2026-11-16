@@ -12,7 +12,7 @@ import { CandidaturaRepository } from '../repositories/CandidaturaRepository';
 //  validar tipo=cadastro  -> SÓ ALTERA status para ATIVO. Nunca cria usuario.
 //  cancelar               -> status CANCELADO + anonimiza email/CPF + apaga endereco + cancela candidaturas.
 // Toda a escrita acontece dentro da transacao unica do TransactionMiddleware — NENHUM BEGIN/COMMIT aqui.
-const JWT_SECRET = process.env.JWT_SECRET || '';
+const JWT_SECRET = process.env.JWT_SECRET; if (!JWT_SECRET) throw new Error('JWT_SECRET nao definido no .env');
 function erro(message: string, status = 400): any { const e: any = new Error(message); e.status = status; return e; }
 function gerarToken(usuario: any, tipoChave: string, nivel: number, tipoUsuarioId: number) {
   return jwt.sign({ id: usuario.id, email: usuario.email, tipoUsuarioId, tipoChave, tipo_chave: tipoChave, nivelPermissao: nivel, nivel_permissao: nivel, isAdmin: nivel >= 80 || ['ADMIN', 'SUPER_ADMIN'].includes(String(tipoChave).toUpperCase()) }, JWT_SECRET, { expiresIn: '7d' });

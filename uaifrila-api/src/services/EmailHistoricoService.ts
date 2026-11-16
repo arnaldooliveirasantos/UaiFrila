@@ -1,6 +1,8 @@
+import { BaseService } from './BaseService';
 import { EmailHistoricoRepository } from '../repositories/EmailHistoricoRepository';
 import { EmailHistoricoModel } from '../models/EmailHistoricoModel';
-export class EmailHistoricoService {
+export class EmailHistoricoService extends BaseService {
+  constructor() { super(new EmailHistoricoRepository()); }
   private repo = new EmailHistoricoRepository();
   async listar(): Promise<EmailHistoricoModel[]> { return await this.repo.buscarTodos(); }
   async listarPorUsuario(usuarioId: number): Promise<EmailHistoricoModel[]> { return await this.repo.listarPorUsuario(usuarioId); }

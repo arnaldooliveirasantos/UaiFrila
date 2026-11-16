@@ -1,5 +1,6 @@
 import { BaseRepository } from '../repositories/BaseRepository';
 import { BaseModel } from '../models/BaseModel';
+import { registrarErro } from '../utils/registrarErro';
 
 // BaseService ÚNICO - unifica as 2 versões que estavam misturadas:
 // - versão antiga: this.repo, constructor(repo), sem handleError/validateRequired
@@ -26,7 +27,7 @@ export abstract class BaseService<T extends BaseModel = any> {
   }
 
   protected handleError(e: any, context: string): never {
-    console.error(`[${context}] Erro:`, e?.message || e);
+    registrarErro(context, e);
     if (e?.message?.includes('não encontrado') || e?.message?.includes('obrigatório') || e?.message?.includes('já cadastrado') || e?.message?.includes('inválido') || e?.message?.includes('expirado')) {
       throw e;
     }

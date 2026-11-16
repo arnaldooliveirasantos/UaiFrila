@@ -1,10 +1,11 @@
 import 'reflect-metadata';
 import express from 'express';
 import cors from 'cors';
-import { Pool } from 'pg';
-import jwt from 'jsonwebtoken';
+import { pool } from './config/Database';
 import { BaseRepository } from './repositories/BaseRepository';
-
+import { authMiddleware, optionalAuthMiddleware } from './middlewares/AuthMiddleware';
+import { transactionMiddleware } from './middlewares/TransactionMiddleware';
+import { loggerMiddleware } from './middlewares/LoggerMiddleware';
 import { AuthController } from './controllers/AuthController';
 import { SolicitarCodigoController } from './controllers/SolicitarCodigoController';
 import { ValidarCodigoController } from './controllers/ValidarCodigoController';
@@ -34,59 +35,18 @@ import { ConversaController } from './controllers/ConversaController';
 import { MensagemController } from './controllers/MensagemController';
 import { NotificacaoController } from './controllers/NotificacaoController';
 import { VagaTemplateController } from './controllers/VagaTemplateController';
-
-
 import { EnderecoVagaController } from './controllers/EnderecoVagaController';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'uaifrila-secret-2024';
-let globalPool: Pool | null = null;
-
-export function setAuthPool(pool: Pool) { globalPool = pool; }
-
-export function authMiddleware(req: any, res: any, next: any) {
-  const header = req.headers.authorization;
-  if (!header) return res.status(401).json({ success: false, message: 'Token não fornecido' });
-  const token = header.replace('Bearer ', '');
-  try {
-    const decoded: any = jwt.verify(token, JWT_SECRET);
-    if (globalPool) {
-      globalPool.query(`SELECT u.id, u.email, u.tipo_usuario_id, tu.chave as tipo_chave, tu.nivel_permissao FROM usuarios u LEFT JOIN tipos_usuario tu ON tu.id = u.tipo_usuario_id WHERE u.id = $1 LIMIT 1`, [decoded.id]).then((result: any) => {
-        if (result.rows && result.rows[0]) {
-          const row = result.rows[0];
-          req.usuario = { id: row.id, email: row.email, tipoUsuarioId: row.tipo_usuario_id, tipoChave: row.tipo_chave, tipo_chave: row.tipo_chave, nivelPermissao: row.nivel_permissao, nivel_permissao: row.nivel_permissao, isAdmin: (row.nivel_permissao || 0) >= 80 || ['ADMIN','SUPER_ADMIN'].includes((row.tipo_chave || '').toUpperCase()) };
-          next();
-        } else {
-          return res.status(401).json({ success: false, message: 'Usuario nao encontrado' });
-        }
-      }).catch(() => res.status(401).json({ success: false, message: 'Falha ao validar usuario' }));
-      return;
-    }
-    return res.status(401).json({ success: false, message: 'Token invalido' });
-  } catch { return res.status(401).json({ success: false, message: 'Token inválido' }); }
-}
-
-export function optionalAuthMiddleware(req: any, _res: any, next: any) {
-  const header = req.headers.authorization;
-  if (header) { try { const token = header.replace('Bearer ', ''); const decoded: any = jwt.verify(token, JWT_SECRET); req.usuario = decoded; } catch {} }
-  next();
-}
 
 export class App {
   public expressApp: express.Application;
-  private pool: Pool;
   constructor() {
     this.expressApp = express();
-    const databaseUrl = process.env.DATABASE_URL;
-    if (databaseUrl) {
-      this.pool = new Pool({ connectionString: databaseUrl, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
-    } else {
-      this.pool = new Pool({ user: process.env.DB_USER || 'postgres', password: process.env.DB_PASSWORD || 'postgres', host: process.env.DB_HOST || 'localhost', port: parseInt(process.env.DB_PORT || '5432'), database: process.env.DB_NAME || 'uaifrila' });
-    }
-    BaseRepository.setPool(this.pool);
-    setAuthPool(this.pool);
-    globalPool = this.pool;
+    BaseRepository.setPool(pool);
     this.expressApp.use(cors());
     this.expressApp.use(express.json({ limit: '10mb' }));
+    this.expressApp.use(loggerMiddleware);
+    // Transacao unica por request (BEGIN/COMMIT/ROLLBACK). Nenhum controller/service/repository abre transacao.
+    this.expressApp.use('/api', transactionMiddleware(pool));
     this.routes();
   }
   public getApp() { return this.expressApp; }
@@ -105,11 +65,11 @@ export class App {
     const trampoCtrl: any = new TrampoController();
     const transacaoCtrl: any = new TransacaoController();
     const avaliacaoCtrl: any = new AvaliacaoController();
-    const paisCtrl: any = PaisController ? new PaisController() : null;
-    const tipoUsuarioCtrl: any = TipoUsuarioController ? new TipoUsuarioController() : null;
-    const statusUsuarioCtrl: any = StatusUsuarioController ? new StatusUsuarioController() : null;
-    const funcaoCtrl: any = FuncaoController ? new FuncaoController() : null;
-    const tipoEnderecoCtrl: any = TipoEnderecoController ? new TipoEnderecoController() : null;
+    const paisCtrl: any = new PaisController();
+    const tipoUsuarioCtrl: any = new TipoUsuarioController();
+    const statusUsuarioCtrl: any = new StatusUsuarioController();
+    const funcaoCtrl: any = new FuncaoController();
+    const tipoEnderecoCtrl: any = new TipoEnderecoController();
     const variavelCtrl: any = new VariavelSistemaController();
     const expansaoCtrl: any = new ExpansaoCidadeController();
     const permissaoCtrl: any = new PermissaoController();
@@ -133,9 +93,9 @@ export class App {
     this.expressApp.post('/api/auth/validar-codigo', (req, res) => validarCtrl.validarCodigo(req, res));
     this.expressApp.post('/api/auth/reenviar-codigo', (req, res) => solicitarCtrl.reenviarCodigo(req, res));
 
-    if (paisCtrl) this.expressApp.get('/api/paises', (req, res) => paisCtrl.listar(req, res));
-    if (funcaoCtrl) this.expressApp.get('/api/funcoes', (req, res) => funcaoCtrl.listar(req, res));
-    if (tipoEnderecoCtrl) this.expressApp.get('/api/tipos-endereco', (req, res) => tipoEnderecoCtrl.listar(req, res));
+    this.expressApp.get('/api/paises', (req, res) => paisCtrl.listar(req, res));
+    this.expressApp.get('/api/funcoes', (req, res) => funcaoCtrl.listar(req, res));
+    this.expressApp.get('/api/tipos-endereco', (req, res) => tipoEnderecoCtrl.listar(req, res));
     this.expressApp.get('/api/estados', (req, res) => estadoCtrl.listar(req, res));
     this.expressApp.get('/api/estados/ativos', (req, res) => estadoCtrl.listarAtivos(req, res));
     this.expressApp.get('/api/estados/:sigla', (req, res) => estadoCtrl.buscarPorSigla(req, res));
@@ -156,7 +116,7 @@ export class App {
     // Resultado: GET /tipos-usuario -> 401, hook caía no fallback hardcoded (FREELA/CONTRATANTE/DUAL).
     // AGORA: GET público antes do middleware. POST continua protegido (depois do middleware).
     // Express casa a PRIMEIRA rota que bate, então esse GET público ganha do GET protegido de baixo.
-    if (tipoUsuarioCtrl) this.expressApp.get('/api/tipos-usuario', (req, res) => tipoUsuarioCtrl.listar(req, res));
+    this.expressApp.get('/api/tipos-usuario', (req, res) => tipoUsuarioCtrl.listar(req, res));
 
     this.expressApp.use('/api', authMiddleware);
 
@@ -181,8 +141,7 @@ export class App {
 
     this.expressApp.get('/api/enderecos/meus', (req, res) => enderecoCtrl.meusEnderecos(req, res));
     this.expressApp.get('/api/enderecos/ativo', (req: any, res: any) => {
-      if (enderecoCtrl.buscarAtivo) return enderecoCtrl.buscarAtivo(req, res);
-      return enderecoCtrl.meusEnderecos(req, res);
+      return enderecoCtrl.buscarAtivo(req, res);
     });
     this.expressApp.get('/api/enderecos/usuario/:usuarioId', (req, res) => enderecoCtrl.listarPorUsuario(req, res));
     this.expressApp.get('/api/enderecos/todos', (req, res) => enderecoCtrl.listarTodos(req, res));
@@ -203,10 +162,9 @@ export class App {
     // VAGAS - ORDEM FIXA
     this.expressApp.get('/api/vagas/abertas', (req, res) => vagaCtrl.listar(req, res));
     this.expressApp.get('/api/vagas/minhas', (req, res) => vagaCtrl.minhasVagas(req, res));
-    this.expressApp.get('/api/vagas/minhas-publicadas', (req, res) => vagaCtrl.minhasPublicadas ? vagaCtrl.minhasPublicadas(req, res) : vagaCtrl.minhasVagas(req, res));
     this.expressApp.get('/api/vagas/todas', (req, res) => vagaCtrl.listarTodas(req, res));
     this.expressApp.get('/api/vagas/contratante/:contratanteId', (req, res) => vagaCtrl.listarPorContratante(req, res));
-    this.expressApp.post('/api/vagas/calcular', (req, res) => vagaCtrl.calcular ? vagaCtrl.calcular(req, res) : res.json({ success: true, calculo: {} }));
+    this.expressApp.post('/api/vagas/calcular', (req, res) => vagaCtrl.calcular(req, res));
     this.expressApp.post('/api/vagas/criar', (req, res) => vagaCtrl.criar(req, res));
     this.expressApp.post('/api/vagas', (req, res) => vagaCtrl.criar(req, res));
     // Turnos da vaga (agenda: dias + periodos + valor por turno)
@@ -261,11 +219,9 @@ export class App {
     this.expressApp.post('/api/avaliacoes', (req, res) => avaliacaoCtrl.criar(req, res));
     this.expressApp.delete('/api/avaliacoes/:id', (req, res) => avaliacaoCtrl.deletar(req, res));
 
-    if (tipoUsuarioCtrl) {
-      this.expressApp.post('/api/tipos-usuario', (req, res) => tipoUsuarioCtrl.criar(req, res));
-    }
-    if (statusUsuarioCtrl) this.expressApp.get('/api/status-usuario', (req, res) => statusUsuarioCtrl.listar(req, res));
-    if (tipoEnderecoCtrl) this.expressApp.get('/api/tipos-endereco/todos', (req, res) => tipoEnderecoCtrl.listarTodos(req, res));
+    this.expressApp.post('/api/tipos-usuario', (req, res) => tipoUsuarioCtrl.criar(req, res));
+    this.expressApp.get('/api/status-usuario', (req, res) => statusUsuarioCtrl.listar(req, res));
+    this.expressApp.get('/api/tipos-endereco/todos', (req, res) => tipoEnderecoCtrl.listarTodos(req, res));
 
     this.expressApp.get('/api/variaveis', (req, res) => variavelCtrl.listar(req, res));
     this.expressApp.get('/api/variaveis/categoria/:categoria', (req, res) => variavelCtrl.listarPorCategoria(req, res));

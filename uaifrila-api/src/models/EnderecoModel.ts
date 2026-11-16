@@ -51,6 +51,16 @@ export class EnderecoModel extends BaseModel {
   @Column({ name: 'atualizado_em', type: 'timestamp', description: 'Data atualização' })
   atualizadoEm?: Date;
 
+  // Geocodificacao: 0 tentativas + NULL = nunca tentado. Worker incrementa a cada tentativa.
+  @Column({ name: 'geocodificacao_tentativas', type: 'integer', description: 'Quantas vezes o worker tentou geocodificar' })
+  geocodificacaoTentativas: number = 0;
+
+  @Column({ name: 'geocodificacao_ultima_tentativa', type: 'timestamp', description: 'Ultima tentativa do worker' })
+  geocodificacaoUltimaTentativa?: Date;
+
+  @Column({ name: 'geocodificacao_erro', type: 'string', description: 'Ultimo motivo de falha (SEM_RESULTADO, NOMINATIM_HTTP_*, FALHA_REDE_TIMEOUT...)' })
+  geocodificacaoErro?: string;
+
   @BelongsTo(() => UsuarioModel, 'usuario_id', { description: 'Usuário dono' })
   usuario?: UsuarioModel;
 

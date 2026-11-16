@@ -5,6 +5,7 @@ import { VagaModel } from '../models/VagaModel';
 import { BaseRepository } from '../repositories/BaseRepository';
 import { VariavelSistemaService } from './VariavelSistemaService';
 import { EnderecoVagaService } from './EnderecoVagaService';
+import { VagaTurnoService } from './VagaTurnoService';
 
 // ATENÇÃO: NÃO use nome 'variavelService' aqui - BaseService antigo tinha 'protected variavelService'
 // Use 'variavelSvc' para não dar TS2415 (private vs protected)
@@ -120,6 +121,19 @@ export class VagaService extends BaseService<VagaModel> {
     } catch (e: any) { this.handleError(e, 'VagaService.calcular'); }
   }
 
+  // BUG CORRIGIDO (Patch 4): o pg devolve DATE como objeto Date, nao string.
+  // String(new Date(...)) = "Thu Nov 19 2026 ..." -> .slice(0,10) = "Thu Nov 19"
+  // -> split('-') = NaN -> "Invalid Date" no mural. Sempre normaliza para YYYY-MM-DD em UTC.
+  private dataISO(v: any): string {
+    if (v instanceof Date) return v.toISOString().slice(0, 10);
+    const s = String(v ?? '');
+    const m = s.match(/^\d{4}-\d{2}-\d{2}/);
+    if (m) return m[0];
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+    return s;
+  }
+
   async listarMuralParaUsuario(usuarioId: number): Promise<any[]> {
     const pool = BaseRepository.getPool() as any;
     const cfg = await this.variavelSvc.getConfigCancelamento();
@@ -138,13 +152,30 @@ export class VagaService extends BaseService<VagaModel> {
       // usuarioId NULL (visitante) deixa o ramo do dono inerte: contratante_id = NULL nunca é true.
       const r = await pool.query(`SELECT v.*, f.nome as funcao, sv.chave as status_chave, sv.nome_exibicao as status_nome, sv.cor_hex as status_cor, sv.permite_editar, sv.permite_cancelar, sv.permite_candidatar FROM vagas v LEFT JOIN funcoes f ON f.id = v.funcao_id JOIN status_vaga sv ON sv.id = v.status_vaga_id WHERE ((sv.chave IN ('AGUARDANDO_CANDIDATURA','AGUARDANDO_ACEITE') AND (v.data_inicio IS NULL OR DATE(v.data_inicio) >= CURRENT_DATE)) OR (v.contratante_id = $1 AND sv.chave <> 'CANCELADA')) ORDER BY v.criado_em DESC`, [usuarioId || null]);
       vagas = r.rows;
-    } catch { vagas = await this.listarAbertas(); }
+    } catch (e: any) { console.error('[VagaService.listarMuralParaUsuario] falha na query do mural:', e?.message || e); vagas = await this.listarAbertas(); }
 
     // A distancia NAO e calculada aqui: o front calcula (Haversine) a partir das
     // coordenadas do endereco ativo do usuario e do endereco da vaga.
     const minhasCandidaturas = new Map<number, any>();
     if (pool && usuarioId) {
       try { const rc = await pool.query(`SELECT * FROM candidaturas WHERE (freela_id=$1 OR usuario_id=$1) AND status IN ('PENDENTE','ACEITA','EM_ANALISE')`, [usuarioId]); rc.rows.forEach((c: any) => minhasCandidaturas.set(Number(c.vaga_id), c)); } catch {}
+    }
+
+    // BUG CORRIGIDO: listarMuralParaUsuario NUNCA devolvia `turnos`.
+    // O front (PainelMural.diasHorarios) lia vaga.turnos e, sem ele, caia para o
+    // fallback de data_inicio/data_fim (1 unico dia) - por isso "Dias e horarios"
+    // parou de mostrar os varios dias. Agora anexa os turnos em 1 query em lote.
+    const turnosPorVaga = new Map<number, any[]>();
+    if (pool && vagas.length) {
+      try {
+        const ids = vagas.map((x: any) => Number(x.id)).filter(Boolean);
+        const rt = await pool.query(`SELECT vaga_id, data, hora_inicio, hora_fim, valor_servico, ordem, status FROM vaga_turnos WHERE vaga_id = ANY($1::int[]) ORDER BY vaga_id, data, hora_inicio`, [ids]);
+        for (const row of rt.rows || []) {
+          const arr = turnosPorVaga.get(Number(row.vaga_id)) || [];
+          arr.push({ id: row.id, vaga_id: Number(row.vaga_id), data: this.dataISO(row.data), hora_inicio: String(row.hora_inicio).slice(0, 5), hora_fim: String(row.hora_fim).slice(0, 5), valor_servico: Number(row.valor_servico || 0), ordem: row.ordem, status: row.status });
+          turnosPorVaga.set(Number(row.vaga_id), arr);
+        }
+      } catch (e: any) { console.error('[VagaService.listarMuralParaUsuario] falha ao carregar turnos do mural:', e?.message || e); throw e; }
     }
 
     const result: any[] = [];
@@ -176,6 +207,7 @@ export class VagaService extends BaseService<VagaModel> {
         permite_cancelar: v.permite_cancelar ?? !['EM_ANDAMENTO','FINALIZADA','CANCELADA','FECHADA'].includes(statusChave),
         permite_candidatar: v.permite_candidatar ?? true,
         data_inicio: v.data_inicio, data_fim: v.data_fim,
+        turnos: turnosPorVaga.get(Number(v.id)) || [],
         valor_servico: v.valor_servico, valor_transporte: v.valor_transporte,
         calculo,
         bairro: enderecoVaga?.bairro, cidade_nome: enderecoVaga?.cidade_nome, cidade_estado: enderecoVaga?.cidade_estado,
@@ -261,6 +293,16 @@ export class VagaService extends BaseService<VagaModel> {
     const calculo = await this.calcular({ ...dados, data_inicio_local: iniWall, data_fim_local: fimWall });
     const funcaoId = Number(dados.funcao_id ?? dados.funcaoId);
     if (!funcaoId || isNaN(funcaoId)) throw new Error('funcao_id obrigatorio (use /api/funcoes para listar; nao existe coluna funcao em vagas)');
+    // BUG CORRIGIDO: o front (TelaCadastroVaga) SEMPRE mandou `turnos` no payload,
+    // mas criar() ignorava e nunca gravava em vaga_turnos. A agenda sumia do mural.
+    // Agora: normaliza antes de criar; se vieram turnos e nenhum e valido, explode.
+    const turnoSvc = new VagaTurnoService();
+    let turnosNormalizados: any[] = [];
+    if (dados.turnos !== undefined && dados.turnos !== null) {
+      if (!Array.isArray(dados.turnos)) throw new Error('turnos deve ser um array');
+      turnosNormalizados = turnoSvc.normalizarTurnos(dados.turnos);
+      if (dados.turnos.length > 0 && !turnosNormalizados.length) throw new Error('Nenhum turno valido (dia + periodo + valor). Verifique os dias e horarios.');
+    }
     const payload = {
       contratante_id: contratanteId,
       titulo: String(dados.titulo).trim(),
@@ -276,6 +318,12 @@ export class VagaService extends BaseService<VagaModel> {
     };
     const criada: any = await this.getRepo().criarGenerico(payload);
     const vagaId = Number((criada as any)?.id);
+    // Grava a agenda. Se falhar, desfaz a vaga (igual ao vinculo de endereco):
+    // vaga sem turnos nao pode ir para o mural com "Dias e horarios" vazio.
+    if (turnosNormalizados.length) {
+      try { await turnoSvc.substituirAgenda(vagaId, contratanteId, turnosNormalizados); }
+      catch (e: any) { try { await this.deletar(vagaId); } catch {} throw new Error('Nao foi possivel salvar os turnos da vaga: ' + (e.message || 'erro desconhecido')); }
+    }
     try {
       await new EnderecoVagaService().vincular(vagaId, enderecoId);
     } catch (e: any) {
@@ -315,6 +363,15 @@ export class VagaService extends BaseService<VagaModel> {
       patch.total_freela = Number(calculo.freela_recebe_liquido || 0);
     }
     const atualizada: any = await this.getRepo().atualizarGenerico(id, patch);
+    // Edicao da agenda: se o front mandou turnos, substitui a agenda inteira.
+    // (A TelaCadastroVaga tambem chama PUT /api/vagas/:id/turnos separado; os dois
+    // caminhos usam a mesma normalizacao e terminam com a mesma agenda.)
+    if (dados.turnos !== undefined && dados.turnos !== null) {
+      if (!Array.isArray(dados.turnos)) throw new Error('turnos deve ser um array');
+      const norm = new VagaTurnoService().normalizarTurnos(dados.turnos);
+      if (dados.turnos.length > 0 && !norm.length) throw new Error('Nenhum turno valido (dia + periodo + valor). Verifique os dias e horarios.');
+      if (norm.length) await new VagaTurnoService().substituirAgenda(id, Number(existente.contratante_id ?? existente.contratanteId), norm);
+    }
     const enderecoId = Number(dados.endereco_id || dados.enderecoId);
     if (enderecoId && !isNaN(enderecoId)) {
       const evSvc = new EnderecoVagaService();

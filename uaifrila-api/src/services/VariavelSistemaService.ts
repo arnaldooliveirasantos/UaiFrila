@@ -2,6 +2,7 @@ import { BaseService } from './BaseService';
 import { VariavelSistemaRepository } from '../repositories/VariavelSistemaRepository';
 import { VariavelSistemaModel } from '../models/VariavelSistemaModel';
 import { VARIAVEIS } from '../config/VariaveisSistema';
+import { registrarErro } from '../utils/registrarErro';
 // Sem fallback: variavel ausente = erro explicito. Variaveis sao seed no 00-CRIACAO-BANCO-NOVO-COMPLETO.sql.
 export class VariavelSistemaService extends BaseService<VariavelSistemaModel> {
   constructor() { super(new VariavelSistemaRepository()); }
@@ -14,18 +15,16 @@ export class VariavelSistemaService extends BaseService<VariavelSistemaModel> {
   // O seed antigo do banco so tem PRAZO_CANCELAMENTO_*_HORAS (24h) - sem este
   // fallback, getConfigCancelamento() lancava e TODA listagem que o chamava
   // (mural, /vagas/minhas) caia em 500 antes de listar qualquer vaga.
+  // SEM FALLBACK: sem variavel em minutos nem em horas, explode com log. Antes retornava 240 silenciosamente.
   private async buscarPrazoMinutos(chaveMinutos: string, chaveHoras: string): Promise<number> {
-    try { return await this.buscarNumeroObrigatorio(chaveMinutos); } catch {}
-    try { return (await this.buscarNumeroObrigatorio(chaveHoras)) * 60; } catch {}
-    return 240;
+    try { return await this.buscarNumeroObrigatorio(chaveMinutos); }
+    catch (e: any) { registrarErro('VariavelSistemaService.buscarPrazoMinutos', e, { chaveMinutos, chaveHoras }); throw e; }
   }
   async getConfigCancelamento() {
     const prazoMin = await this.buscarPrazoMinutos(VARIAVEIS.PRAZO_CANCELAMENTO_CANDIDATURA_MINUTOS, 'PRAZO_CANCELAMENTO_CANDIDATURA_HORAS');
     const prazoVagaMin = await this.buscarPrazoMinutos(VARIAVEIS.PRAZO_CANCELAMENTO_VAGA_MINUTOS, 'PRAZO_CANCELAMENTO_VAGA_HORAS');
-    let motivoMin = 10;
-    try { motivoMin = await this.buscarNumeroObrigatorio(VARIAVEIS.MOTIVO_CANCELAMENTO_MIN_CARACTERES); } catch {}
-    let notificar = true;
-    try { notificar = await this.buscarBooleanObrigatorio(VARIAVEIS.NOTIFICAR_CANCELAMENTO); } catch {}
+    const motivoMin = await this.buscarNumeroObrigatorio(VARIAVEIS.MOTIVO_CANCELAMENTO_MIN_CARACTERES);
+    const notificar = await this.buscarBooleanObrigatorio(VARIAVEIS.NOTIFICAR_CANCELAMENTO);
     return { prazoHoras: prazoMin / 60, prazoVagaHoras: prazoVagaMin / 60, prazoMin, prazoVagaMin, motivoMin, notificar };
   }
   async getConfigPagamento() {

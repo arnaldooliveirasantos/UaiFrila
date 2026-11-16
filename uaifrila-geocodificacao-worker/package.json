@@ -1,0 +1,9 @@
+{
+  "name": "uaifrila-geocodificacao-worker",
+  "version": "1.0.0",
+  "main": "dist/Index.js",
+  "type": "commonjs",
+  "scripts": { "dev": "ts-node-dev --respawn --transpile-only src/Index.ts", "build": "tsc", "start": "node dist/Index.js" },
+  "dependencies": { "dotenv": "^16.4.5", "pg": "^8.11.5" },
+  "devDependencies": { "@types/node": "^20.11.30", "@types/pg": "^8.11.4", "ts-node-dev": "^2.0.0", "typescript": "^5.4.3" }
+}
