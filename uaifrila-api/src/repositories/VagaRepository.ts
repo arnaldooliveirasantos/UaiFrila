@@ -18,8 +18,10 @@ export class VagaRepository extends BaseRepository<VagaModel> {
     return rows[0] || null;
   }
   // Mural: vagas com inicio anterior a hoje NAO aparecem.
-  async listarMural(): Promise<any[]> {
-    const r = await this.query(`SELECT v.*, sv.chave as status_chave, sv.nome_exibicao as status_nome, sv.cor_hex as status_cor, sv.permite_editar, sv.permite_cancelar, sv.permite_candidatar FROM vagas v JOIN status_vaga sv ON sv.id = v.status_vaga_id WHERE sv.chave IN ('AGUARDANDO_CANDIDATURA','AGUARDANDO_ACEITE') AND (v.data_inicio IS NULL OR DATE(v.data_inicio) >= CURRENT_DATE) ORDER BY v.criado_em DESC`);
+  // REGRA DO DONO (mesma do VagaService.listarMuralParaUsuario): a vaga do
+  // criador nunca some — fura o filtro de status e o de data, menos CANCELADA.
+  async listarMural(contratanteId?: number | null): Promise<any[]> {
+    const r = await this.query(`SELECT v.*, sv.chave as status_chave, sv.nome_exibicao as status_nome, sv.cor_hex as status_cor, sv.permite_editar, sv.permite_cancelar, sv.permite_candidatar FROM vagas v JOIN status_vaga sv ON sv.id = v.status_vaga_id WHERE ((sv.chave IN ('AGUARDANDO_CANDIDATURA','AGUARDANDO_ACEITE') AND (v.data_inicio IS NULL OR DATE(v.data_inicio) >= CURRENT_DATE)) OR (v.contratante_id = $1 AND sv.chave <> 'CANCELADA')) ORDER BY v.criado_em DESC`, [contratanteId || null]);
     return r.rows || [];
   }
   async buscarVagaComStatus(vagaId: number): Promise<any | null> {

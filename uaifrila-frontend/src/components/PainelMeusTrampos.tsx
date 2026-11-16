@@ -3,7 +3,8 @@ import { apiFetch } from '../utils/Api';
 import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 
 // Meus Trampos — duas secoes, conforme o tipo:
-// - Vagas que publiquei (CONTRATANTE e DUAL): com Editar vaga e Cancelar vaga.
+// - Vagas que publiquei (CONTRATANTE e DUAL): Editar/Cancelar só aparecem se
+//   status_vaga.permite_editar / permite_cancelar forem true (vêm do /api/vagas/minhas).
 // - Minhas candidaturas (FREELA e DUAL): a vaga sai do mural e vem para ca.
 //   PENDENTE = "Pendente de aprovação de candidatura", com botao CANCELAR a candidatura.
 //   Cancelar faz a vaga voltar a aparecer no mural.
@@ -193,8 +194,8 @@ export default function PainelMeusTrampos({ usuario: usuarioProp, setTelaAtiva }
                     </div>
                   ) : (
                     <div className="flex gap-2 mt-3">
-                      <button onClick={() => editarVaga(v)} className={styles.buttonSecondary}>Editar vaga</button>
-                      <button onClick={() => setCancelandoVaga({ id: v.id, motivo: '' })} className={styles.buttonSecondary}>Cancelar vaga</button>
+                      {v.permite_editar !== false && (<button onClick={() => editarVaga(v)} className={styles.buttonSecondary}>Editar vaga</button>)}
+                      {v.permite_cancelar !== false && (<button onClick={() => setCancelandoVaga({ id: v.id, motivo: '' })} className={styles.buttonSecondary}>Cancelar vaga</button>)}
                     </div>
                   )}
                 </div>

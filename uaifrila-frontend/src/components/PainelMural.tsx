@@ -27,33 +27,6 @@ function inicioValido(vaga: any): boolean {
   const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
   return inicio.getTime() >= hoje.getTime();
 }
-// Dias e horários da vaga, agrupados por dia. Sem turnos, cai para data/hora única.
-function renderDiasHorarios(vaga: any, dt: Date | null, hora: string) {
-  if (Array.isArray(vaga.turnos) && vaga.turnos.length) {
-    const g: Record<string, any[]> = {};
-    for (const x of vaga.turnos) {
-      const k = String(x.data).slice(0, 10);
-      (g[k] = g[k] || []).push(x);
-    }
-    return Object.keys(g).sort().map((d) => {
-      const [y, mo, dd] = d.split('-').map(Number);
-      const dt2 = new Date(y, mo - 1, dd);
-      const turnos = g[d].map((x: any) => `${String(x.hora_inicio).slice(0, 5)}–${String(x.hora_fim).slice(0, 5)} (R$ ${(Number(x.valor_servico) || 0).toFixed(2)})`).join(' • ');
-      return (
-        <div key={d} className="font-black capitalize">
-          {dt2.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })} — {turnos}
-        </div>
-      );
-    });
-  }
-  return (
-    <>
-      <div className="font-black">{dt ? dt.toLocaleDateString('pt-BR') : '—'}</div>
-      {hora && <div className={styles.typography.caption}>às {hora}</div>}
-    </>
-  );
-}
-
 export function PainelMural({ usuario, setTelaAtiva }: { usuario?: any; setTelaAtiva?: (t: string) => void }) {
   const styles = useUaiFrilaStyles();
   const [vagas, setVagas] = useState<any[]>([]);
@@ -75,8 +48,10 @@ export function PainelMural({ usuario, setTelaAtiva }: { usuario?: any; setTelaA
         data = await apiGetPublic('/api/vagas/abertas');
         const lista = data?.vagas || data?.data || data?.mural || data || [];
         const arr = Array.isArray(lista) ? lista : [];
-        // Filtro 2: tira vagas com início < hoje (defesa no front; backend também filtra)
-        const futuras = arr.filter(inicioValido);
+        // Filtro 2: tira vagas com início < hoje (defesa no front; backend também filtra).
+        // REGRA DO DONO: a vaga do criador nunca some — o filtro de data não
+        // tira a vaga própria, nem depois que o trampo já começou/passou.
+        const futuras = arr.filter((v: any) => inicioValido(v) || (usuario && Number(v.contratante_id) === Number(usuario.id)));
         if (mounted) setVagas(futuras);
       } catch (e: any) { if (mounted) setErro(e.message); } finally { if (mounted) setLoading(false); }
     };
@@ -110,19 +85,37 @@ export function PainelMural({ usuario, setTelaAtiva }: { usuario?: any; setTelaA
       setMsg('Vaga cancelada.');
     } catch (e: any) { setMsg(e.message || 'Não foi possível cancelar a vaga'); } finally { setCancelando(null); }
   };
-  const [candidatandoForm, setCandidatandoForm] = useState<number | null>(null);
-  const [mensagemPorVaga, setMensagemPorVaga] = useState<Record<number, string>>({});
-  const candidatar = async (vagaId: number, mensagem?: string) => {
+  const candidatar = async (vagaId: number) => {
     if (!getToken()) { setMsg('Faça login como Freela para se candidatar.'); return; }
     if (!podeCandidatar) { setMsg('Só Freela/DUAL pode se candidatar.'); return; }
     setCandidatando(vagaId); setMsg('');
     try {
-      await apiFetch('/api/candidaturas', { method: 'POST', body: JSON.stringify({ vaga_id: vagaId, mensagem: (mensagem || '').slice(0, 500) || undefined }) });
+      await apiFetch('/api/candidaturas', { method: 'POST', body: JSON.stringify({ vaga_id: vagaId }) });
       // Vaga ja candidatada sai do Mural (regra do backend): ela passa a ser
       // acompanhada em Meus Trampos.
       setVagas(prev => prev.filter(v => v.id !== vagaId));
-      setMsg('Candidatura enviada! Acompanhe em Meus Trampos.'); setCandidatandoForm(null);
+      setMsg('Candidatura enviada! Acompanhe em Meus Trampos.');
     } catch (e: any) { setMsg(e.message || 'Não foi possível candidatar'); } finally { setCandidatando(null); }
+  };
+  // Bloco "Dias e horários" de uma vaga. Fica FORA do JSX: o agrupamento dos
+  // turnos por dia estava dentro de um IIFE no meio do JSX (linha 128) e o
+  // parser do Babel quebrava com "Adjacent JSX elements must be wrapped".
+  // Com turnos: uma linha por dia (dia + horários com valor). Sem turnos:
+  // cai para a data/hora única da vaga (compatibilidade com vagas antigas).
+  const diasHorarios = (vaga: any, dt: Date | null, hora: string) => {
+    if (Array.isArray(vaga.turnos) && vaga.turnos.length) {
+      const g: Record<string, any[]> = {};
+      for (const x of vaga.turnos) {
+        const d = String(x.data).slice(0, 10);
+        (g[d] = g[d] || []).push(x);
+      }
+      return Object.keys(g).sort().map((d) => {
+        const [y, m, dd] = d.split('-').map(Number);
+        const dt2 = new Date(y, m - 1, dd);
+        return (<div key={d} className="font-black capitalize">{dt2.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })} — {g[d].map((x: any) => `${String(x.hora_inicio).slice(0, 5)}–${String(x.hora_fim).slice(0, 5)} (R$ ${(Number(x.valor_servico) || 0).toFixed(2)})`).join(' • ')}</div>);
+      });
+    }
+    return (<div><div className="font-black">{dt ? dt.toLocaleDateString('pt-BR') : '—'}</div>{hora && <div className={styles.typography.caption}>às {hora}</div>}</div>);
   };
   if (loading) return <div className={styles.pageContainer}><div className={styles.card}>Carregando mural...</div></div>;
   if (erro) return <div className={styles.pageContainer}><div className={styles.errorBox}>ERRO MURAL: {erro}</div></div>;
@@ -152,27 +145,15 @@ export function PainelMural({ usuario, setTelaAtiva }: { usuario?: any; setTelaA
               <div><div className={styles.typography.caption}>Você recebe</div><div className="font-black">R$ {valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div></div>
               <div><div className={styles.typography.caption}>Cidade</div><div className="font-black">{cidade || '—'}</div>{vaga.bairro && <div className={styles.typography.caption}>{vaga.bairro}</div>}</div>
               <div className="col-span-2 md:col-span-3"><div className={styles.typography.caption}>Dias e horários</div>
-                {renderDiasHorarios(vaga, dt, hora)}
+                {diasHorarios(vaga, dt, hora)}
               </div>
               <div><div className={styles.typography.caption}>Função</div><div className="font-black">{vaga.funcao || '—'}</div></div>
-              <div><div className={styles.typography.caption}>Vagas</div><div className="font-black">{Number(vaga.quantidade_vagas ?? 1)} vaga(s) • {Number(vaga.preenchidas ?? 0)} preenchida(s) • {Number(vaga.restantes ?? vaga.quantidade_vagas ?? 1)} restante(s)</div></div>
-              {vaga.data_limite_candidatura && <div><div className={styles.typography.caption}>Candidaturas até</div><div className="font-black">{new Date(vaga.data_limite_candidatura).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div></div>}
               {distanciaTexto && <div><div className={styles.typography.caption}>Distância</div><div className="font-black">📍 {distanciaTexto} de você</div></div>}
             </div>
           );
         })()}
         <div className="mt-4 flex flex-wrap gap-2">
-          {podeCandidatar && !ehMinha && !ja && candidatandoForm !== vaga.id && (<button onClick={() => setCandidatandoForm(vaga.id)} className={styles.buttonPrimary(false)}>Candidatar-se</button>)}
-          {podeCandidatar && !ehMinha && !ja && candidatandoForm === vaga.id && (
-            <div className={styles.cardSmall + ' w-full'}>
-              <label className={styles.label}>Mensagem para o contratante (opcional)</label>
-              <textarea value={mensagemPorVaga[vaga.id] || ''} onChange={(e) => setMensagemPorVaga((prev) => ({ ...prev, [vaga.id]: e.target.value }))} maxLength={500} rows={2} className={styles.input} placeholder="Ex.: Já trabalhei em casamentos, chego 1h antes." />
-              <div className="flex gap-2 mt-2">
-                <button disabled={candidatando === vaga.id} onClick={() => candidatar(vaga.id, mensagemPorVaga[vaga.id])} className={styles.buttonPrimary(candidatando === vaga.id)}>{candidatando === vaga.id ? 'Enviando...' : 'Enviar candidatura'}</button>
-                <button onClick={() => setCandidatandoForm(null)} className={styles.buttonSecondary}>Voltar</button>
-              </div>
-            </div>
-          )}
+          {podeCandidatar && !ehMinha && !ja && vaga.permite_candidatar !== false && (<button disabled={candidatando === vaga.id} onClick={() => candidatar(vaga.id)} className={styles.buttonPrimary(candidatando === vaga.id)}>{candidatando === vaga.id ? 'Enviando...' : 'Candidatar-se'}</button>)}
           {ehMinha && vaga.permite_editar !== false && (<button onClick={() => editarVaga(vaga)} className={styles.buttonWarning}>Editar</button>)}
           {ehMinha && vaga.permite_cancelar !== false && (<button disabled={cancelando === vaga.id} onClick={() => cancelarVaga(vaga.id)} className={styles.buttonDanger}>{cancelando === vaga.id ? 'Cancelando...' : 'Cancelar vaga'}</button>)}
         </div>

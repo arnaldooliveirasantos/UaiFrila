@@ -233,6 +233,7 @@ export class App {
     this.expressApp.get('/api/candidaturas/vaga/:vagaId/selecao', (req, res) => candidaturaCtrl.resumoSelecao(req, res));
     this.expressApp.post('/api/candidaturas/:id/confirmar-selecao', (req, res) => candidaturaCtrl.confirmarSelecao(req, res));
     this.expressApp.post('/api/candidaturas/:id/recusar-selecao', (req, res) => candidaturaCtrl.recusarSelecao(req, res));
+    this.expressApp.post('/api/candidaturas/:id/recusar', (req, res) => candidaturaCtrl.recusar(req, res));
     this.expressApp.post('/api/candidaturas/:id/cancelar', (req, res) => candidaturaCtrl.cancelar(req, res));
     this.expressApp.post('/api/candidaturas/:id/visto', (req, res) => candidaturaCtrl.marcarVisto(req, res));
     this.expressApp.put('/api/candidaturas/:id/status', (req, res) => candidaturaCtrl.atualizarStatus(req, res));
