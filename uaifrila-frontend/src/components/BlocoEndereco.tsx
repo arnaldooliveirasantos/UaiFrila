@@ -23,6 +23,10 @@ interface Props {
   titulo?: string; subtitulo?: string;
   modoCadastro?: boolean; // true = cadastro novo, sem token
   modoVaga?: boolean;
+  // Endereco que o bloco deve EXIBIR, quando o pai ja resolveu qual e.
+  // Na edicao de vaga e o endereco DA VAGA (pode nao ser o ativo do usuario).
+  // Sem ele, o bloco cai para o comportamento antigo: mostrar o ativo do usuario.
+  enderecoFixo?: any;
   onEnderecoSelecionado?: (id: number, endereco: any) => void;
   onEnderecoChange?: (endereco: any) => void;
 }
@@ -33,7 +37,7 @@ function temToken(): boolean {
   } catch { return false; }
 }
 
-export default function BlocoEndereco({ form, setForm, cidades: cidadesProp, titulo = 'ENDEREÇO', subtitulo, modoCadastro, modoVaga = false, onEnderecoSelecionado, onEnderecoChange }: Props) {
+export default function BlocoEndereco({ form, setForm, cidades: cidadesProp, titulo = 'ENDEREÇO', subtitulo, modoCadastro, modoVaga = false, enderecoFixo, onEnderecoSelecionado, onEnderecoChange }: Props) {
   const styles = useUaiFrilaStyles();
   const [ativo, setAtivo] = useState<any>(null);
   const [mostrar, setMostrar] = useState(false);
@@ -50,6 +54,7 @@ export default function BlocoEndereco({ form, setForm, cidades: cidadesProp, tit
   // Busca o endereco ATIVO (ativo=true; se nenhum, o primeiro). Reutilizada
   // apos salvar/trocar no CadastroEndereco para o bloco nao ficar defasado.
   const carregarAtivo = async () => {
+    if (enderecoFixo?.id) return; // o pai ja definiu qual endereco exibir (ex.: endereco DA VAGA) - nao sobrescreve com o ativo do usuario
     if (ehCadastro) return; // cadastro: sem token, sem /enderecos/meus
     if (!temToken()) return;
     try {
@@ -75,11 +80,12 @@ export default function BlocoEndereco({ form, setForm, cidades: cidadesProp, tit
 
   // Só busca endereço ativo se NÃO é cadastro e TEM token
   useEffect(() => {
+    if (enderecoFixo?.id) { setAtivo(enderecoFixo); return; }
     canceladoRef.current = false;
     carregarAtivo();
     return () => { canceladoRef.current = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ehCadastro]);
+  }, [ehCadastro, enderecoFixo?.id]);
 
   // Estados / cidades por estado - SEMPRE público, nunca apiFetch com token
   useEffect(() => {
