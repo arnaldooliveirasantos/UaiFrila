@@ -18,6 +18,7 @@ export class AvaliacaoController extends BaseController {
     } catch (e: any) { return this.handleError(res, e); }
   };
 
+  pendentes = async (req: AuthRequest, res: Response) => { try { const lista = await this.service.pendentes(req.usuario!.id); return res.json({ success: true, data: lista, pendentes: lista }); } catch (e: any) { return this.handleError(res, e); } };
   listarPorAvaliado = async (req: AuthRequest, res: Response) => {
     try {
       const avaliacoes = await this.service.listarPorAvaliado(Number(req.params.avaliadoId));

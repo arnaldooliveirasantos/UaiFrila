@@ -1,10 +1,20 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { apiFetch } from '../utils/Api';
 import { useTheme } from '../context/ThemeContext';
 import LogoIcone from './LogoIcone';
 
 export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: any) {
   const { toggleTheme, isDark } = useTheme();
   const [menuAberto, setMenuAberto] = useState(false);
+  const [naoLidas, setNaoLidas] = useState(0);
+  // Selo do sino: conta as não lidas. Atualiza ao trocar de tela (ex.: ao sair
+  // da tela de Notificações, o selo já volta zerado) e ao logar.
+  useEffect(() => {
+    if (!usuario) { setNaoLidas(0); return; }
+    let vivo = true;
+    apiFetch('/api/notificacoes/nao-lidas').then((d: any) => { if (vivo) setNaoLidas(Number(d?.data?.nao_lidas ?? d?.nao_lidas ?? 0)); }).catch(() => {});
+    return () => { vivo = false; };
+  }, [usuario, telaAtiva]);
 
   // FIX: Não depende mais de useTiposUsuario - evita "getTipoUsuario is not a function"
   const getTipo = (): string => {
@@ -130,7 +140,7 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
                 onClick={() => handleNav(item.id)}
                 className={`text-[10px] font-black uppercase px-2.5 py-1.5 border-2 transition-all ${ativo ? 'bg-white text-black border-white' : 'bg-transparent text-white border-white hover:bg-white hover:text-black'}`}
               >
-                {item.icon} {item.label}
+                {item.icon} {item.label}{item.id === 'notificacoes' && naoLidas > 0 && <span className="ml-1 bg-red-600 text-white text-[9px] font-black px-1.5 py-0.5 border border-white">{naoLidas}</span>}
               </button>
             );
           })}
@@ -168,7 +178,7 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
               const ativo = telaAtiva === item.id;
               return (
                 <button key={item.id} onClick={() => handleNav(item.id)} className={`text-[11px] font-black uppercase px-3 py-3 border-2 text-left ${ativo ? 'bg-white text-black border-white' : 'bg-transparent text-white border-white'}`}>
-                  {item.icon} {item.label}
+                  {item.icon} {item.label}{item.id === 'notificacoes' && naoLidas > 0 && <span className="ml-1 bg-red-600 text-white text-[9px] font-black px-1.5 py-0.5 border border-white">{naoLidas}</span>}
                 </button>
               );
             })}

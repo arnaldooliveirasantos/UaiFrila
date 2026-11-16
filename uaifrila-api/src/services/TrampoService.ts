@@ -76,6 +76,23 @@ export class TrampoService extends BaseService<TrampoModel> {
     const valor_a_pagar = turnos.filter((x: any) => String(x.status).toUpperCase() === 'CONCLUIDO').reduce((s: number, x: any) => s + Number(x.valor_servico || 0), 0);
     return { trampo, turnos, valor_a_pagar };
   }
+  // FASE 4: freela confirma que vai (24h antes do trampo). Só quem participa.
+  async confirmarPresenca(id: number, usuarioId: number): Promise<any> {
+    const pool = (await import('../repositories/BaseRepository')).BaseRepository.getPool() as any;
+    const rt = await pool.query(`SELECT t.*, v.titulo FROM trampos t JOIN vagas v ON v.id = t.vaga_id WHERE t.id = $1`, [id]);
+    const trampo = rt.rows[0];
+    if (!trampo) throw new Error('Trampo não encontrado');
+    if (Number(trampo.freela_id) !== Number(usuarioId) && Number(trampo.contratante_id) !== Number(usuarioId)) throw new Error('Você não participa deste trampo');
+    if (trampo.presenca_confirmada_em) return { trampo_id: id, presenca_confirmada_em: trampo.presenca_confirmada_em, ja_confirmada: true };
+    const r = await pool.query(`UPDATE trampos SET presenca_confirmada_em = NOW() WHERE id = $1 RETURNING *`, [id]);
+    const outroId = Number(trampo.freela_id) === Number(usuarioId) ? Number(trampo.contratante_id) : Number(trampo.freela_id);
+    try {
+      const { NotificacaoService } = await import('./NotificacaoService');
+      await new NotificacaoService().criarNotificacao({ usuario_id: outroId, tipo: 'PRESENCA_CONFIRMADA', titulo: `Presença confirmada - Vaga #${trampo.vaga_id}`, mensagem: `Presença confirmada para "${trampo.titulo}".`, referencia_tipo: 'TRAMPO', referencia_id: id });
+    } catch {}
+    return { ...r.rows[0], ja_confirmada: false };
+  }
+
   async listarTodos(): Promise<TrampoModel[]> {
     try { return await this.listar(); }
     catch (e: any) { this.handleError(e, 'TrampoService.listarTodos'); }

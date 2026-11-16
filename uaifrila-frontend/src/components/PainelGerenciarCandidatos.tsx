@@ -18,6 +18,10 @@ export default function PainelGerenciarCandidatos() {
   const [carregandoCandidatos, setCarregandoCandidatos] = useState(false);
   const [erro, setErro] = useState('');
   const [acaoId, setAcaoId] = useState<number | null>(null);
+  // Fases 1: resumo da seleção + checkbox de seleção em lote.
+  const [resumo, setResumo] = useState<any>(null);
+  const [selecionados, setSelecionados] = useState<number[]>([]);
+  const [selecionando, setSelecionando] = useState(false);
 
   const carregarVagas = async () => {
     setCarregando(true); setErro('');
@@ -34,10 +38,22 @@ export default function PainelGerenciarCandidatos() {
       const data = await apiFetch(`/api/candidatos/vaga/${id}`).catch(() => apiFetch(`/api/candidaturas/vaga/${id}`));
       const lista = data.candidaturas || data.data || (Array.isArray(data) ? data : []);
       setCandidatos(lista);
+      setSelecionados([]);
+      try { const dr = await apiFetch(`/api/candidaturas/vaga/${id}/selecao`); setResumo(dr?.data || dr || null); } catch { setResumo(null); }
     } catch (e: any) { setErro(e.message || 'Erro ao carregar candidatos'); setCandidatos([]); } finally { setCarregandoCandidatos(false); }
   };
   useEffect(() => { carregarVagas(); }, []);
   useEffect(() => { if (vagaId) carregarCandidatos(vagaId); }, [vagaId]);
+
+  const selecionarEmLote = async () => {
+    if (!vagaId || !selecionados.length) return;
+    setSelecionando(true); setErro('');
+    try {
+      await apiFetch(`/api/candidaturas/vaga/${vagaId}/selecionar`, { method: 'POST', body: JSON.stringify({ candidatura_ids: selecionados }) });
+      await carregarCandidatos(vagaId);
+    } catch (e: any) { setErro(e.message || 'Erro ao selecionar candidatos'); } finally { setSelecionando(false); }
+  };
+  const alternarSelecao = (id: number) => setSelecionados((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
 
   const mudarStatus = async (id: number, status: 'ACEITA' | 'RECUSADA') => {
     setAcaoId(id); setErro('');
@@ -62,6 +78,18 @@ export default function PainelGerenciarCandidatos() {
       </div>
       {carregandoCandidatos && <p className="mt-4 text-xs animate-pulse">Carregando candidatos...</p>}
       {!carregandoCandidatos && candidatos.length === 0 && vagas.length > 0 && <p className="mt-4 text-xs">Nenhum candidato nesta vaga ainda.</p>}
+      {resumo && (
+        <div className={`${styles.cardSmall} mt-4`}>
+          <p className={styles.typography.body + ' font-black'}>{resumo.quantidade_vagas} vaga(s) • {resumo.preenchidas} preenchida(s) • {resumo.restantes} restante(s) • fila: {resumo.lista_espera}</p>
+          <p className={styles.typography.caption}>Prazo do freela confirmar a seleção: {resumo.prazo_confirmacao_horas}h. Quem não confirmar, perde a vaga para o próximo da fila.</p>
+          {selecionados.length > 0 && (
+            <button onClick={selecionarEmLote} disabled={selecionando || selecionados.length > resumo.restantes} className={styles.buttonPrimary(selecionando) + ' mt-3'}>
+              {selecionando ? 'Selecionando...' : `Selecionar ${selecionados.length} candidato${selecionados.length > 1 ? 's' : ''}`}
+            </button>
+          )}
+          {selecionados.length > resumo.restantes && <p className={styles.typography.caption + ' mt-1'}>Só restam {resumo.restantes} vaga(s). Desmarque {selecionados.length - resumo.restantes}.</p>}
+        </div>
+      )}
       <div className="mt-6 grid gap-4">
         {[...candidatos].sort((a: any, b: any) => (b.match_vaga ?? 0) - (a.match_vaga ?? 0)).map((c: any) => {
           const u = c.freela || c.usuario || c || {};
@@ -82,10 +110,18 @@ export default function PainelGerenciarCandidatos() {
                   {c.historico_app && <p className="text-xs mt-1"><b>No app:</b> {c.historico_app.trampos_concluidos} trampos concluídos • {c.historico_app.candidaturas_canceladas} cancelamentos</p>}
                   {c.avaliacoes_recentes?.length > 0 && <div className="mt-2 text-xs opacity-80">{c.avaliacoes_recentes.map((a: any, i: number) => <p key={i}>“{a.comentario || `Nota ${a.nota}`}” — {a.nota}⭐</p>)}</div>}
                   <p className="text-xs opacity-70 mt-1">Status: {c.status}</p>
+                  {c.mensagem && <p className="text-xs mt-1 italic">💬 “{c.mensagem}”</p>}
                 </div>
                 <div className="flex flex-col gap-2 shrink-0">
-                  <button disabled={acaoId === c.id} onClick={() => mudarStatus(c.id, 'ACEITA')} className={`px-4 py-2 text-xs font-black uppercase ${styles.buttonPrimary(acaoId === c.id)}`}>{acaoId === c.id ? 'Salvando...' : 'Aceitar'}</button>
-                  <button disabled={acaoId === c.id} onClick={() => mudarStatus(c.id, 'RECUSADA')} className={`px-4 py-2 text-xs font-black uppercase ${styles.buttonDanger}`}>Recusar</button>
+                  {(() => { const st = String(c.status || '').toUpperCase(); const elegivel = st === 'PENDENTE' || st === 'LISTA_ESPERA'; const prazo = c.prazo_resposta_ate ? new Date(c.prazo_resposta_ate) : null; return (<>
+                    {st === 'SELECIONADO' && <span className={styles.badge('warning')}>Selecionado — confirmar até {prazo ? prazo.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'}</span>}
+                    {st === 'LISTA_ESPERA' && <span className={styles.badge('default')}>Lista de espera — posição {c.posicao_lista_espera ?? '—'}</span>}
+                    {st === 'ACEITA' && <span className={styles.badge('success')}>Aceita — trampo gerado</span>}
+                    {st === 'RECUSADA' && <span className={styles.badge('danger')}>Recusada{c.motivo_recusa ? ` • ${c.motivo_recusa}` : ''}</span>}
+                    {elegivel && (<label className="flex items-center gap-2 text-xs font-black uppercase cursor-pointer"><input type="checkbox" checked={selecionados.includes(c.id)} onChange={() => alternarSelecao(c.id)} /> Selecionar</label>)}
+                    {elegivel && <button disabled={acaoId === c.id} onClick={() => mudarStatus(c.id, 'ACEITA')} className={`px-4 py-2 text-xs font-black uppercase ${styles.buttonPrimary(acaoId === c.id)}`}>{acaoId === c.id ? 'Salvando...' : 'Aceitar direto'}</button>}
+                    {elegivel && <button disabled={acaoId === c.id} onClick={() => mudarStatus(c.id, 'RECUSADA')} className={`px-4 py-2 text-xs font-black uppercase ${styles.buttonDanger}`}>Recusar</button>}
+                  </>); })()}
                 </div>
               </div>
             </div>

@@ -10,6 +10,7 @@ import { SolicitarCodigoController } from './controllers/SolicitarCodigoControll
 import { ValidarCodigoController } from './controllers/ValidarCodigoController';
 import { UsuarioController } from './controllers/UsuarioController';
 import { VagaController } from './controllers/VagaController';
+import { VagaTurnoController } from './controllers/VagaTurnoController';
 import { CidadeController } from './controllers/CidadeController';
 import { EstadoController } from './controllers/EstadoController';
 import { EnderecoController } from './controllers/EnderecoController';
@@ -31,17 +32,38 @@ import { FuncaoController } from './controllers/FuncaoController';
 import { TipoEnderecoController } from './controllers/TipoEnderecoController';
 import { ConversaController } from './controllers/ConversaController';
 import { MensagemController } from './controllers/MensagemController';
-import { CancelarCadastroController } from './controllers/CancelarCadastroController';
 import { NotificacaoController } from './controllers/NotificacaoController';
-import { VagaTurnoController } from './controllers/VagaTurnoController';
-import { TrampoTurnoController } from './controllers/TrampoTurnoController';
-import { StatusVagaController } from './controllers/StatusVagaController';
-import { authMiddleware } from './middlewares/AuthMiddleware';
+import { VagaTemplateController } from './controllers/VagaTemplateController';
 
 
 import { EnderecoVagaController } from './controllers/EnderecoVagaController';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'uaifrila-secret-2024';
+let globalPool: Pool | null = null;
+
+export function setAuthPool(pool: Pool) { globalPool = pool; }
+
+export function authMiddleware(req: any, res: any, next: any) {
+  const header = req.headers.authorization;
+  if (!header) return res.status(401).json({ success: false, message: 'Token não fornecido' });
+  const token = header.replace('Bearer ', '');
+  try {
+    const decoded: any = jwt.verify(token, JWT_SECRET);
+    if (globalPool) {
+      globalPool.query(`SELECT u.id, u.email, u.tipo_usuario_id, tu.chave as tipo_chave, tu.nivel_permissao FROM usuarios u LEFT JOIN tipos_usuario tu ON tu.id = u.tipo_usuario_id WHERE u.id = $1 LIMIT 1`, [decoded.id]).then((result: any) => {
+        if (result.rows && result.rows[0]) {
+          const row = result.rows[0];
+          req.usuario = { id: row.id, email: row.email, tipoUsuarioId: row.tipo_usuario_id, tipoChave: row.tipo_chave, tipo_chave: row.tipo_chave, nivelPermissao: row.nivel_permissao, nivel_permissao: row.nivel_permissao, isAdmin: (row.nivel_permissao || 0) >= 80 || ['ADMIN','SUPER_ADMIN'].includes((row.tipo_chave || '').toUpperCase()) };
+          next();
+        } else {
+          return res.status(401).json({ success: false, message: 'Usuario nao encontrado' });
+        }
+      }).catch(() => res.status(401).json({ success: false, message: 'Falha ao validar usuario' }));
+      return;
+    }
+    return res.status(401).json({ success: false, message: 'Token invalido' });
+  } catch { return res.status(401).json({ success: false, message: 'Token inválido' }); }
+}
 
 export function optionalAuthMiddleware(req: any, _res: any, next: any) {
   const header = req.headers.authorization;
@@ -61,6 +83,8 @@ export class App {
       this.pool = new Pool({ user: process.env.DB_USER || 'postgres', password: process.env.DB_PASSWORD || 'postgres', host: process.env.DB_HOST || 'localhost', port: parseInt(process.env.DB_PORT || '5432'), database: process.env.DB_NAME || 'uaifrila' });
     }
     BaseRepository.setPool(this.pool);
+    setAuthPool(this.pool);
+    globalPool = this.pool;
     this.expressApp.use(cors());
     this.expressApp.use(express.json({ limit: '10mb' }));
     this.routes();
@@ -72,6 +96,7 @@ export class App {
     const validarCtrl: any = new ValidarCodigoController();
     const usuarioCtrl: any = new UsuarioController();
     const vagaCtrl: any = new VagaController();
+    const vagaTurnoCtrl: any = new VagaTurnoController();
     const cidadeCtrl: any = new CidadeController();
     const estadoCtrl: any = new EstadoController();
     const enderecoCtrl: any = new EnderecoController();
@@ -94,6 +119,8 @@ export class App {
     const usuarioPixCtrl: any = new UsuarioPixController();
     const conversaCtrl: any = new ConversaController();
     const mensagemCtrl: any = new MensagemController();
+    const notificacaoCtrl: any = new NotificacaoController();
+    const vagaTemplateCtrl: any = new VagaTemplateController();
 
     this.expressApp.post('/api/auth/register', (req, res) => authCtrl.register(req, res));
     this.expressApp.post('/api/auth/login', (req, res) => authCtrl.login(req, res));
@@ -105,7 +132,6 @@ export class App {
     this.expressApp.post('/api/auth/solicitar-codigo', (req, res) => solicitarCtrl.solicitarCodigo(req, res));
     this.expressApp.post('/api/auth/validar-codigo', (req, res) => validarCtrl.validarCodigo(req, res));
     this.expressApp.post('/api/auth/reenviar-codigo', (req, res) => solicitarCtrl.reenviarCodigo(req, res));
-    this.expressApp.post('/api/auth/cancelar-cadastro', (req, res) => new CancelarCadastroController().cancelarCadastro(req, res));
 
     if (paisCtrl) this.expressApp.get('/api/paises', (req, res) => paisCtrl.listar(req, res));
     if (funcaoCtrl) this.expressApp.get('/api/funcoes', (req, res) => funcaoCtrl.listar(req, res));
@@ -135,25 +161,6 @@ export class App {
     this.expressApp.use('/api', authMiddleware);
 
     this.expressApp.get('/api/auth/me', (req, res) => authCtrl.me(req, res));
-    this.expressApp.get('/api/notificacoes/minhas', (req, res) => new NotificacaoController().listarMinhas(req as any, res));
-    this.expressApp.put('/api/notificacoes/:id/lida', (req, res) => new NotificacaoController().marcarComoLida(req as any, res));
-  // Turnos da vaga (03-VAGA-TURNOS.sql): agenda por dias + periodos + valor por turno.
-  this.expressApp.get('/api/vagas/:vagaId/turnos', (req, res) => new VagaTurnoController().listarPorVaga(req as any, res));
-  this.expressApp.get('/api/vagas/:vagaId/turnos/resumo', (req, res) => new VagaTurnoController().resumo(req as any, res));
-  this.expressApp.put('/api/vagas/:vagaId/turnos', (req, res) => new VagaTurnoController().substituirAgenda(req as any, res));
-  this.expressApp.post('/api/vagas/:vagaId/turnos', (req, res) => new VagaTurnoController().criar(req as any, res));
-  this.expressApp.put('/api/vaga-turnos/:id', (req, res) => new VagaTurnoController().atualizar(req as any, res));
-  this.expressApp.delete('/api/vaga-turnos/:id', (req, res) => new VagaTurnoController().deletar(req as any, res));
-  // Turnos do trampo: execucao turno a turno + acerto por imprevisto.
-  this.expressApp.get('/api/trampos/:trampoId/turnos', (req, res) => new TrampoTurnoController().listarPorTrampo(req as any, res));
-  this.expressApp.post('/api/trampos/:trampoId/turnos/gerar', (req, res) => new TrampoTurnoController().gerar(req as any, res));
-  this.expressApp.get('/api/trampos/:trampoId/turnos/resumo', (req, res) => new TrampoTurnoController().resumo(req as any, res));
-  this.expressApp.put('/api/trampos/:trampoId/turnos/cancelar-restantes', (req, res) => new TrampoTurnoController().cancelarRestantes(req as any, res));
-  this.expressApp.put('/api/trampo-turnos/:id/checkin', (req, res) => new TrampoTurnoController().checkin(req as any, res));
-  this.expressApp.put('/api/trampo-turnos/:id/checkout', (req, res) => new TrampoTurnoController().checkout(req as any, res));
-  this.expressApp.put('/api/trampo-turnos/:id/falta', (req, res) => new TrampoTurnoController().falta(req as any, res));
-    this.expressApp.get('/api/status-vaga', (req, res) => new StatusVagaController().listar(req as any, res));
-    this.expressApp.get('/api/status-vaga/ativos', (req, res) => new StatusVagaController().listarAtivos(req as any, res));
     this.expressApp.get('/api/usuarios', (req, res) => usuarioCtrl.listar(req, res));
     this.expressApp.get('/api/usuarios/freelas', (req, res) => usuarioCtrl.listarFreelas(req, res));
     this.expressApp.get('/api/usuarios/:id/completo', (req, res) => usuarioCtrl.buscarPorIdCompleto(req, res));
@@ -186,7 +193,9 @@ export class App {
     this.expressApp.delete('/api/enderecos/:id', (req, res) => enderecoCtrl.deletar(req, res));
 
     this.expressApp.post('/api/enderecos-vaga', (req, res) => enderecoVagaCtrl.vincular(req, res));
+    this.expressApp.post('/api/enderecos/vincular-vaga', (req, res) => enderecoVagaCtrl.vincular(req, res));
     this.expressApp.get('/api/enderecos-vaga/vaga/:vagaId', (req, res) => enderecoVagaCtrl.listarPorVaga(req, res));
+    this.expressApp.get('/api/enderecos/vaga/:vagaId', (req, res) => enderecoVagaCtrl.listarPorVaga(req, res));
     this.expressApp.get('/api/enderecos-vaga/endereco/:enderecoId', (req, res) => enderecoVagaCtrl.listarPorEndereco(req, res));
     this.expressApp.get('/api/enderecos-vaga', (req, res) => enderecoVagaCtrl.listar(req, res));
     this.expressApp.delete('/api/enderecos-vaga', (req, res) => enderecoVagaCtrl.desvincular(req, res));
@@ -198,7 +207,15 @@ export class App {
     this.expressApp.get('/api/vagas/todas', (req, res) => vagaCtrl.listarTodas(req, res));
     this.expressApp.get('/api/vagas/contratante/:contratanteId', (req, res) => vagaCtrl.listarPorContratante(req, res));
     this.expressApp.post('/api/vagas/calcular', (req, res) => vagaCtrl.calcular ? vagaCtrl.calcular(req, res) : res.json({ success: true, calculo: {} }));
+    this.expressApp.post('/api/vagas/criar', (req, res) => vagaCtrl.criar(req, res));
     this.expressApp.post('/api/vagas', (req, res) => vagaCtrl.criar(req, res));
+    // Turnos da vaga (agenda: dias + periodos + valor por turno)
+    this.expressApp.get('/api/vagas/:vagaId/turnos', (req, res) => vagaTurnoCtrl.listarPorVaga(req, res));
+    this.expressApp.get('/api/vagas/:vagaId/turnos/resumo', (req, res) => vagaTurnoCtrl.resumo(req, res));
+    this.expressApp.put('/api/vagas/:vagaId/turnos', (req, res) => vagaTurnoCtrl.substituirAgenda(req, res));
+    this.expressApp.post('/api/vagas/:vagaId/turnos', (req, res) => vagaTurnoCtrl.criar(req, res));
+    this.expressApp.put('/api/vagas/turnos/:id', (req, res) => vagaTurnoCtrl.atualizar(req, res));
+    this.expressApp.delete('/api/vagas/turnos/:id', (req, res) => vagaTurnoCtrl.deletar(req, res));
     this.expressApp.get('/api/vagas/:id', (req, res) => vagaCtrl.buscarPorId(req, res));
     this.expressApp.put('/api/vagas/:id', (req, res) => vagaCtrl.atualizar(req, res));
     this.expressApp.delete('/api/vagas/:id', (req, res) => vagaCtrl.deletar(req, res));
@@ -209,17 +226,25 @@ export class App {
     this.expressApp.get('/api/candidaturas/vaga/:vagaId', (req, res) => candidaturaCtrl.listarPorVaga(req, res));
     this.expressApp.get('/api/candidaturas/todas', (req, res) => candidaturaCtrl.listarTodas(req, res));
     this.expressApp.post('/api/candidaturas', (req, res) => candidaturaCtrl.candidatar(req, res));
+    // Fases 1: seleção em lote, confirmar/recusar seleção, visto, resumo, prazos.
+    // (Ordem importa: rotas literais antes de /api/candidaturas/:id/...)
+    this.expressApp.post('/api/candidaturas/processar-prazos', (req, res) => candidaturaCtrl.processarPrazos(req, res));
+    this.expressApp.post('/api/candidaturas/vaga/:vagaId/selecionar', (req, res) => candidaturaCtrl.selecionarEmLote(req, res));
+    this.expressApp.get('/api/candidaturas/vaga/:vagaId/selecao', (req, res) => candidaturaCtrl.resumoSelecao(req, res));
+    this.expressApp.post('/api/candidaturas/:id/confirmar-selecao', (req, res) => candidaturaCtrl.confirmarSelecao(req, res));
+    this.expressApp.post('/api/candidaturas/:id/recusar-selecao', (req, res) => candidaturaCtrl.recusarSelecao(req, res));
+    this.expressApp.post('/api/candidaturas/:id/cancelar', (req, res) => candidaturaCtrl.cancelar(req, res));
+    this.expressApp.post('/api/candidaturas/:id/visto', (req, res) => candidaturaCtrl.marcarVisto(req, res));
     this.expressApp.put('/api/candidaturas/:id/status', (req, res) => candidaturaCtrl.atualizarStatus(req, res));
     this.expressApp.delete('/api/candidaturas/:id', (req, res) => candidaturaCtrl.deletar(req, res));
 
     this.expressApp.get('/api/trampos/meus', (req, res) => trampoCtrl.meusTrampos(req, res));
     this.expressApp.get('/api/trampos/todos', (req, res) => trampoCtrl.listarTodos(req, res));
-    // ANTES de /api/trampos/:id: senao 'por-candidatura' cairia no :id.
-  this.expressApp.get('/api/trampos/por-candidatura/:candidaturaId', (req, res) => trampoCtrl.buscarPorCandidatura(req, res));
-  this.expressApp.get('/api/trampos/:id', (req, res) => trampoCtrl.buscarPorId(req, res));
+    this.expressApp.get('/api/trampos/:id', (req, res) => trampoCtrl.buscarPorId(req, res));
     this.expressApp.post('/api/trampos', (req, res) => trampoCtrl.criar(req, res));
     this.expressApp.put('/api/trampos/:id', (req, res) => trampoCtrl.atualizar(req, res));
     this.expressApp.post('/api/trampos/:id/iniciar', (req, res) => trampoCtrl.iniciar(req, res));
+    this.expressApp.post('/api/trampos/:id/confirmar-presenca', (req, res) => trampoCtrl.confirmarPresenca(req, res));
     this.expressApp.post('/api/trampos/:id/finalizar', (req, res) => trampoCtrl.finalizar(req, res));
 
     this.expressApp.get('/api/transacoes/minhas', (req, res) => transacaoCtrl.minhasTransacoes(req, res));
@@ -231,6 +256,7 @@ export class App {
     this.expressApp.get('/api/avaliacoes', (req, res) => avaliacaoCtrl.listar(req, res));
     this.expressApp.get('/api/avaliacoes/avaliado/:avaliadoId', (req, res) => avaliacaoCtrl.listarPorAvaliado(req, res));
     this.expressApp.get('/api/avaliacoes/minhas', (req, res) => avaliacaoCtrl.minhasAvaliacoes(req, res));
+    this.expressApp.get('/api/avaliacoes/pendentes', (req, res) => avaliacaoCtrl.pendentes(req, res));
     this.expressApp.post('/api/avaliacoes', (req, res) => avaliacaoCtrl.criar(req, res));
     this.expressApp.delete('/api/avaliacoes/:id', (req, res) => avaliacaoCtrl.deletar(req, res));
 
@@ -274,6 +300,14 @@ export class App {
     this.expressApp.put('/api/permissoes/:id', (req, res) => permissaoCtrl.atualizar(req, res));
 
     this.expressApp.get('/api/conversas/minhas', (req, res) => conversaCtrl.listarMinhas(req, res));
+    // Fase 3: templates de vaga (publicar em 30 segundos).
+    this.expressApp.get('/api/vaga-templates', (req, res) => vagaTemplateCtrl.listar(req, res));
+    // Notificacoes: existiam service/controller/tela, mas NENHUMA rota — a tela
+    // sempre caia em erro e o sino do Navbar nunca tinha contador.
+    this.expressApp.get('/api/notificacoes/minhas', (req, res) => notificacaoCtrl.listarMinhas(req, res));
+    this.expressApp.get('/api/notificacoes/nao-lidas', (req, res) => notificacaoCtrl.contarNaoLidas(req, res));
+    this.expressApp.put('/api/notificacoes/lidas/todas', (req, res) => notificacaoCtrl.marcarTodasComoLidas(req, res));
+    this.expressApp.put('/api/notificacoes/:id/lida', (req, res) => notificacaoCtrl.marcarComoLida(req, res));
     this.expressApp.post('/api/conversas', (req, res) => conversaCtrl.buscarOuCriar(req, res));
     this.expressApp.get('/api/conversas/:conversaId/mensagens', (req, res) => mensagemCtrl.listarPorConversa(req, res));
     this.expressApp.post('/api/conversas/:conversaId/mensagens', (req, res) => mensagemCtrl.enviar(req, res));

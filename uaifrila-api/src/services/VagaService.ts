@@ -5,6 +5,7 @@ import { VagaModel } from '../models/VagaModel';
 import { BaseRepository } from '../repositories/BaseRepository';
 import { VariavelSistemaService } from './VariavelSistemaService';
 import { EnderecoVagaService } from './EnderecoVagaService';
+import { VagaTurnoRepository } from '../repositories/VagaTurnoRepository';
 
 // ATENÇÃO: NÃO use nome 'variavelService' aqui - BaseService antigo tinha 'protected variavelService'
 // Use 'variavelSvc' para não dar TS2415 (private vs protected)
@@ -113,7 +114,7 @@ export class VagaService extends BaseService<VagaModel> {
         freela_recebe_bruto: base, freela_recebe_liquido, valor_a_receber,
         valor_servico_liquido: valor_a_receber - Number(dados.valor_transporte || 0),
         valor_servico_liquido_cartao: valor_a_receber - Number(dados.valor_transporte || 0),
-        valor_hora_liquido: valor_hora_final, valor_hora_final, valor_minimo_valido, valor_minimo: VALOR_MINIMO,
+        valor_hora_liquido: valor_hora_final, valor_hora_final, valor_minimo_valido,
         mensagem_validacao: valor_minimo_valido ? undefined : `Valor mínimo R$ ${VALOR_MINIMO.toFixed(2)} - aumente o valor do serviço`,
         meio_pagamento: 'cartao',
       };
@@ -145,6 +146,18 @@ export class VagaService extends BaseService<VagaModel> {
       if (pool) {
         try { const re = await pool.query(`SELECT e.*, c.nome as cidade_nome, e2.sigla as cidade_estado FROM enderecos_vaga ev JOIN enderecos e ON e.id=ev.endereco_id LEFT JOIN cidades c ON c.id=e.cidade_id LEFT JOIN estados e2 ON e2.id=c.estado_id WHERE ev.vaga_id=$1 AND ev.ativo=true LIMIT 1`, [v.id]); enderecoVaga = re.rows[0] || null; } catch {}
       }
+      // Turnos da vaga (agenda): o PainelMural agrupa por dia. Sem tabela
+      // (migration 03 nao rodada) cai para [] e o mural usa data/hora unica.
+      let turnosVaga: any[] = [];
+      if (pool) {
+        try { const rt = await pool.query(`SELECT data, hora_inicio, hora_fim, valor_servico, ordem, status FROM vaga_turnos WHERE vaga_id=$1 ORDER BY ordem`, [v.id]); turnosVaga = rt.rows || []; } catch {}
+      }
+      // Fase 1: quantas vagas já estão preenchidas (selecionado + aceito).
+      let preenchidas = 0;
+      if (pool) {
+        try { const rp = await pool.query(`SELECT COUNT(*)::int AS n FROM candidaturas WHERE vaga_id = $1 AND status IN ('SELECIONADO','ACEITA')`, [v.id]); preenchidas = Number(rp.rows[0]?.n || 0); } catch {}
+      }
+      const quantidadeVagas = Number(v.quantidade_vagas ?? 1);
       // Vaga em que o usuario ja se candidatou (PENDENTE/ACEITA/EM_ANALISE) NAO
       // aparece no Mural — ela e acompanhada em Meus Trampos.
       if (minhasCandidaturas.has(Number(v.id))) continue;
@@ -163,10 +176,13 @@ export class VagaService extends BaseService<VagaModel> {
         id: v.id, titulo: v.titulo, funcao: v.funcao, descricao: v.descricao,
         contratante_id: v.contratante_id, contratante_nome: v.contratante_nome,
         status: v.status_nome || statusChave, status_chave: statusChave, status_nome: v.status_nome || statusChave, status_cor: v.status_cor,
-        permite_editar: (v.permite_editar ?? true) && statusChave === 'AGUARDANDO_CANDIDATURA',
+        permite_editar: v.permite_editar ?? !['ACEITA','EM_ANDAMENTO','FINALIZADA','CANCELADA','FECHADA'].includes(statusChave),
         permite_cancelar: v.permite_cancelar ?? !['EM_ANDAMENTO','FINALIZADA','CANCELADA','FECHADA'].includes(statusChave),
         permite_candidatar: v.permite_candidatar ?? true,
         data_inicio: v.data_inicio, data_fim: v.data_fim,
+        turnos: turnosVaga,
+        quantidade_vagas: quantidadeVagas, preenchidas, restantes: Math.max(0, quantidadeVagas - preenchidas),
+        data_limite_candidatura: v.data_limite_candidatura || null,
         valor_servico: v.valor_servico, valor_transporte: v.valor_transporte,
         calculo,
         bairro: enderecoVaga?.bairro, cidade_nome: enderecoVaga?.cidade_nome, cidade_estado: enderecoVaga?.cidade_estado,
@@ -182,53 +198,10 @@ export class VagaService extends BaseService<VagaModel> {
         endereco_latitude: enderecoVaga?.latitude ?? null, endereco_longitude: enderecoVaga?.longitude ?? null,
         is_minha: isMinha, ja_candidatado: !!minhaCand, minha_candidatura: minhaCand || null, candidatura_status: minhaCand?.status || null,
         horas_para_inicio: horasParaInicio, pode_cancelar_candidatura: podeCancelarCandidatura, motivo_cancelar_bloqueado: motivoCancelarBloqueado,
-        turnos: await this.listarTurnos(Number(v.id)),
         valor_total_pagar: calculo.contratante_paga, valor_a_receber: calculo.valor_a_receber, valor_servico_liquido: calculo.valor_servico_liquido,
       });
     }
     return result;
-  }
-
-
-  // ---- TURNOS (vaga_turnos) ----
-  // Turno que passa da meia-noite pertence ao dia em que COMECA.
-  // Entrada do front: [{ data: 'YYYY-MM-DD', hora_inicio: 'HH:MM', hora_fim: 'HH:MM', valor_servico: number }]
-  private normalizarTurnos(turnos: any): any[] {
-    if (!Array.isArray(turnos)) return [];
-    const out: any[] = [];
-    for (const tu of turnos) {
-      const data = String(tu.data || tu.dia || '');
-      const hi = String(tu.hora_inicio || tu.horaInicio || tu.inicio || '');
-      const hf = String(tu.hora_fim || tu.horaFim || tu.fim || '');
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(data) || !/^\d{2}:\d{2}(:\d{2})?$/.test(hi) || !/^\d{2}:\d{2}(:\d{2})?$/.test(hf)) continue;
-      const norm = (h: string) => h.slice(0, 5);
-      const paraMin = (h: string) => { const [a, b] = norm(h).split(':').map(Number); return a * 60 + b; };
-      const atravessa = paraMin(hf) <= paraMin(hi);
-      const duracao = atravessa ? (1440 - paraMin(hi) + paraMin(hf)) : (paraMin(hf) - paraMin(hi));
-      if (duracao <= 0 || duracao > 1440) continue;
-      const valor = Number(tu.valor_servico ?? tu.valorServico ?? tu.valor ?? 0) || 0;
-      if (valor < 0) continue;
-      out.push({ data, hora_inicio: norm(hi), hora_fim: norm(hf), atravessa_meia_noite: atravessa, duracao_minutos: duracao, valor_servico: valor });
-    }
-    out.sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : a.hora_inicio < b.hora_inicio ? -1 : 1));
-    return out.map((x, i) => ({ ...x, ordem: i + 1 }));
-  }
-  private async salvarTurnos(vagaId: number, turnos: any) {
-    const pool = BaseRepository.getPool() as any;
-    const lista = this.normalizarTurnos(turnos);
-    if (!lista.length) return [];
-    await pool.query(`DELETE FROM vaga_turnos WHERE vaga_id = $1`, [vagaId]);
-    for (const tu of lista) {
-      await pool.query(`INSERT INTO vaga_turnos (vaga_id, data, hora_inicio, hora_fim, atravessa_meia_noite, duracao_minutos, valor_servico, ordem) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [vagaId, tu.data, tu.hora_inicio, tu.hora_fim, tu.atravessa_meia_noite, tu.duracao_minutos, tu.valor_servico, tu.ordem]);
-    }
-    return lista;
-  }
-  private async listarTurnos(vagaId: number): Promise<any[]> {
-    const pool = BaseRepository.getPool() as any;
-    try {
-      const r = await pool.query(`SELECT id, vaga_id, data, hora_inicio, hora_fim, atravessa_meia_noite, duracao_minutos, valor_servico, ordem, status FROM vaga_turnos WHERE vaga_id = $1 ORDER BY data, hora_inicio`, [vagaId]);
-      return (r.rows || []).map((x: any) => ({ ...x, data: x.data instanceof Date ? x.data.toISOString().slice(0, 10) : String(x.data).slice(0, 10), valor_servico: Number(x.valor_servico || 0) }));
-    } catch { return []; }
   }
 
   // Cancelar vaga do dono - com trava via status_vaga
@@ -264,6 +237,43 @@ export class VagaService extends BaseService<VagaModel> {
   }
 
   // Extrai inicio/fim (parede) do payload: front manda data_inicio_local/data_fim_local.
+  // Turnos normalizados -> inicio (1o turno) e fim (ultimo turno) em horario de parede.
+  // Se o ultimo turno atravessa a meia-noite, o fim cai no dia seguinte.
+  private limitesDosTurnos(turnos: any[]): { iniWall: string; fimWall: string } {
+    const primeiro = turnos[0];
+    const ultimo = turnos[turnos.length - 1];
+    const iniWall = `${primeiro.data}T${primeiro.hora_inicio}`;
+    let fimData = String(ultimo.data);
+    if (ultimo.atravessa_meia_noite) {
+      const d = new Date(`${fimData}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + 1);
+      fimData = d.toISOString().slice(0, 10);
+    }
+    return { iniWall, fimWall: `${fimData}T${ultimo.hora_fim}` };
+  }
+  // Normaliza os turnos do payload sem depender do VagaTurnoService (evita ciclo).
+  // Reusa a mesma regra: descarta invalido, ordena por data/hora.
+  private normalizarTurnosPayload(turnos: any): any[] {
+    if (!Array.isArray(turnos) || !turnos.length) return [];
+    const paraMin = (h: string) => { const [a, b] = String(h).slice(0, 5).split(':').map(Number); return a * 60 + b; };
+    const out: any[] = [];
+    for (const tu of turnos) {
+      const data = String(tu.data || tu.dia || '');
+      const hi = String(tu.hora_inicio || tu.horaInicio || tu.inicio || '').slice(0, 5);
+      const hf = String(tu.hora_fim || tu.horaFim || tu.fim || '').slice(0, 5);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(data) || !/^\d{2}:\d{2}$/.test(hi) || !/^\d{2}:\d{2}$/.test(hf)) continue;
+      if (hi === hf) continue;
+      const atravessa = paraMin(hf) <= paraMin(hi);
+      const duracao = atravessa ? (1440 - paraMin(hi) + paraMin(hf)) : (paraMin(hf) - paraMin(hi));
+      if (duracao < 30 || duracao > 1440) continue;
+      const valor = Number(tu.valor_servico ?? tu.valorServico ?? tu.valor ?? 0) || 0;
+      if (valor < 0) continue;
+      out.push({ data, hora_inicio: hi, hora_fim: hf, atravessa_meia_noite: atravessa, duracao_minutos: duracao, valor_servico: valor });
+    }
+    out.sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : paraMin(a.hora_inicio) - paraMin(b.hora_inicio)));
+    return out.map((x, i) => ({ ...x, ordem: i + 1, status: 'AGENDADO' }));
+  }
+
   private extrairDatas(dados: any): { iniWall: string; fimWall: string } {
     const iniWall = String(dados.data_inicio_local || dados.data_inicio || dados.dataInicio || '');
     const fimWall = String(dados.data_fim_local || dados.data_fim || dados.dataFim || '');
@@ -282,9 +292,19 @@ export class VagaService extends BaseService<VagaModel> {
     if (!String(dados.titulo || '').trim()) throw new Error('Título obrigatório');
     const enderecoId = Number(dados.endereco_id || dados.enderecoId);
     if (!enderecoId || isNaN(enderecoId)) throw new Error('Endereço obrigatório');
-    const valorServico = Number(dados.valor_servico ?? dados.valorServico);
+    // Agenda: se vieram turnos, o valor e o intervalo da vaga DERIVAM deles
+    // (valor = soma dos turnos; inicio = 1o turno; fim = ultimo turno).
+    const turnosNorm = this.normalizarTurnosPayload(dados.turnos);
+    if (Array.isArray(dados.turnos) && dados.turnos.length && !turnosNorm.length) throw new Error('Turnos inválidos (dia + período + valor)');
+    let valorServico = Number(dados.valor_servico ?? dados.valorServico);
+    let iniWall = '', fimWall = '';
+    if (turnosNorm.length) {
+      valorServico = turnosNorm.reduce((s: number, x: any) => s + Number(x.valor_servico || 0), 0);
+      ({ iniWall, fimWall } = this.limitesDosTurnos(turnosNorm));
+    } else {
+      ({ iniWall, fimWall } = this.extrairDatas(dados));
+    }
     if (!valorServico || isNaN(valorServico) || valorServico <= 0) throw new Error('Valor do serviço obrigatório');
-    const { iniWall, fimWall } = this.extrairDatas(dados);
     if (!iniWall || !fimWall) throw new Error('Data de início e fim obrigatórias');
     const tz = dados.timezone || 'America/Sao_Paulo';
     const dataInicio = this.paredeParaUTC(iniWall, tz);
@@ -293,12 +313,6 @@ export class VagaService extends BaseService<VagaModel> {
     if (dataFim.getTime() <= dataInicio.getTime()) throw new Error('Data fim deve ser maior que início');
     // Reusa o calculo (valida horas e devolve totais) com as mesmas datas.
     const calculo = await this.calcular({ ...dados, data_inicio_local: iniWall, data_fim_local: fimWall });
-    // VALOR_MINIMO_VAGA: o calculo ja calculava valor_minimo_valido, mas o criar
-    // IGNORAVA e criava a vaga mesmo assim. Agora rejeita (400) - backend e fonte da verdade.
-    // Regra sobre o VALOR DO SERVICO (bruto): o seed define a variavel como "valor minimo
-    // que contratante pode solicitar um servico". Se fosse sobre o liquido, o proprio valor
-    // padrao (= minimo) seria rejeitado quando o transporte e 0.
-    if (valorServico < Number(calculo.valor_minimo ?? 0)) throw { status: 400, message: `Valor do serviço abaixo do mínimo R$ ${Number(calculo.valor_minimo).toFixed(2)} - aumente o valor do serviço` };
     const funcaoId = Number(dados.funcao_id ?? dados.funcaoId);
     if (!funcaoId || isNaN(funcaoId)) throw new Error('funcao_id obrigatorio (use /api/funcoes para listar; nao existe coluna funcao em vagas)');
     const payload = {
@@ -313,18 +327,27 @@ export class VagaService extends BaseService<VagaModel> {
       status_vaga_id: 1,
       data_inicio: dataInicio,
       data_fim: dataFim,
+      // Fase 1: quantas pessoas a vaga precisa (1 = comportamento antigo).
+      // Fase 3: até quando dá para se candidatar (NULL = até o início do 1o turno).
+      quantidade_vagas: Math.min(20, Math.max(1, Number(dados.quantidade_vagas ?? dados.quantidadeVagas ?? 1) || 1)),
+      data_limite_candidatura: dados.data_limite_candidatura || dados.dataLimiteCandidatura || null,
     };
     const criada: any = await this.getRepo().criarGenerico(payload);
     const vagaId = Number((criada as any)?.id);
-    // Turnos: se o front mandou a agenda (tela separada de dias/periodos), salva
-    // em vaga_turnos. Sem turnos, o backfill/legado segue valendo (1 turno = data_inicio/data_fim).
-    if (Array.isArray(dados.turnos) && dados.turnos.length) { try { await this.salvarTurnos(vagaId, dados.turnos); } catch (e: any) { try { await this.deletar(vagaId); } catch {} throw new Error('Não foi possível salvar os turnos da vaga: ' + (e.message || 'erro desconhecido')); } }
     try {
       await new EnderecoVagaService().vincular(vagaId, enderecoId);
     } catch (e: any) {
       // Sem endereco a vaga nao aparece direito no mural: desfaz a criacao.
       try { await this.deletar(vagaId); } catch {}
       throw new Error('Não foi possível vincular o endereço à vaga: ' + (e.message || 'erro desconhecido'));
+    }
+    if (turnosNorm.length) {
+      try {
+        await new VagaTurnoRepository().substituirAgenda(vagaId, turnosNorm);
+      } catch (e: any) {
+        try { await this.deletar(vagaId); } catch {}
+        throw new Error('Não foi possível salvar os turnos da vaga: ' + (e.message || 'erro desconhecido'));
+      }
     }
     return criada;
   }
@@ -334,14 +357,13 @@ export class VagaService extends BaseService<VagaModel> {
   async atualizar(id: number, dados: any): Promise<any> {
     const existente: any = await this.buscarPorId(id);
     if (!existente) throw new Error('Registro não encontrado para atualizar');
-    // Edicao so em AGUARDANDO_CANDIDATURA. Atualizacao so de status (ex.: fechar
-    // vaga) nao e edicao e passa. Sem isso, o front escondia o botao mas um PUT
-    // direto ainda editava vaga ACEITA/EM_ANDAMENTO.
-    const camposEdicao = ['titulo', 'descricao', 'funcao_id', 'funcaoId', 'valor_servico', 'valor_transporte', 'turnos', 'data_inicio_local', 'data_fim_local', 'endereco_id', 'enderecoId'];
-    if (camposEdicao.some((k) => dados[k] !== undefined)) {
-      const completa: any = await this.buscarCompletaPorId(id);
-      const st = String(completa?.status_chave || '').toUpperCase();
-      if (st && st !== 'AGUARDANDO_CANDIDATURA') throw new Error(`Só é possível editar vaga em Aguardando Candidatura (status atual: ${st})`);
+    // Agenda: turnos novos substituem valor/datas — o resto do metodo segue igual,
+    // porque ele ja recalcula e regrava a partir desses campos.
+    const turnosNorm = this.normalizarTurnosPayload(dados.turnos);
+    if (Array.isArray(dados.turnos) && dados.turnos.length && !turnosNorm.length) throw new Error('Turnos inválidos (dia + período + valor)');
+    if (turnosNorm.length) {
+      const { iniWall, fimWall } = this.limitesDosTurnos(turnosNorm);
+      dados = { ...dados, data_inicio_local: iniWall, data_fim_local: fimWall, valor_servico: turnosNorm.reduce((s: number, x: any) => s + Number(x.valor_servico || 0), 0) };
     }
     const { iniWall, fimWall } = this.extrairDatas(dados);
     const tz = dados.timezone || 'America/Sao_Paulo';
@@ -349,6 +371,13 @@ export class VagaService extends BaseService<VagaModel> {
     if (dados.titulo !== undefined) patch.titulo = String(dados.titulo).trim();
     if (dados.descricao !== undefined) patch.descricao = dados.descricao || '';
     if (dados.funcao_id !== undefined || dados.funcaoId !== undefined) patch.funcao_id = Number(dados.funcao_id ?? dados.funcaoId);
+    // Fases 1 e 3: quantidade e data limite editáveis (mural só deixa editar vaga Aguardando).
+    if (dados.quantidade_vagas !== undefined || dados.quantidadeVagas !== undefined) {
+      const q = Number(dados.quantidade_vagas ?? dados.quantidadeVagas);
+      if (!q || q < 1 || q > 20) throw new Error('Quantidade de vagas deve ser entre 1 e 20');
+      patch.quantidade_vagas = q;
+    }
+    if (dados.data_limite_candidatura !== undefined || dados.dataLimiteCandidatura !== undefined) patch.data_limite_candidatura = dados.data_limite_candidatura ?? dados.dataLimiteCandidatura ?? null;
     if (dados.valor_servico !== undefined || dados.valor_transporte !== undefined) {
       const vs = Number(dados.valor_servico ?? existente.valorServico ?? existente.valor_servico ?? 0);
       const vt = Number(dados.valor_transporte ?? existente.valorTransporte ?? existente.valor_transporte ?? 0);
@@ -362,17 +391,14 @@ export class VagaService extends BaseService<VagaModel> {
       const dataFim = this.paredeParaUTC(fimAtual, tz);
       if (dataFim.getTime() <= dataInicio.getTime()) throw new Error('Data fim deve ser maior que início');
       const calculo = await this.calcular({ ...dados, valor_servico: patch.valor_servico ?? existente.valorServico, valor_transporte: patch.valor_transporte ?? existente.valorTransporte, data_inicio_local: iniAtual, data_fim_local: fimAtual });
-      if (Number(patch.valor_servico ?? existente.valorServico ?? 0) < Number(calculo.valor_minimo ?? 0)) throw { status: 400, message: `Valor do serviço abaixo do mínimo R$ ${Number(calculo.valor_minimo).toFixed(2)} - aumente o valor do serviço` };
       patch.data_inicio = dataInicio; patch.data_fim = dataFim;
       patch.valor_hora = Number(calculo.valor_hora_bruto || 0);
       patch.total_freela = Number(calculo.freela_recebe_liquido || 0);
     }
-    if (patch.valor_servico !== undefined && !iniWall && !fimWall) {
-      const calculoSemData = await this.calcular({ valor_servico: patch.valor_servico, valor_transporte: patch.valor_transporte ?? existente.valorTransporte, data_inicio_local: this.isoParaParede(existente.dataInicio || existente.data_inicio, tz), data_fim_local: this.isoParaParede(existente.dataFim || existente.data_fim, tz) });
-      if (Number(patch.valor_servico) < Number(calculoSemData.valor_minimo ?? 0)) throw { status: 400, message: `Valor do serviço abaixo do mínimo R$ ${Number(calculoSemData.valor_minimo).toFixed(2)} - aumente o valor do serviço` };
-    }
     const atualizada: any = await this.getRepo().atualizarGenerico(id, patch);
-    if (Array.isArray(dados.turnos)) { try { await this.salvarTurnos(id, dados.turnos); } catch (e: any) { throw new Error('Não foi possível salvar os turnos da vaga: ' + (e.message || 'erro desconhecido')); } }
+    if (turnosNorm.length) {
+      await new VagaTurnoRepository().substituirAgenda(id, turnosNorm);
+    }
     const enderecoId = Number(dados.endereco_id || dados.enderecoId);
     if (enderecoId && !isNaN(enderecoId)) {
       const evSvc = new EnderecoVagaService();

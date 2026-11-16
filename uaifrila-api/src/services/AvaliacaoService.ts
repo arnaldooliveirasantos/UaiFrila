@@ -28,6 +28,25 @@ export class AvaliacaoService extends BaseService<AvaliacaoModel> {
     }
   }
 
+  // FASE 4: trampos finalizados em que o usuário ainda NÃO avaliou a outra parte.
+  // O saque (quando existir) usa esta lista como trava: sem avaliar, sem liberar.
+  async pendentes(usuarioId: number): Promise<any[]> {
+    const { BaseRepository } = await import('../repositories/BaseRepository');
+    const pool = BaseRepository.getPool() as any;
+    const r = await pool.query(
+      `SELECT t.id as trampo_id, t.vaga_id, v.titulo as vaga_titulo,
+              CASE WHEN t.freela_id = $1 THEN t.contratante_id ELSE t.freela_id END as avaliado_id,
+              CASE WHEN t.freela_id = $1 THEN u2.nome_completo ELSE u1.nome_completo END as avaliado_nome,
+              t.data_fim
+       FROM trampos t JOIN vagas v ON v.id = t.vaga_id
+       LEFT JOIN usuarios u1 ON u1.id = t.contratante_id
+       LEFT JOIN usuarios u2 ON u2.id = t.freela_id
+       WHERE (t.freela_id = $1 OR t.contratante_id = $1) AND t.status = 'FINALIZADO'
+         AND NOT EXISTS (SELECT 1 FROM avaliacoes a WHERE a.trampo_id = t.id AND a.avaliador_id = $1)
+       ORDER BY t.data_fim DESC NULLS LAST`, [usuarioId]);
+    return r.rows || [];
+  }
+
   async minhasAvaliacoes(usuarioId: number): Promise<AvaliacaoModel[]> {
     return this.listarPorAvaliador(usuarioId);
   }

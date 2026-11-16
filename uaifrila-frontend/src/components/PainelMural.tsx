@@ -27,18 +27,31 @@ function inicioValido(vaga: any): boolean {
   const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
   return inicio.getTime() >= hoje.getTime();
 }
-// Linhas "sex 20/11 — 18:00–00:00 (R$ 200,00) • ..." agrupadas por dia.
-// ANTES era um IIFE com JSX dentro do map do JSX -> o Babel quebrava com
-// "Adjacent JSX elements must be wrapped" (linha 126). Funcao separada resolve.
-function linhasTurnos(turnos: any[]) {
-  const g: Record<string, any[]> = {};
-  for (const x of turnos) { const d = String(x.data).slice(0, 10); (g[d] = g[d] || []).push(x); }
-  return Object.keys(g).sort().map((d) => {
-    const [y, m, dd] = d.split('-').map(Number);
-    const dt2 = new Date(y, m - 1, dd);
-    const texto = g[d].map((x: any) => `${String(x.hora_inicio).slice(0, 5)}–${String(x.hora_fim).slice(0, 5)} (R$ ${(Number(x.valor_servico) || 0).toFixed(2)})`).join(' • ');
-    return <div key={d} className="font-black capitalize">{dt2.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })} — {texto}</div>;
-  });
+// Dias e horários da vaga, agrupados por dia. Sem turnos, cai para data/hora única.
+function renderDiasHorarios(vaga: any, dt: Date | null, hora: string) {
+  if (Array.isArray(vaga.turnos) && vaga.turnos.length) {
+    const g: Record<string, any[]> = {};
+    for (const x of vaga.turnos) {
+      const k = String(x.data).slice(0, 10);
+      (g[k] = g[k] || []).push(x);
+    }
+    return Object.keys(g).sort().map((d) => {
+      const [y, mo, dd] = d.split('-').map(Number);
+      const dt2 = new Date(y, mo - 1, dd);
+      const turnos = g[d].map((x: any) => `${String(x.hora_inicio).slice(0, 5)}–${String(x.hora_fim).slice(0, 5)} (R$ ${(Number(x.valor_servico) || 0).toFixed(2)})`).join(' • ');
+      return (
+        <div key={d} className="font-black capitalize">
+          {dt2.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })} — {turnos}
+        </div>
+      );
+    });
+  }
+  return (
+    <>
+      <div className="font-black">{dt ? dt.toLocaleDateString('pt-BR') : '—'}</div>
+      {hora && <div className={styles.typography.caption}>às {hora}</div>}
+    </>
+  );
 }
 
 export function PainelMural({ usuario, setTelaAtiva }: { usuario?: any; setTelaAtiva?: (t: string) => void }) {
@@ -97,16 +110,18 @@ export function PainelMural({ usuario, setTelaAtiva }: { usuario?: any; setTelaA
       setMsg('Vaga cancelada.');
     } catch (e: any) { setMsg(e.message || 'Não foi possível cancelar a vaga'); } finally { setCancelando(null); }
   };
-  const candidatar = async (vagaId: number) => {
+  const [candidatandoForm, setCandidatandoForm] = useState<number | null>(null);
+  const [mensagemPorVaga, setMensagemPorVaga] = useState<Record<number, string>>({});
+  const candidatar = async (vagaId: number, mensagem?: string) => {
     if (!getToken()) { setMsg('Faça login como Freela para se candidatar.'); return; }
     if (!podeCandidatar) { setMsg('Só Freela/DUAL pode se candidatar.'); return; }
     setCandidatando(vagaId); setMsg('');
     try {
-      await apiFetch('/api/candidaturas', { method: 'POST', body: JSON.stringify({ vaga_id: vagaId }) });
+      await apiFetch('/api/candidaturas', { method: 'POST', body: JSON.stringify({ vaga_id: vagaId, mensagem: (mensagem || '').slice(0, 500) || undefined }) });
       // Vaga ja candidatada sai do Mural (regra do backend): ela passa a ser
       // acompanhada em Meus Trampos.
       setVagas(prev => prev.filter(v => v.id !== vagaId));
-      setMsg('Candidatura enviada! Acompanhe em Meus Trampos.');
+      setMsg('Candidatura enviada! Acompanhe em Meus Trampos.'); setCandidatandoForm(null);
     } catch (e: any) { setMsg(e.message || 'Não foi possível candidatar'); } finally { setCandidatando(null); }
   };
   if (loading) return <div className={styles.pageContainer}><div className={styles.card}>Carregando mural...</div></div>;
@@ -132,26 +147,33 @@ export function PainelMural({ usuario, setTelaAtiva }: { usuario?: any; setTelaA
           // o item nao aparece.
           const distancia = calcularDistanciaKm(meuEndereco?.latitude, meuEndereco?.longitude, vaga.endereco_latitude, vaga.endereco_longitude);
           const distanciaTexto = formatarDistancia(distancia);
-          const temTurnos = Array.isArray(vaga.turnos) && vaga.turnos.length > 0;
-          // Fallback (vaga antiga sem turnos) como variavel, NAO como fragmento <>
-          // dentro do ternario: o Babel quebrava em "</>)}" (linha 140).
-          const fallbackData = (<div><div className="font-black">{dt ? dt.toLocaleDateString('pt-BR') : '—'}</div>{hora && <div className={styles.typography.caption}>às {hora}</div>}</div>);
           return (
             <div className={`${styles.valorBox} mt-3 grid grid-cols-2 md:grid-cols-3 gap-3`}>
               <div><div className={styles.typography.caption}>Você recebe</div><div className="font-black">R$ {valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div></div>
-              <div><div className={styles.typography.caption}>Transporte</div><div className="font-black">R$ {Number(vaga.valor_transporte || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div></div>
               <div><div className={styles.typography.caption}>Cidade</div><div className="font-black">{cidade || '—'}</div>{vaga.bairro && <div className={styles.typography.caption}>{vaga.bairro}</div>}</div>
-                            <div className="col-span-2 md:col-span-3"><div className={styles.typography.caption}>Dias e horários</div>
-                {temTurnos ? linhasTurnos(vaga.turnos) : fallbackData}
+              <div className="col-span-2 md:col-span-3"><div className={styles.typography.caption}>Dias e horários</div>
+                {renderDiasHorarios(vaga, dt, hora)}
               </div>
               <div><div className={styles.typography.caption}>Função</div><div className="font-black">{vaga.funcao || '—'}</div></div>
+              <div><div className={styles.typography.caption}>Vagas</div><div className="font-black">{Number(vaga.quantidade_vagas ?? 1)} vaga(s) • {Number(vaga.preenchidas ?? 0)} preenchida(s) • {Number(vaga.restantes ?? vaga.quantidade_vagas ?? 1)} restante(s)</div></div>
+              {vaga.data_limite_candidatura && <div><div className={styles.typography.caption}>Candidaturas até</div><div className="font-black">{new Date(vaga.data_limite_candidatura).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div></div>}
               {distanciaTexto && <div><div className={styles.typography.caption}>Distância</div><div className="font-black">📍 {distanciaTexto} de você</div></div>}
             </div>
           );
         })()}
         <div className="mt-4 flex flex-wrap gap-2">
-          {podeCandidatar && !ehMinha && !ja && (<button disabled={candidatando === vaga.id} onClick={() => candidatar(vaga.id)} className={styles.buttonPrimary(candidatando === vaga.id)}>{candidatando === vaga.id ? 'Enviando...' : 'Candidatar-se'}</button>)}
-          {ehMinha && vaga.permite_editar !== false && String(vaga.status_chave || '').toUpperCase() === 'AGUARDANDO_CANDIDATURA' && (<button onClick={() => editarVaga(vaga)} className={styles.buttonWarning}>Editar</button>)}
+          {podeCandidatar && !ehMinha && !ja && candidatandoForm !== vaga.id && (<button onClick={() => setCandidatandoForm(vaga.id)} className={styles.buttonPrimary(false)}>Candidatar-se</button>)}
+          {podeCandidatar && !ehMinha && !ja && candidatandoForm === vaga.id && (
+            <div className={styles.cardSmall + ' w-full'}>
+              <label className={styles.label}>Mensagem para o contratante (opcional)</label>
+              <textarea value={mensagemPorVaga[vaga.id] || ''} onChange={(e) => setMensagemPorVaga((prev) => ({ ...prev, [vaga.id]: e.target.value }))} maxLength={500} rows={2} className={styles.input} placeholder="Ex.: Já trabalhei em casamentos, chego 1h antes." />
+              <div className="flex gap-2 mt-2">
+                <button disabled={candidatando === vaga.id} onClick={() => candidatar(vaga.id, mensagemPorVaga[vaga.id])} className={styles.buttonPrimary(candidatando === vaga.id)}>{candidatando === vaga.id ? 'Enviando...' : 'Enviar candidatura'}</button>
+                <button onClick={() => setCandidatandoForm(null)} className={styles.buttonSecondary}>Voltar</button>
+              </div>
+            </div>
+          )}
+          {ehMinha && vaga.permite_editar !== false && (<button onClick={() => editarVaga(vaga)} className={styles.buttonWarning}>Editar</button>)}
           {ehMinha && vaga.permite_cancelar !== false && (<button disabled={cancelando === vaga.id} onClick={() => cancelarVaga(vaga.id)} className={styles.buttonDanger}>{cancelando === vaga.id ? 'Cancelando...' : 'Cancelar vaga'}</button>)}
         </div>
         {ehMinha && <span className={styles.badge('default') + ' mt-4 inline-block'}>Sua vaga</span>}

@@ -102,6 +102,21 @@ export default function FotoPerfil({ usuario, onSalvo }: { usuario: any; onSalvo
   };
   const abrirCamera = async () => {
     setErro(''); setCameraPronta(false);
+    // ANDROID / CELULAR: abre a câmera nativa do aparelho direto, pelo
+    // <input capture="user">, de forma SÍNCRONA dentro do toque do botão.
+    // ANTES: tentava getUserMedia primeiro e, se falhasse, clicava no input
+    // DEPOIS de um await. Aí o toque do usuário já tinha expirado e o Android
+    // bloqueava a abertura — tocava em "Tirar Retrato" e nada abria.
+    // Também falhava em WebView / navegador dentro de outro app (WhatsApp,
+    // Instagram), onde getUserMedia é bloqueado, e em http://192.168...,
+    // onde o fallback mandava abrir a GALERIA em vez da câmera.
+    // O input com capture não precisa de HTTPS nem de permissão do navegador,
+    // então funciona nesses 3 casos. O fluxo da webcam com círculo fica só
+    // no PC, onde ele funciona.
+    if (!noPC) {
+      cameraArquivoRef.current?.click();
+      return;
+    }
     if (!navigator.mediaDevices?.getUserMedia) {
       setErro('Este navegador não consegue tirar o retrato. Use "escolher um arquivo".');
       galeriaRef.current?.click();
@@ -132,8 +147,9 @@ export default function FotoPerfil({ usuario, onSalvo }: { usuario: any; onSalvo
       } else {
         setErro('Não consegui tirar o retrato: ' + (e?.message || e?.name || 'erro desconhecido'));
       }
-      if (!noPC) cameraArquivoRef.current?.click();
-      else galeriaRef.current?.click();
+      // PC: sem webcam, abre o seletor de arquivo (no celular nunca chega aqui:
+      // o abrirCamera retorna antes, direto no input da câmera nativa).
+      galeriaRef.current?.click();
     } finally { setAbrindoCamera(false); }
   };
   const capturar = () => {

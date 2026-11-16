@@ -15,6 +15,15 @@ const TIPO_ROTULO: Record<string, string> = {
   VAGA_CRIADA: 'Nova vaga',
   AVALIACAO_RECEBIDA: 'Avaliação recebida',
   PAGAMENTO_RECEBIDO: 'Pagamento recebido',
+  // Fases 1 a 4 (antes caíam no rótulo genérico):
+  CANDIDATURA_SELECIONADA: 'Você foi selecionado — confirme!',
+  CANDIDATURA_SELECIONADO: 'Você foi selecionado — confirme!',
+  SELECAO_CHAMADA_FILA: 'Sua vez! Chamado da lista de espera',
+  SELECAO_CONFIRMADA: 'Seleção confirmada pelo freela',
+  SELECAO_RECUSADA: 'Seleção recusada pelo freela',
+  SELECAO_EXPIRADA: 'Prazo de confirmação expirado',
+  CANDIDATURA_CONFIRMADA: 'Freela confirmou a seleção',
+  PRESENCA_CONFIRMADA: 'Presença confirmada',
 };
 const rotuloTipo = (tipo: string) => TIPO_ROTULO[tipo] || String(tipo || '').replace(/_/g, ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase());
 const iconeTipo = (tipo: string) => {
@@ -56,8 +65,8 @@ export default function TelaNotificacoes() {
     } catch (e: any) { setErro(e.message || 'Não foi possível marcar como lida'); } finally { setMarcandoId(null); }
   };
   const marcarTodasComoLidas = async () => {
-    const ids = naoLidas.map((n: any) => Number(n.id));
-    for (const id of ids) { try { await apiFetch(`/api/notificacoes/${id}/lida`, { method: 'PUT' }); } catch {} }
+    try { await apiFetch('/api/notificacoes/lidas/todas', { method: 'PUT' }); }
+    catch { const ids = naoLidas.map((n: any) => Number(n.id)); for (const id of ids) { try { await apiFetch(`/api/notificacoes/${id}/lida`, { method: 'PUT' }); } catch {} } }
     setNotificacoes((prev) => prev.map((n: any) => ({ ...n, lida: true })));
   };
   if (carregando) return <div className={styles.pageContainer}><div className={styles.card}><p className="animate-pulse">Carregando notificações...</p></div></div>;

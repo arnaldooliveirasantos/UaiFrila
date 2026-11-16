@@ -50,6 +50,7 @@ export class TrampoController extends BaseController {
     try { const lista = await this.service.listarTodos(); return res.json({ success: true, data: this.mapListToPublic(lista, req) }); }
     catch (e: any) { return this.handleError(res, e); }
   };
+  confirmarPresenca = async (req: AuthRequest, res: Response) => { try { const r = await this.service.confirmarPresenca(Number(req.params.id), Number(req.usuario?.id)); return res.json({ success: true, data: r }); } catch (e: any) { return this.handleError(res, e); } };
   buscarPorCandidatura = async (req: AuthRequest, res: Response) => {
     try { const r = await this.service.buscarPorCandidatura(Number(req.params.candidaturaId), Number(req.usuario?.id)); return res.json({ success: true, data: r }); }
     catch (e: any) { return this.handleError(res, e); }

@@ -231,8 +231,11 @@ CREATE TABLE vagas (
   status_vaga_id INT  NOT NULL REFERENCES status_vaga(id)DEFAULT 1,
   data_inicio TIMESTAMP NOT NULL,
   data_fim TIMESTAMP NOT NULL,
+  data_limite_candidatura TIMESTAMP null,
+  quantidade_vagas INT NOT NULL DEFAULT 1 CHECK (quantidade_vagas >= 1)
   criado_em TIMESTAMP DEFAULT NOW(),
-  atualizado_em TIMESTAMP DEFAULT NOW()
+  atualizado_em TIMESTAMP DEFAULT NOW(),
+  
 );
 
 
@@ -266,10 +269,17 @@ CREATE TABLE candidaturas (
   motivo_cancelamento TEXT,
   data_cancelamento TIMESTAMP,
   cancelado_por INT REFERENCES usuarios(id),
+  visto_em TIMESTAMP NULL,
+  motivo_recusa VARCHAR(100) NULL,
+  prazo_resposta_ate TIMESTAMP NULL,
+  posicao_lista_espera INT NULL,
   criado_em TIMESTAMP DEFAULT NOW(),
   atualizado_em TIMESTAMP DEFAULT NOW(),
   UNIQUE(vaga_id, usuario_id)
 );
+CREATE INDEX IF NOT EXISTS idx_candidaturas_vaga_status ON candidaturas (vaga_id, status);
+CREATE INDEX IF NOT EXISTS idx_candidaturas_prazo ON candidaturas (prazo_resposta_ate)  WHERE status = 'SELECIONADO';
+
 CREATE TABLE IF NOT EXISTS candidatos (
   id SERIAL PRIMARY KEY,
   usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
@@ -287,6 +297,7 @@ CREATE TABLE trampos (
   codigo_fim VARCHAR(10),
   data_inicio TIMESTAMP,
   data_fim TIMESTAMP,
+  presenca_confirmada_em TIMESTAMP NULL,
   criado_em TIMESTAMP DEFAULT NOW(),
   atualizado_em TIMESTAMP DEFAULT NOW()
 );
@@ -549,6 +560,19 @@ CREATE TABLE IF NOT EXISTS trampo_turnos (
 );
 CREATE INDEX IF NOT EXISTS idx_trampo_turnos_trampo ON trampo_turnos (trampo_id);
 CREATE INDEX IF NOT EXISTS idx_trampo_turnos_turno ON trampo_turnos (vaga_turno_id);
+
+-- Fase 3: templates de vaga (publicar em 30 segundos)
+CREATE TABLE IF NOT EXISTS vaga_templates (
+  id SERIAL PRIMARY KEY,
+  nome VARCHAR(100) NOT NULL UNIQUE,
+  funcao_id INT NOT NULL REFERENCES funcoes(id),
+  titulo VARCHAR(150) NOT NULL,
+  descricao TEXT NOT NULL,
+  turnos_json JSONB NOT NULL DEFAULT '[]',
+  ativo BOOLEAN NOT NULL DEFAULT true,
+  criado_em TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_vaga_templates_funcao ON vaga_templates (funcao_id);
 -- =====================================================================
 -- 8. FUNÇÕES E VIEWS
 -- =====================================================================
@@ -767,12 +791,13 @@ ON CONFLICT (chave) DO NOTHING;
 
 INSERT INTO status_vaga (chave, nome_exibicao, descricao, cor_hex, ordem, permite_editar, permite_cancelar, permite_candidatar) VALUES
 ('AGUARDANDO_CANDIDATURA', 'Aguardando Candidatura', 'Vaga aberta, aguardando freelas se candidatarem', '#22C55E', 1, true, true, true),
-('AGUARDANDO_ACEITE', 'Aguardando Aceite', 'Tem candidaturas pendentes, aguardando contratante aceitar um freela', '#F59E0B', 2, true, true, true),
+('AGUARDANDO_ACEITE', 'Aguardando Aceite', 'Tem candidaturas pendentes, aguardando contratante aceitar um freela', '#F59E0B', 2, false, true, true),
 ('ACEITA', 'Aceita', 'Freela aceito, aguardando início (pode cancelar até Xh antes com motivo)', '#3B82F6', 3, false, false, false),
 ('EM_ANDAMENTO', 'Em Andamento', 'Trampo iniciado, freela trabalhando', '#8B5CF6', 4, false, false, false),
 ('FINALIZADA', 'Finalizada', 'Trampo finalizado', '#10B981', 5, false, false, false),
 ('CANCELADA', 'Cancelada', 'Vaga cancelada', '#EF4444', 6, false, false, false),
-('FECHADA', 'Fechada', 'Vaga fechada sem contratação', '#6B7280', 7, false, false, false)
+('FECHADA', 'Fechada', 'Vaga fechada sem contratação', '#6B7280', 7, false, false, false),
+('AGUARDANDO_CONFIRMACAO', 'Aguardando Confirmação', 'Seleção feita, aguardando o freela confirmar', '#F59E0B', 3, false, true, true)
 ON CONFLICT (chave) DO UPDATE SET nome_exibicao=EXCLUDED.nome_exibicao, descricao=EXCLUDED.descricao, cor_hex=EXCLUDED.cor_hex, ordem=EXCLUDED.ordem, permite_editar=EXCLUDED.permite_editar, permite_cancelar=EXCLUDED.permite_cancelar, permite_candidatar=EXCLUDED.permite_candidatar;
 
 
@@ -931,8 +956,10 @@ INSERT INTO variaveis_sistema (chave, valor, valor_numerico, tipo, descricao, ca
 ('PRAZO_CANCELAMENTO_VAGA_HORAS', '24', 24, 'number', 'Prazo mínimo antes do início para contratante cancelar vaga com freela aceito.', 'vagas', true),
 ('MOTIVO_CANCELAMENTO_MIN_CARACTERES', '10', 10, 'number',  'Tamanho mínimo do motivo de cancelamento quando já aceito.', 'candidatura', true),
 ('NOTIFICAR_CANCELAMENTO', 'true', 1, 'boolean', 'Se true, envia notificação ao contratante/freela ao cancelar candidatura aceita.', 'candidatura', true),
-('CAMINHO_LOG_API', '/var/log/uaifrila/api', NULL, 'string', 'Diretorio dos logs em arquivo da uaifrila-api (um arquivo por dia). Dev Windows ex.: C:\logs\uaifrila\api', 'log', true),
-('CAMINHO_LOG_EMAIL_WORKER', '/var/log/uaifrila/email-worker', NULL, 'string', 'Diretorio dos logs em arquivo do uaifrila-email-worker (um arquivo por dia). Dev Windows ex.: C:\logs\uaifrila\email-worker', 'log', true)
+('CAMINHO_LOG_API', '/var/logs/uaifrila/api', NULL, 'string', 'Diretorio dos logs em arquivo da uaifrila-api (um arquivo por dia). Dev Windows ex.: C:\logs\uaifrila\api', 'log', true),
+('CAMINHO_LOG_EMAIL_WORKER', '/var/logs/uaifrila/email-worker', NULL, 'string', 'Diretorio dos logs em arquivo do uaifrila-email-worker (um arquivo por dia). Dev Windows ex.: C:\logs\uaifrila\email-worker', 'log', true),
+('PRAZO_CONFIRMACAO_SELECAO_HORAS', '24', 24, 'number', 'Prazo em horas para o freela confirmar a seleção. Sem confirmar, a vaga chama o próximo da lista de espera.', 'CANDIDATURA', true),
+ ('LIMITE_CANDIDATURAS_PENDENTES', '5', 5, 'number', 'Máximo de candidaturas PENDENTES por freela ao mesmo tempo. Evita freela que se candidata em 30 vagas e some.', 'CANDIDATURA', true)
 ON CONFLICT (chave) 
 DO UPDATE SET 
   valor = EXCLUDED.valor,
@@ -978,6 +1005,25 @@ INSERT INTO permissoes (chave, nome, categoria, descricao, tipo_usuario_id) VALU
 ('GERENCIAR_VARIAVEIS','Gerenciar variaveis','admin','Gerenciar variaveis do sistema',(SELECT id FROM tipos_usuario WHERE chave='ADMIN')),
 ('GERENCIAR_PERMISSOES','Gerenciar permissoes','admin','Gerenciar permissoes e matriz RBAC',(SELECT id FROM tipos_usuario WHERE chave='SUPER_ADMIN'))
 ON CONFLICT (chave, tipo_usuario_id) DO UPDATE SET nome=EXCLUDED.nome, categoria=EXCLUDED.categoria, descricao=EXCLUDED.descricao;
+
+INSERT INTO vaga_templates (nome, funcao_id, titulo, descricao, turnos_json)
+VALUES
+  ('Garçom para casamento',
+   (SELECT id FROM funcoes WHERE nome = 'Garçom'),
+   'Garçom para casamento',
+   'Servir bebidas e pratos durante a festa. Chegar 1h antes para alinhar com o cerimonial. Traje: camisa branca, calça preta e sapato fechado.',
+   '[{"data":"","hora_inicio":"18:00","hora_fim":"00:00","valor_servico":180}]'::jsonb),
+  ('Cozinheiro para evento',
+   (SELECT id FROM funcoes WHERE nome = 'Cozinheiro'),
+   'Cozinheiro para evento',
+   'Preparar e finalizar os pratos do evento. Cozinha equipada no local. Levar facas próprias.',
+   '[{"data":"","hora_inicio":"14:00","hora_fim":"22:00","valor_servico":300}]'::jsonb),
+  ('Bartender para festa',
+   (SELECT id FROM funcoes WHERE nome = 'Bartender'),
+   'Bartender para festa',
+   'Preparar drinks do cardápio da festa. Insumos e utensílios fornecidos pelo contratante.',
+   '[{"data":"","hora_inicio":"19:00","hora_fim":"01:00","valor_servico":250}]'::jsonb)
+ON CONFLICT (nome) DO NOTHING;
 
 -- GRANTS - USUARIOS DE BANCO PARA APLICAÇÃO
 CREATE ROLE uaifrila_app_dev WITH LOGIN PASSWORD 'UaiFrila@App2024!';
