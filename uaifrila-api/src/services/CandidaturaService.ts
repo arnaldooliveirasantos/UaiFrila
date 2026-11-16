@@ -4,6 +4,8 @@ import { VariavelSistemaService } from './VariavelSistemaService';
 import { NotificacaoService } from './NotificacaoService';
 import { BaseRepository } from '../repositories/BaseRepository';
 import { VagaService } from './VagaService';
+import { TrampoService } from './TrampoService';
+import { TrampoTurnoService } from './TrampoTurnoService';
 
 export class CandidaturaService extends BaseService<any> {
   private variavelSvc = new VariavelSistemaService();
@@ -81,7 +83,18 @@ export class CandidaturaService extends BaseService<any> {
     // ANTES passava vaga_id/candidatura_id e o mapToDbColumns deixava passar -> Postgres:
     // "column \"vaga_id\" of relation \"notificacoes\" does not exist" ao aceitar/recusar.
     await this.notificacaoService.criarNotificacao({ usuario_id: cand.freela_id || cand.usuario_id, tipo: 'CANDIDATURA_ACEITA', titulo: `Sua candidatura foi aceita - Vaga #${cand.vaga_id}`, mensagem: `Você foi aceito para "${cand.titulo}". Aguarde o início.`, referencia_tipo: 'CANDIDATURA', referencia_id: candidaturaId });
-    return { ...cand, status: 'ACEITA' };
+    // Aceitar cria o TRAMPO + os TRAMPO_TURNOS (um por turno da vaga).
+    // ANTES o aceitar nao criava trampo nenhum: o trampo so nascia via
+    // POST /api/trampos manual (e o TrampoService.criar entrava em recursao
+    // infinita). Sem trampo, nao havia onde pendurar check-in/out por turno.
+    // TrampoService.criar e idempotente: aceitar de novo nao duplica.
+    let trampoId: number | null = null;
+    try {
+      const trampo = await new TrampoService().criar({ vaga_id: cand.vaga_id, freela_id: cand.freela_id || cand.usuario_id, contratante_id: contratanteId, status: 'ACEITO' });
+      trampoId = Number((trampo as any).id);
+      await new TrampoTurnoService().gerarParaTrampo(trampoId, contratanteId);
+    } catch (e: any) { console.warn('[aceitar] trampo/turnos nao gerados:', e?.message); }
+    return { ...cand, status: 'ACEITA', trampo_id: trampoId };
   }
 
   // Recusar: so o dono da vaga, so candidatura PENDENTE. O front manda status RECUSADA,

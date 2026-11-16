@@ -34,6 +34,34 @@ export default function PainelMeusTrampos({ usuario: usuarioProp, setTelaAtiva }
   const [cancelandoCandId, setCancelandoCandId] = useState<number | null>(null);
   const [cancelandoVaga, setCancelandoVaga] = useState<any | null>(null);
   const [cancelandoVagaId, setCancelandoVagaId] = useState<number | null>(null);
+  // Turnos do trampo (candidatura ACEITA): carregados sob demanda por candidatura.
+  const [turnosDados, setTurnosDados] = useState<Record<number, any>>({});
+  const [carregandoTurnosId, setCarregandoTurnosId] = useState<number | null>(null);
+  const [acaoTurnoId, setAcaoTurnoId] = useState<number | null>(null);
+  const carregarTurnos = async (cand: any) => {
+    if (turnosDados[cand.id]) { setTurnosDados((p) => { const n = { ...p }; delete n[cand.id]; return n; }); return; }
+    setCarregandoTurnosId(cand.id);
+    try {
+      const d: any = await apiFetch(`/api/trampos/por-candidatura/${cand.id}`);
+      setTurnosDados((p) => ({ ...p, [cand.id]: d.data || d }));
+    } catch (e: any) { setMsg(e.message || 'Não foi possível carregar os turnos'); } finally { setCarregandoTurnosId(null); }
+  };
+  const acaoTurno = async (cand: any, turno: any, acao: 'checkin' | 'checkout' | 'falta') => {
+    setAcaoTurnoId(turno.id);
+    try { await apiFetch(`/api/trampo-turnos/${turno.id}/${acao}`, { method: 'PUT' }); await carregarTurnosFechado(cand); }
+    catch (e: any) { setMsg(e.message || 'Não foi possível atualizar o turno'); } finally { setAcaoTurnoId(null); }
+  };
+  const carregarTurnosFechado = async (cand: any) => {
+    try { const d: any = await apiFetch(`/api/trampos/por-candidatura/${cand.id}`); setTurnosDados((p) => ({ ...p, [cand.id]: d.data || d })); } catch {}
+  };
+  const cancelarRestantes = async (cand: any) => {
+    const dados = turnosDados[cand.id];
+    if (!dados?.trampo?.id) return;
+    if (!window.confirm('Não vou continuar (imprevisto): cancelar os turnos restantes? Os turnos já concluídos continuam pagos.')) return;
+    setAcaoTurnoId(-1);
+    try { await apiFetch(`/api/trampos/${dados.trampo.id}/turnos/cancelar-restantes`, { method: 'PUT', body: JSON.stringify({ motivo: 'Imprevisto' }) }); await carregarTurnosFechado(cand); setMsg('Turnos restantes cancelados. O acerto considera só os turnos concluídos.'); }
+    catch (e: any) { setMsg(e.message || 'Não foi possível cancelar os turnos restantes'); } finally { setAcaoTurnoId(null); }
+  };
 
   const usuario = usuarioProp || getUsuario();
   const tipoChave = String(usuario?.tipo_chave || usuario?.tipo?.chave || 'FREELA').toUpperCase();
@@ -111,7 +139,7 @@ export default function PainelMeusTrampos({ usuario: usuarioProp, setTelaAtiva }
                     </div>
                   ) : (
                     <div className="flex gap-2 mt-3">
-                      <button onClick={() => editarVaga(v)} className={styles.buttonSecondary}>Editar vaga</button>
+                      {v.permite_editar !== false && (<button onClick={() => editarVaga(v)} className={styles.buttonSecondary}>Editar vaga</button>)}
                       <button onClick={() => setCancelandoVaga({ id: v.id, motivo: '' })} className={styles.buttonSecondary}>Cancelar vaga</button>
                     </div>
                   )}
@@ -137,6 +165,34 @@ export default function PainelMeusTrampos({ usuario: usuarioProp, setTelaAtiva }
                   <div className="flex justify-between"><h3 className={styles.typography.h3}>{titulo}</h3><span className={styles.badge('warning')}>{rotuloCandidatura(c.status)}</span></div>
                   <p className={styles.typography.bodySmall}>{(c.vaga_descricao || '').slice(0, 100)}</p>
                   <p className={styles.typography.caption}>{c.vaga_data_inicio ? new Date(c.vaga_data_inicio).toLocaleDateString() : ''} • Você recebe {fmtReais(aReceber)}</p>
+                  {aceita && (
+                    <div className="mt-3">
+                      <button onClick={() => carregarTurnos(c)} disabled={carregandoTurnosId === c.id} className={styles.buttonSecondary}>{carregandoTurnosId === c.id ? 'Carregando turnos...' : turnosDados[c.id] ? 'Ocultar turnos' : 'Ver turnos do trampo'}</button>
+                      {turnosDados[c.id] && (
+                        <div className={styles.cardSmall + ' mt-2'}>
+                          {!turnosDados[c.id].trampo && <p className={styles.typography.bodySmall}>Trampo ainda não gerado. Aguarde o contratante confirmar.</p>}
+                          {Array.isArray(turnosDados[c.id].turnos) && turnosDados[c.id].turnos.map((tt: any) => {
+                            const [y, m, dd] = String(tt.data).slice(0, 10).split('-').map(Number);
+                            const dtT = new Date(y, m - 1, dd);
+                            const st = String(tt.status || '').toUpperCase();
+                            return (
+                              <div key={tt.id} className="flex flex-wrap items-center gap-2 mt-2">
+                                <span className="capitalize font-bold">{dtT.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })}</span>
+                                <span>{String(tt.hora_inicio).slice(0, 5)}–{String(tt.hora_fim).slice(0, 5)}</span>
+                                <span>{fmtReais(tt.valor_servico)}</span>
+                                <span className={styles.badge(st === 'CONCLUIDO' ? 'success' : st === 'CANCELADO' || st === 'FALTOU' ? 'danger' : 'warning')}>{tt.status}</span>
+                                {st === 'AGENDADO' && <button onClick={() => acaoTurno(c, tt, 'checkin')} disabled={acaoTurnoId === tt.id} className={styles.buttonSecondary}>Check-in</button>}
+                                {st === 'EM_ANDAMENTO' && <button onClick={() => acaoTurno(c, tt, 'checkout')} disabled={acaoTurnoId === tt.id} className={styles.buttonSecondary}>Check-out (concluir)</button>}
+                                {(st === 'AGENDADO' || st === 'EM_ANDAMENTO') && <button onClick={() => acaoTurno(c, tt, 'falta')} disabled={acaoTurnoId === tt.id} className={styles.buttonGhost}>Falta</button>}
+                              </div>
+                            );
+                          })}
+                          <p className={styles.typography.bodySmall + ' mt-2 font-black'}>Valor a pagar pelos turnos concluídos: {fmtReais(turnosDados[c.id].valor_a_pagar)}</p>
+                          <button onClick={() => cancelarRestantes(c)} disabled={acaoTurnoId === -1} className={styles.buttonDanger + ' mt-2'}>Não vou continuar (imprevisto) — cancelar turnos restantes</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {String(c.status || '').toUpperCase() === 'PENDENTE' || aceita || String(c.status || '').toUpperCase() === 'EM_ANALISE' ? (
                     cancelandoCand?.id === c.id ? (
                       <div className="space-y-2 mt-3">

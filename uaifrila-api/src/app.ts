@@ -33,6 +33,8 @@ import { ConversaController } from './controllers/ConversaController';
 import { MensagemController } from './controllers/MensagemController';
 import { CancelarCadastroController } from './controllers/CancelarCadastroController';
 import { NotificacaoController } from './controllers/NotificacaoController';
+import { VagaTurnoController } from './controllers/VagaTurnoController';
+import { TrampoTurnoController } from './controllers/TrampoTurnoController';
 import { StatusVagaController } from './controllers/StatusVagaController';
 import { authMiddleware } from './middlewares/AuthMiddleware';
 
@@ -135,6 +137,21 @@ export class App {
     this.expressApp.get('/api/auth/me', (req, res) => authCtrl.me(req, res));
     this.expressApp.get('/api/notificacoes/minhas', (req, res) => new NotificacaoController().listarMinhas(req as any, res));
     this.expressApp.put('/api/notificacoes/:id/lida', (req, res) => new NotificacaoController().marcarComoLida(req as any, res));
+  // Turnos da vaga (03-VAGA-TURNOS.sql): agenda por dias + periodos + valor por turno.
+  this.expressApp.get('/api/vagas/:vagaId/turnos', (req, res) => new VagaTurnoController().listarPorVaga(req as any, res));
+  this.expressApp.get('/api/vagas/:vagaId/turnos/resumo', (req, res) => new VagaTurnoController().resumo(req as any, res));
+  this.expressApp.put('/api/vagas/:vagaId/turnos', (req, res) => new VagaTurnoController().substituirAgenda(req as any, res));
+  this.expressApp.post('/api/vagas/:vagaId/turnos', (req, res) => new VagaTurnoController().criar(req as any, res));
+  this.expressApp.put('/api/vaga-turnos/:id', (req, res) => new VagaTurnoController().atualizar(req as any, res));
+  this.expressApp.delete('/api/vaga-turnos/:id', (req, res) => new VagaTurnoController().deletar(req as any, res));
+  // Turnos do trampo: execucao turno a turno + acerto por imprevisto.
+  this.expressApp.get('/api/trampos/:trampoId/turnos', (req, res) => new TrampoTurnoController().listarPorTrampo(req as any, res));
+  this.expressApp.post('/api/trampos/:trampoId/turnos/gerar', (req, res) => new TrampoTurnoController().gerar(req as any, res));
+  this.expressApp.get('/api/trampos/:trampoId/turnos/resumo', (req, res) => new TrampoTurnoController().resumo(req as any, res));
+  this.expressApp.put('/api/trampos/:trampoId/turnos/cancelar-restantes', (req, res) => new TrampoTurnoController().cancelarRestantes(req as any, res));
+  this.expressApp.put('/api/trampo-turnos/:id/checkin', (req, res) => new TrampoTurnoController().checkin(req as any, res));
+  this.expressApp.put('/api/trampo-turnos/:id/checkout', (req, res) => new TrampoTurnoController().checkout(req as any, res));
+  this.expressApp.put('/api/trampo-turnos/:id/falta', (req, res) => new TrampoTurnoController().falta(req as any, res));
     this.expressApp.get('/api/status-vaga', (req, res) => new StatusVagaController().listar(req as any, res));
     this.expressApp.get('/api/status-vaga/ativos', (req, res) => new StatusVagaController().listarAtivos(req as any, res));
     this.expressApp.get('/api/usuarios', (req, res) => usuarioCtrl.listar(req, res));
@@ -197,7 +214,9 @@ export class App {
 
     this.expressApp.get('/api/trampos/meus', (req, res) => trampoCtrl.meusTrampos(req, res));
     this.expressApp.get('/api/trampos/todos', (req, res) => trampoCtrl.listarTodos(req, res));
-    this.expressApp.get('/api/trampos/:id', (req, res) => trampoCtrl.buscarPorId(req, res));
+    // ANTES de /api/trampos/:id: senao 'por-candidatura' cairia no :id.
+  this.expressApp.get('/api/trampos/por-candidatura/:candidaturaId', (req, res) => trampoCtrl.buscarPorCandidatura(req, res));
+  this.expressApp.get('/api/trampos/:id', (req, res) => trampoCtrl.buscarPorId(req, res));
     this.expressApp.post('/api/trampos', (req, res) => trampoCtrl.criar(req, res));
     this.expressApp.put('/api/trampos/:id', (req, res) => trampoCtrl.atualizar(req, res));
     this.expressApp.post('/api/trampos/:id/iniciar', (req, res) => trampoCtrl.iniciar(req, res));

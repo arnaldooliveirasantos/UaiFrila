@@ -490,6 +490,65 @@ CREATE TABLE IF NOT EXISTS permissoes (
 );
 CREATE INDEX IF NOT EXISTS idx_permissoes_tipo ON permissoes(tipo_usuario_id);
 CREATE INDEX IF NOT EXISTS idx_permissoes_categoria ON permissoes(categoria);
+
+
+-- ============================================================
+-- 1. vaga_turnos: um turno = um dia + um periodo + um valor
+-- ============================================================
+CREATE TABLE IF NOT EXISTS vaga_turnos (
+  id SERIAL PRIMARY KEY,
+  vaga_id INT NOT NULL REFERENCES vagas(id) ON DELETE CASCADE,
+  data DATE NOT NULL,                       -- dia em que o turno COMECA (ex.: 2026-12-24)
+  hora_inicio TIME NOT NULL,                -- ex.: 08:00
+  hora_fim TIME NOT NULL,                   -- ex.: 15:00 (pode ser <= hora_inicio = atravessa a meia-noite)
+  atravessa_meia_noite BOOLEAN NOT NULL DEFAULT false,
+  duracao_minutos INT NOT NULL,             -- ex.: 420 (7h). Calculado na escrita.
+  valor_servico NUMERIC(10,2) NOT NULL DEFAULT 0,  -- VALOR DO SERVICO DESTE TURNO (facilita o pagamento)
+  ordem INT NOT NULL DEFAULT 1,             -- ordem de exibicao dentro da vaga
+  status VARCHAR(20) NOT NULL DEFAULT 'AGENDADO',   -- AGENDADO | CANCELADO | CONCLUIDO
+  criado_em TIMESTAMP NOT NULL DEFAULT NOW(),
+  CONSTRAINT vaga_turnos_horas_diferentes CHECK (hora_inicio <> hora_fim),
+  CONSTRAINT vaga_turnos_duracao_positiva CHECK (duracao_minutos > 0 AND duracao_minutos <= 1440),
+  CONSTRAINT vaga_turnos_valor_nao_negativo CHECK (valor_servico >= 0),
+  CONSTRAINT vaga_turnos_unico UNIQUE (vaga_id, data, hora_inicio)
+);
+CREATE INDEX IF NOT EXISTS idx_vaga_turnos_vaga ON vaga_turnos (vaga_id, data, hora_inicio);
+CREATE INDEX IF NOT EXISTS idx_vaga_turnos_data ON vaga_turnos (data);
+
+-- ============================================================
+-- 2. (REMOVIDO) candidatura_turnos — NAO EXISTE MAIS
+-- ============================================================
+-- REGRA DE NEGOCIO (14/11/2026): o candidato SO pode se candidatar se for
+-- para TODOS os dias/turnos estipulados. Candidatura e TUDO-OU-NADA.
+-- Por isso NAO ha escolha de turnos na candidatura e esta tabela nao e criada.
+-- Quem se candidata assume a vaga inteira; o acerto por turno (tabela 3)
+-- so entra em cena se houver IMPREVISTO no meio do caminho.
+
+-- ============================================================
+-- 3. trampo_turnos: execucao de cada turno (check-in/out por turno)
+-- ============================================================
+-- Um trampo (vaga aceita) passa a ter um item por turno.
+-- REGRA DE NEGOCIO: o freela assume TODOS os turnos. O valor por turno NAO e
+-- uma forma de escolher turnos — ele so serve para o ACERTO quando ha
+-- IMPREVISTO (ex.: freela passa mal no 2o dia e nao pode continuar).
+-- Nesse caso: turnos concluidos = pagos, turnos restantes = CANCELADO,
+-- e o pagamento final = soma dos turnos CONCLUIDOS, nao da vaga inteira.
+-- Falta num turno afeta so aquele turno, nao apaga o que ja foi feito.
+CREATE TABLE IF NOT EXISTS trampo_turnos (
+  id SERIAL PRIMARY KEY,
+  trampo_id INT NOT NULL REFERENCES trampos(id) ON DELETE CASCADE,
+  vaga_turno_id INT NOT NULL REFERENCES vaga_turnos(id) ON DELETE CASCADE,
+  status VARCHAR(20) NOT NULL DEFAULT 'AGENDADO',  -- AGENDADO | EM_ANDAMENTO | CONCLUIDO | FALTOU | CANCELADO
+  checkin_em TIMESTAMP NULL,
+  checkout_em TIMESTAMP NULL,
+  valor_servico NUMERIC(10,2) NOT NULL DEFAULT 0,  -- copia do valor do turno no aceite (congelado)
+  criado_em TIMESTAMP NOT NULL DEFAULT NOW(),
+  atualizado_em TIMESTAMP NOT NULL DEFAULT NOW(),
+  CONSTRAINT trampo_turnos_unico UNIQUE (trampo_id, vaga_turno_id),
+  CONSTRAINT trampo_turnos_valor_nao_negativo CHECK (valor_servico >= 0)
+);
+CREATE INDEX IF NOT EXISTS idx_trampo_turnos_trampo ON trampo_turnos (trampo_id);
+CREATE INDEX IF NOT EXISTS idx_trampo_turnos_turno ON trampo_turnos (vaga_turno_id);
 -- =====================================================================
 -- 8. FUNÇÕES E VIEWS
 -- =====================================================================

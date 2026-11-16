@@ -163,7 +163,7 @@ export class VagaService extends BaseService<VagaModel> {
         id: v.id, titulo: v.titulo, funcao: v.funcao, descricao: v.descricao,
         contratante_id: v.contratante_id, contratante_nome: v.contratante_nome,
         status: v.status_nome || statusChave, status_chave: statusChave, status_nome: v.status_nome || statusChave, status_cor: v.status_cor,
-        permite_editar: v.permite_editar ?? !['ACEITA','EM_ANDAMENTO','FINALIZADA','CANCELADA','FECHADA'].includes(statusChave),
+        permite_editar: (v.permite_editar ?? true) && statusChave === 'AGUARDANDO_CANDIDATURA',
         permite_cancelar: v.permite_cancelar ?? !['EM_ANDAMENTO','FINALIZADA','CANCELADA','FECHADA'].includes(statusChave),
         permite_candidatar: v.permite_candidatar ?? true,
         data_inicio: v.data_inicio, data_fim: v.data_fim,
@@ -182,10 +182,53 @@ export class VagaService extends BaseService<VagaModel> {
         endereco_latitude: enderecoVaga?.latitude ?? null, endereco_longitude: enderecoVaga?.longitude ?? null,
         is_minha: isMinha, ja_candidatado: !!minhaCand, minha_candidatura: minhaCand || null, candidatura_status: minhaCand?.status || null,
         horas_para_inicio: horasParaInicio, pode_cancelar_candidatura: podeCancelarCandidatura, motivo_cancelar_bloqueado: motivoCancelarBloqueado,
+        turnos: await this.listarTurnos(Number(v.id)),
         valor_total_pagar: calculo.contratante_paga, valor_a_receber: calculo.valor_a_receber, valor_servico_liquido: calculo.valor_servico_liquido,
       });
     }
     return result;
+  }
+
+
+  // ---- TURNOS (vaga_turnos) ----
+  // Turno que passa da meia-noite pertence ao dia em que COMECA.
+  // Entrada do front: [{ data: 'YYYY-MM-DD', hora_inicio: 'HH:MM', hora_fim: 'HH:MM', valor_servico: number }]
+  private normalizarTurnos(turnos: any): any[] {
+    if (!Array.isArray(turnos)) return [];
+    const out: any[] = [];
+    for (const tu of turnos) {
+      const data = String(tu.data || tu.dia || '');
+      const hi = String(tu.hora_inicio || tu.horaInicio || tu.inicio || '');
+      const hf = String(tu.hora_fim || tu.horaFim || tu.fim || '');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(data) || !/^\d{2}:\d{2}(:\d{2})?$/.test(hi) || !/^\d{2}:\d{2}(:\d{2})?$/.test(hf)) continue;
+      const norm = (h: string) => h.slice(0, 5);
+      const paraMin = (h: string) => { const [a, b] = norm(h).split(':').map(Number); return a * 60 + b; };
+      const atravessa = paraMin(hf) <= paraMin(hi);
+      const duracao = atravessa ? (1440 - paraMin(hi) + paraMin(hf)) : (paraMin(hf) - paraMin(hi));
+      if (duracao <= 0 || duracao > 1440) continue;
+      const valor = Number(tu.valor_servico ?? tu.valorServico ?? tu.valor ?? 0) || 0;
+      if (valor < 0) continue;
+      out.push({ data, hora_inicio: norm(hi), hora_fim: norm(hf), atravessa_meia_noite: atravessa, duracao_minutos: duracao, valor_servico: valor });
+    }
+    out.sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : a.hora_inicio < b.hora_inicio ? -1 : 1));
+    return out.map((x, i) => ({ ...x, ordem: i + 1 }));
+  }
+  private async salvarTurnos(vagaId: number, turnos: any) {
+    const pool = BaseRepository.getPool() as any;
+    const lista = this.normalizarTurnos(turnos);
+    if (!lista.length) return [];
+    await pool.query(`DELETE FROM vaga_turnos WHERE vaga_id = $1`, [vagaId]);
+    for (const tu of lista) {
+      await pool.query(`INSERT INTO vaga_turnos (vaga_id, data, hora_inicio, hora_fim, atravessa_meia_noite, duracao_minutos, valor_servico, ordem) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [vagaId, tu.data, tu.hora_inicio, tu.hora_fim, tu.atravessa_meia_noite, tu.duracao_minutos, tu.valor_servico, tu.ordem]);
+    }
+    return lista;
+  }
+  private async listarTurnos(vagaId: number): Promise<any[]> {
+    const pool = BaseRepository.getPool() as any;
+    try {
+      const r = await pool.query(`SELECT id, vaga_id, data, hora_inicio, hora_fim, atravessa_meia_noite, duracao_minutos, valor_servico, ordem, status FROM vaga_turnos WHERE vaga_id = $1 ORDER BY data, hora_inicio`, [vagaId]);
+      return (r.rows || []).map((x: any) => ({ ...x, data: x.data instanceof Date ? x.data.toISOString().slice(0, 10) : String(x.data).slice(0, 10), valor_servico: Number(x.valor_servico || 0) }));
+    } catch { return []; }
   }
 
   // Cancelar vaga do dono - com trava via status_vaga
@@ -273,6 +316,9 @@ export class VagaService extends BaseService<VagaModel> {
     };
     const criada: any = await this.getRepo().criarGenerico(payload);
     const vagaId = Number((criada as any)?.id);
+    // Turnos: se o front mandou a agenda (tela separada de dias/periodos), salva
+    // em vaga_turnos. Sem turnos, o backfill/legado segue valendo (1 turno = data_inicio/data_fim).
+    if (Array.isArray(dados.turnos) && dados.turnos.length) { try { await this.salvarTurnos(vagaId, dados.turnos); } catch (e: any) { try { await this.deletar(vagaId); } catch {} throw new Error('Não foi possível salvar os turnos da vaga: ' + (e.message || 'erro desconhecido')); } }
     try {
       await new EnderecoVagaService().vincular(vagaId, enderecoId);
     } catch (e: any) {
@@ -288,6 +334,15 @@ export class VagaService extends BaseService<VagaModel> {
   async atualizar(id: number, dados: any): Promise<any> {
     const existente: any = await this.buscarPorId(id);
     if (!existente) throw new Error('Registro não encontrado para atualizar');
+    // Edicao so em AGUARDANDO_CANDIDATURA. Atualizacao so de status (ex.: fechar
+    // vaga) nao e edicao e passa. Sem isso, o front escondia o botao mas um PUT
+    // direto ainda editava vaga ACEITA/EM_ANDAMENTO.
+    const camposEdicao = ['titulo', 'descricao', 'funcao_id', 'funcaoId', 'valor_servico', 'valor_transporte', 'turnos', 'data_inicio_local', 'data_fim_local', 'endereco_id', 'enderecoId'];
+    if (camposEdicao.some((k) => dados[k] !== undefined)) {
+      const completa: any = await this.buscarCompletaPorId(id);
+      const st = String(completa?.status_chave || '').toUpperCase();
+      if (st && st !== 'AGUARDANDO_CANDIDATURA') throw new Error(`Só é possível editar vaga em Aguardando Candidatura (status atual: ${st})`);
+    }
     const { iniWall, fimWall } = this.extrairDatas(dados);
     const tz = dados.timezone || 'America/Sao_Paulo';
     const patch: any = {};
@@ -317,6 +372,7 @@ export class VagaService extends BaseService<VagaModel> {
       if (Number(patch.valor_servico) < Number(calculoSemData.valor_minimo ?? 0)) throw { status: 400, message: `Valor do serviço abaixo do mínimo R$ ${Number(calculoSemData.valor_minimo).toFixed(2)} - aumente o valor do serviço` };
     }
     const atualizada: any = await this.getRepo().atualizarGenerico(id, patch);
+    if (Array.isArray(dados.turnos)) { try { await this.salvarTurnos(id, dados.turnos); } catch (e: any) { throw new Error('Não foi possível salvar os turnos da vaga: ' + (e.message || 'erro desconhecido')); } }
     const enderecoId = Number(dados.endereco_id || dados.enderecoId);
     if (enderecoId && !isNaN(enderecoId)) {
       const evSvc = new EnderecoVagaService();

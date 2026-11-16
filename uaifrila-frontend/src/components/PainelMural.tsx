@@ -27,6 +27,20 @@ function inicioValido(vaga: any): boolean {
   const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
   return inicio.getTime() >= hoje.getTime();
 }
+// Linhas "sex 20/11 — 18:00–00:00 (R$ 200,00) • ..." agrupadas por dia.
+// ANTES era um IIFE com JSX dentro do map do JSX -> o Babel quebrava com
+// "Adjacent JSX elements must be wrapped" (linha 126). Funcao separada resolve.
+function linhasTurnos(turnos: any[]) {
+  const g: Record<string, any[]> = {};
+  for (const x of turnos) { const d = String(x.data).slice(0, 10); (g[d] = g[d] || []).push(x); }
+  return Object.keys(g).sort().map((d) => {
+    const [y, m, dd] = d.split('-').map(Number);
+    const dt2 = new Date(y, m - 1, dd);
+    const texto = g[d].map((x: any) => `${String(x.hora_inicio).slice(0, 5)}–${String(x.hora_fim).slice(0, 5)} (R$ ${(Number(x.valor_servico) || 0).toFixed(2)})`).join(' • ');
+    return <div key={d} className="font-black capitalize">{dt2.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })} — {texto}</div>;
+  });
+}
+
 export function PainelMural({ usuario, setTelaAtiva }: { usuario?: any; setTelaAtiva?: (t: string) => void }) {
   const styles = useUaiFrilaStyles();
   const [vagas, setVagas] = useState<any[]>([]);
@@ -118,11 +132,18 @@ export function PainelMural({ usuario, setTelaAtiva }: { usuario?: any; setTelaA
           // o item nao aparece.
           const distancia = calcularDistanciaKm(meuEndereco?.latitude, meuEndereco?.longitude, vaga.endereco_latitude, vaga.endereco_longitude);
           const distanciaTexto = formatarDistancia(distancia);
+          const temTurnos = Array.isArray(vaga.turnos) && vaga.turnos.length > 0;
+          // Fallback (vaga antiga sem turnos) como variavel, NAO como fragmento <>
+          // dentro do ternario: o Babel quebrava em "</>)}" (linha 140).
+          const fallbackData = (<div><div className="font-black">{dt ? dt.toLocaleDateString('pt-BR') : '—'}</div>{hora && <div className={styles.typography.caption}>às {hora}</div>}</div>);
           return (
             <div className={`${styles.valorBox} mt-3 grid grid-cols-2 md:grid-cols-3 gap-3`}>
               <div><div className={styles.typography.caption}>Você recebe</div><div className="font-black">R$ {valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div></div>
+              <div><div className={styles.typography.caption}>Transporte</div><div className="font-black">R$ {Number(vaga.valor_transporte || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div></div>
               <div><div className={styles.typography.caption}>Cidade</div><div className="font-black">{cidade || '—'}</div>{vaga.bairro && <div className={styles.typography.caption}>{vaga.bairro}</div>}</div>
-              <div><div className={styles.typography.caption}>Data</div><div className="font-black">{dt ? dt.toLocaleDateString('pt-BR') : '—'}</div>{hora && <div className={styles.typography.caption}>às {hora}</div>}</div>
+                            <div className="col-span-2 md:col-span-3"><div className={styles.typography.caption}>Dias e horários</div>
+                {temTurnos ? linhasTurnos(vaga.turnos) : fallbackData}
+              </div>
               <div><div className={styles.typography.caption}>Função</div><div className="font-black">{vaga.funcao || '—'}</div></div>
               {distanciaTexto && <div><div className={styles.typography.caption}>Distância</div><div className="font-black">📍 {distanciaTexto} de você</div></div>}
             </div>
@@ -130,7 +151,7 @@ export function PainelMural({ usuario, setTelaAtiva }: { usuario?: any; setTelaA
         })()}
         <div className="mt-4 flex flex-wrap gap-2">
           {podeCandidatar && !ehMinha && !ja && (<button disabled={candidatando === vaga.id} onClick={() => candidatar(vaga.id)} className={styles.buttonPrimary(candidatando === vaga.id)}>{candidatando === vaga.id ? 'Enviando...' : 'Candidatar-se'}</button>)}
-          {ehMinha && vaga.permite_editar !== false && (<button onClick={() => editarVaga(vaga)} className={styles.buttonWarning}>Editar</button>)}
+          {ehMinha && vaga.permite_editar !== false && String(vaga.status_chave || '').toUpperCase() === 'AGUARDANDO_CANDIDATURA' && (<button onClick={() => editarVaga(vaga)} className={styles.buttonWarning}>Editar</button>)}
           {ehMinha && vaga.permite_cancelar !== false && (<button disabled={cancelando === vaga.id} onClick={() => cancelarVaga(vaga.id)} className={styles.buttonDanger}>{cancelando === vaga.id ? 'Cancelando...' : 'Cancelar vaga'}</button>)}
         </div>
         {ehMinha && <span className={styles.badge('default') + ' mt-4 inline-block'}>Sua vaga</span>}
