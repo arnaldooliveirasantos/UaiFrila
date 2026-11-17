@@ -192,22 +192,7 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
     return extras[String(telaAtiva)] ?? 'Mural';
   })();
 
-  // % do perfil completo (ideia 6): conta campos preenchidos do usuário.
-  // Sem endpoint de completude — é uma conta local sobre os campos que o
-  // front já recebe. Se o backend passar outros nomes, o campo conta como vazio.
-  const perfilCompleto = (() => {
-    if (!usuario) return 0;
-    const campos = [
-      usuario.nome_completo || usuario.nome,
-      usuario.email,
-      usuario.telefone || usuario.celular || usuario.whatsapp,
-      usuario.cidade || usuario.cidade_nome || usuario.endereco,
-      usuario.foto || usuario.avatar || usuario.foto_url,
-      usuario.cpf || usuario.documento,
-    ];
-    const preenchidos = campos.filter((c) => c !== undefined && c !== null && String(c).trim() !== '').length;
-    return Math.round((preenchidos / campos.length) * 100);
-  })();
+
 
   const seloNotificacoes = (item: ItemMenu) =>
     item.id === 'notificacoes' && naoLidas > 0 ? (
@@ -362,7 +347,7 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
         </div>
       </div>
 
-      {/* Ideia 6: linha "você está aqui" + % do perfil. Ideia 7: resumo rápido. */}
+      {/* Ideia 6: linha "você está aqui". Ideia 7: resumo rápido. */}
       {usuario && (
         <div className={`border-t ${isDark ? 'border-zinc-700' : 'border-zinc-800'}`}>
           <div className="max-w-7xl mx-auto px-2 md:px-4 py-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -370,9 +355,6 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
               Você está em: <span className="text-white font-black uppercase">{labelTelaAtual}</span>
               {' '}· Perfil: <span className="text-green-400 font-black">{getTipo()}</span>
             </span>
-            <button onClick={() => handleNav('perfil')} className="text-[10px] font-bold text-yellow-400 hover:underline">
-              Perfil {perfilCompleto}% completo — completar ▸
-            </button>
             <span className="ml-auto flex items-center gap-3 text-[10px] font-black uppercase">
               <button onClick={() => handleNav('notificacoes')} className="text-white hover:underline">🔔 {naoLidas} não lidas</button>
               {tramposAtivos !== null && (

@@ -3,6 +3,12 @@ import { apiGetPublic, apiFetch, getToken } from '../utils/Api';
 import { calcularDistanciaKm, formatarDistancia } from '../utils/distancia';
 import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 
+// Mural - CORRIGIDO + Patch 20 (filtro + ordenação):
+// - Filtro: busca por texto, função, cidade, valor mínimo/máximo,
+//   data a partir de, distância máxima (só aparece com endereço ativo).
+// - Ordenação: mais próximas no tempo, maior valor, menor valor,
+//   mais perto de você, A–Z. Padrão: mais próximas no tempo.
+// - Tudo filtra no front, sobre as vagas já carregadas (sem endpoint novo).
 // Mural - CORRIGIDO:
 // 1. Botão Candidatar para FREELA/DUAL (antes não tinha botão nenhum - a lista era só leitura).
 //    Chama POST /api/candidaturas { vaga_id } com token. Sem token -> pede login.
@@ -37,6 +43,76 @@ export function PainelMural({ usuario, setTelaAtiva }: { usuario?: any; setTelaA
   const [msg, setMsg] = useState('');
   // Endereco ATIVO do usuario (lat/lng): referencia da distancia de cada vaga.
   const [meuEndereco, setMeuEndereco] = useState<any>(null);
+  // Patch 20 — filtro + ordenação (tudo no front, sem endpoint novo).
+  const [busca, setBusca] = useState('');
+  const [filtroFuncao, setFiltroFuncao] = useState('');
+  const [filtroCidade, setFiltroCidade] = useState('');
+  const [valorMin, setValorMin] = useState('');
+  const [valorMax, setValorMax] = useState('');
+  const [dataAPartirDe, setDataAPartirDe] = useState('');
+  const [distanciaMax, setDistanciaMax] = useState('');
+  const [ordenacao, setOrdenacao] = useState<'tempo' | 'maior-valor' | 'menor-valor' | 'distancia' | 'az'>('tempo');
+  const [filtroAberto, setFiltroAberto] = useState(true);
+
+  const valorVaga = (v: any): number => Number(v.valor_total ?? v.valor_servico ?? v.valor ?? 0);
+  const cidadeVaga = (v: any): string => [v.cidade_nome || v.cidade || '', v.cidade_estado || ''].filter(Boolean).join(' - ');
+  const distanciaVaga = (v: any): number | null =>
+    calcularDistanciaKm(meuEndereco?.latitude, meuEndereco?.longitude, v.endereco_latitude, v.endereco_longitude);
+  const limparFiltros = () => {
+    setBusca(''); setFiltroFuncao(''); setFiltroCidade(''); setValorMin(''); setValorMax('');
+    setDataAPartirDe(''); setDistanciaMax(''); setOrdenacao('tempo');
+  };
+  const filtroAtivo = !!(busca || filtroFuncao || filtroCidade || valorMin || valorMax || dataAPartirDe || distanciaMax || ordenacao !== 'tempo');
+
+  // Opções dos selects: vêm das próprias vagas carregadas (sem endpoint novo).
+  const funcoesDisponiveis = Array.from(new Set(vagas.map((v: any) => String(v.funcao || '').trim()).filter(Boolean))).sort();
+  const cidadesDisponiveis = Array.from(new Set(vagas.map((v: any) => cidadeVaga(v)).filter(Boolean))).sort();
+
+  const vagasFiltradas = (() => {
+    const texto = busca.trim().toLowerCase();
+    const min = valorMin === '' ? null : Number(valorMin);
+    const max = valorMax === '' ? null : Number(valorMax);
+    const aPartir = dataAPartirDe ? new Date(dataAPartirDe + 'T00:00:00') : null;
+    const distMax = distanciaMax === '' ? null : Number(distanciaMax);
+    const filtradas = vagas.filter((v: any) => {
+      if (texto) {
+        const hay = `${v.titulo || ''} ${v.descricao || ''} ${v.funcao || ''} ${cidadeVaga(v)} ${v.bairro || ''}`.toLowerCase();
+        if (!hay.includes(texto)) return false;
+      }
+      if (filtroFuncao && String(v.funcao || '') !== filtroFuncao) return false;
+      if (filtroCidade && cidadeVaga(v) !== filtroCidade) return false;
+      const valor = valorVaga(v);
+      if (min !== null && !Number.isNaN(min) && valor < min) return false;
+      if (max !== null && !Number.isNaN(max) && valor > max) return false;
+      if (aPartir) {
+        const d = v.data_inicio ? new Date(v.data_inicio) : null;
+        if (d && d < aPartir) return false;
+      }
+      if (distMax !== null && !Number.isNaN(distMax)) {
+        const dist = distanciaVaga(v);
+        if (dist === null || dist > distMax) return false;
+      }
+      return true;
+    });
+    const porTempo = (a: any, b: any) => {
+      const da = a.data_inicio ? new Date(a.data_inicio).getTime() : 0;
+      const db = b.data_inicio ? new Date(b.data_inicio).getTime() : 0;
+      return da - db;
+    };
+    return [...filtradas].sort((a: any, b: any) => {
+      if (ordenacao === 'maior-valor') return valorVaga(b) - valorVaga(a);
+      if (ordenacao === 'menor-valor') return valorVaga(a) - valorVaga(b);
+      if (ordenacao === 'distancia') {
+        const da = distanciaVaga(a); const db = distanciaVaga(b);
+        if (da === null && db === null) return porTempo(a, b);
+        if (da === null) return 1;
+        if (db === null) return -1;
+        return da - db;
+      }
+      if (ordenacao === 'az') return String(a.titulo || a.funcao || '').localeCompare(String(b.titulo || b.funcao || ''), 'pt-BR');
+      return porTempo(a, b);
+    });
+  })();
   const tipo = getTipo(usuario);
   const podeCandidatar = ['FREELA', 'DUAL'].includes(tipo);
   useEffect(() => {
@@ -51,7 +127,14 @@ export function PainelMural({ usuario, setTelaAtiva }: { usuario?: any; setTelaA
         // Filtro 2: tira vagas com início < hoje (defesa no front; backend também filtra).
         // REGRA DO DONO: a vaga do criador nunca some — o filtro de data não
         // tira a vaga própria, nem depois que o trampo já começou/passou.
-        const futuras = arr.filter((v: any) => inicioValido(v) || (usuario && Number(v.contratante_id) === Number(usuario.id)));
+        // Patch 20: vaga JÁ CANDIDATADA pelo usuário NÃO volta para o Mural.
+        // Antes o front só escondia o botão ("Já candidatou") e a vaga continuava
+        // na lista; ao recarregar, ela reaparecia. Agora ela é excluída aqui,
+        // junto com o filtro de data (a vaga própria continua aparecendo).
+        const ehMinha = (v: any) => usuario && Number(v.contratante_id) === Number(usuario.id);
+        const jaCandidatei = (v: any) => !!(v.minha_candidatura || v.minhaCandidatura || v.ja_candidatou);
+        const futuras = arr.filter((v: any) =>
+          (inicioValido(v) || ehMinha(v)) && !(jaCandidatei(v) && !ehMinha(v)));
         if (mounted) setVagas(futuras);
       } catch (e: any) { if (mounted) setErro(e.message); } finally { if (mounted) setLoading(false); }
     };
@@ -145,10 +228,82 @@ export function PainelMural({ usuario, setTelaAtiva }: { usuario?: any; setTelaA
   };
   if (loading) return <div className={styles.pageContainer}><div className={styles.card}>Carregando mural...</div></div>;
   if (erro) return <div className={styles.pageContainer}><div className={styles.errorBox}>ERRO MURAL: {erro}</div></div>;
+  const inputCls = "w-full border-2 border-zinc-300 bg-white text-black px-3 py-2 text-[13px] font-bold placeholder:text-zinc-400 focus:outline-none focus:border-black";
+  const labelCls = "block text-[10px] font-black uppercase text-zinc-500 mb-1";
   return (<div className={styles.pageContainer}>
-    <div className="flex items-center justify-between mb-6"><h1 className={styles.typography.h1}>Mural de Vagas ({vagas.length})</h1><span className={styles.badge('success')}>Público</span></div>
+    <div className="flex items-center justify-between mb-4"><h1 className={styles.typography.h1}>Mural de Vagas ({vagasFiltradas.length}{filtroAtivo ? ` de ${vagas.length}` : ''})</h1><span className={styles.badge('success')}>Público</span></div>
     {msg && <div className={styles.cardSmall + ' mb-4'}><p className={styles.typography.body}>{msg}</p></div>}
-    <div className="grid gap-4">{vagas.map((vaga: any) => {
+    {/* Patch 20 — filtro + ordenação do Mural. */}
+    <div className={styles.cardSmall + ' mb-4'}>
+      <button onClick={() => setFiltroAberto(!filtroAberto)} className="w-full flex items-center justify-between text-left">
+        <span className="text-[12px] font-black uppercase">🔍 Filtrar vagas{filtroAtivo ? ' • filtro ativo' : ''}</span>
+        <span className="text-[12px] font-black">{filtroAberto ? '▾' : '▸'}</span>
+      </button>
+      {filtroAberto && (
+        <div className="mt-3 flex flex-col gap-3">
+          <div>
+            <label className={labelCls}>Buscar</label>
+            <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Título, descrição, função, cidade, bairro..." className={inputCls} />
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <div>
+              <label className={labelCls}>Função</label>
+              <select value={filtroFuncao} onChange={(e) => setFiltroFuncao(e.target.value)} className={inputCls}>
+                <option value="">Todas as funções</option>
+                {funcoesDisponiveis.map((f) => <option key={f} value={f}>{f}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Cidade</label>
+              <select value={filtroCidade} onChange={(e) => setFiltroCidade(e.target.value)} className={inputCls}>
+                <option value="">Todas as cidades</option>
+                {cidadesDisponiveis.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Ordenar por</label>
+              <select value={ordenacao} onChange={(e) => setOrdenacao(e.target.value as any)} className={inputCls}>
+                <option value="tempo">Mais próximas no tempo</option>
+                <option value="maior-valor">Maior valor</option>
+                <option value="menor-valor">Menor valor</option>
+                <option value="distancia">Mais perto de você</option>
+                <option value="az">Título (A–Z)</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Valor mínimo (R$)</label>
+              <input type="number" min="0" value={valorMin} onChange={(e) => setValorMin(e.target.value)} placeholder="Ex.: 100" className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Valor máximo (R$)</label>
+              <input type="number" min="0" value={valorMax} onChange={(e) => setValorMax(e.target.value)} placeholder="Ex.: 1000" className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>A partir de</label>
+              <input type="date" value={dataAPartirDe} onChange={(e) => setDataAPartirDe(e.target.value)} className={inputCls} />
+            </div>
+            {meuEndereco && (
+              <div>
+                <label className={labelCls}>Distância máxima</label>
+                <select value={distanciaMax} onChange={(e) => setDistanciaMax(e.target.value)} className={inputCls}>
+                  <option value="">Qualquer distância</option>
+                  <option value="5">Até 5 km</option>
+                  <option value="10">Até 10 km</option>
+                  <option value="25">Até 25 km</option>
+                  <option value="50">Até 50 km</option>
+                </select>
+              </div>
+            )}
+          </div>
+          {filtroAtivo && (
+            <div>
+              <button onClick={limparFiltros} className="text-[11px] font-black uppercase border-2 border-zinc-300 px-3 py-2 bg-white text-black">✕ Limpar filtros</button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+    <div className="grid gap-4">{vagasFiltradas.map((vaga: any) => {
       const ehMinha = usuario && Number(vaga.contratante_id) === Number(usuario.id);
       // Campo real da API: minha_candidatura (antes lia minhaCandidatura/ja_candidatou,
       // que nao existem na resposta — o botao nunca virava "Ja candidatou").
@@ -187,7 +342,7 @@ export function PainelMural({ usuario, setTelaAtiva }: { usuario?: any; setTelaA
         {!podeCandidatar && usuario && <span className={styles.typography.caption + ' mt-4 block'}>Só Freela/DUAL pode se candidatar.</span>}
         {!usuario && <span className={styles.typography.caption + ' mt-4 block'}>Faça login como Freela para se candidatar.</span>}
       </div>);
-    })}{vagas.length === 0 && (<div className={styles.cardSmall}><p className={styles.typography.body}>Nenhuma vaga no mural - publique uma vaga!</p></div>)}</div>
+    })}{vagasFiltradas.length === 0 && (<div className={styles.cardSmall}><p className={styles.typography.body}>{filtroAtivo ? 'Nenhuma vaga com esse filtro — ajuste ou limpe os filtros.' : 'Nenhuma vaga no mural - publique uma vaga!'}</p></div>)}</div>
   </div>);
 }
 export default PainelMural;
