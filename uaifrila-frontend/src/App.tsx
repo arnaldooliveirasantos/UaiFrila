@@ -77,7 +77,10 @@ function AppContent() {
         // AGORA: extractor aceita as 4 formas (usuario / data.usuario / data / direto).
         const u = (data?.usuario?.id ? data.usuario : data?.data?.usuario?.id ? data.data.usuario : data?.data?.id ? data.data : data?.id ? data : null);
         console.log('[App] /auth/me -> usuario id=', (u as any)?.id, 'email=', (u as any)?.email);
-        if ((u as any)?.id) setUsuario(u); else { console.warn('[App] /auth/me sem id, resposta=', data); clearAuth(); }
+        // Patch 18: refresh com usuário logado vai para o Mural, não para a landing.
+        // (Não mexe no fluxo de código/cancelar do link do e-mail.)
+        if ((u as any)?.id) { setUsuario(u); if (!codigo && !cancelar) setTelaAtiva('mural'); }
+        else { console.warn('[App] /auth/me sem id, resposta=', data); clearAuth(); }
       } catch { clearAuth(); setUsuario(null); } finally { setCarregandoSessao(false); }
     })();
   }, []);
