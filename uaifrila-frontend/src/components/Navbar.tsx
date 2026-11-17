@@ -3,12 +3,24 @@ import { apiFetch } from '../utils/Api';
 import { useTheme } from '../context/ThemeContext';
 import LogoIcone from './LogoIcone';
 
+// Navbar com menus em CATEGORIAS + SUBCATEGORIAS (Patch 13).
+// - Desktop (xl+): cada categoria é um botão que abre um dropdown com os itens.
+// - Hambúrguer (< xl): categorias empilhadas, UM ITEM POR LINHA, com cabeçalho
+//   da categoria e seta para recolher/expandir (começa tudo expandido).
+// - Mesmos ids de tela do App.tsx (nada de rota nova): 'expansao-cidades' era
+//   'expansao' aqui e caía em tela em branco — corrigido.
+
+type ItemMenu = { id: string; label: string; icon: string; show: () => boolean };
+type GrupoMenu = { titulo: string; icon: string; itens: ItemMenu[] };
+
 export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: any) {
   const { toggleTheme, isDark } = useTheme();
   const [menuAberto, setMenuAberto] = useState(false);
   const [naoLidas, setNaoLidas] = useState(0);
-  // Selo do sino: conta as não lidas. Atualiza ao trocar de tela (ex.: ao sair
-  // da tela de Notificações, o selo já volta zerado) e ao logar.
+  // Dropdown aberto no desktop (título do grupo) e grupos recolhidos no hambúrguer.
+  const [dropdownAberto, setDropdownAberto] = useState<string | null>(null);
+  const [gruposRecolhidos, setGruposRecolhidos] = useState<Record<string, boolean>>({});
+
   useEffect(() => {
     if (!usuario) { setNaoLidas(0); return; }
     let vivo = true;
@@ -16,7 +28,6 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
     return () => { vivo = false; };
   }, [usuario, telaAtiva]);
 
-  // FIX: Não depende mais de useTiposUsuario - evita "getTipoUsuario is not a function"
   const getTipo = (): string => {
     if (!usuario) return 'VISITANTE';
     if (usuario.tipo_chave) return String(usuario.tipo_chave).toUpperCase();
@@ -29,7 +40,6 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
     if (nivel >= 100) return 'SUPER_ADMIN';
     if (nivel >= 90) return 'ADMIN';
     if (nivel >= 50) return 'FINANCEIRO';
-    // fallback por id
     if (usuario.tipo_usuario_id === 1) return 'FREELA';
     if (usuario.tipo_usuario_id === 2) return 'CONTRATANTE';
     if (usuario.tipo_usuario_id === 3) return 'DUAL';
@@ -37,75 +47,87 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
   };
 
   const getNivel = (): number => usuario?.nivel_permissao ?? usuario?.nivel ?? 0;
+  const checkContratante = (): boolean => ['CONTRATANTE', 'DUAL', 'ADMIN', 'SUPER_ADMIN', 'FINANCEIRO'].includes(getTipo());
+  // Transações é quem PAGA (contratante). Freela RECEBE - ele vê Meus Ganhos, não Transações.
+  const checkContratanteOuAdmin = (): boolean => ['CONTRATANTE', 'DUAL', 'ADMIN', 'SUPER_ADMIN', 'FINANCEIRO'].includes(getTipo());
+  const checkFreelaOuDual = (): boolean => ['FREELA', 'DUAL'].includes(getTipo());
+  // Patch 16: Minhas Funções aparece para QUALQUER perfil exceto Contratante
+  // (FREELA, DUAL, ADMIN, SUPER_ADMIN, FINANCEIRO). Antes era só FREELA/DUAL.
+  const checkNaoContratante = (): boolean => getTipo() !== 'CONTRATANTE';
+  const checkAdmin = (): boolean => getNivel() >= 90 || ['ADMIN', 'SUPER_ADMIN'].includes(getTipo());
+  const checkSuperAdmin = (): boolean => getTipo() === 'SUPER_ADMIN' || getNivel() >= 100;
 
-  const checkContratante = (): boolean => {
-    const t = getTipo();
-    return ['CONTRATANTE','DUAL','ADMIN','SUPER_ADMIN','FINANCEIRO'].includes(t);
-  };
-  // BUG 2 - Transações aparecia para FREELA:
-  // ANTES: transacoes show: () => !!usuario (qualquer logado, inclusive FREELA).
-  // Transação é quem PAGA (contratante). Freela RECEBE - ele vê Meus Ganhos, não Transações.
-  // AGORA: Transações só para CONTRATANTE/DUAL/ADMIN/FINANCEIRO. FREELA puro não vê.
-  const checkContratanteOuAdmin = (): boolean => {
-    const t = getTipo();
-    return ['CONTRATANTE','DUAL','ADMIN','SUPER_ADMIN','FINANCEIRO'].includes(t);
-  };
-  const checkFreelaOuDual = (): boolean => {
-    const t = getTipo();
-    return ['FREELA','DUAL'].includes(t);
-  };
-  const checkAdmin = (): boolean => {
-    const nivel = getNivel();
-    const chave = getTipo();
-    return nivel >= 90 || ['ADMIN','SUPER_ADMIN'].includes(chave);
-  };
-  const checkSuperAdmin = (): boolean => {
-    const nivel = getNivel();
-    const chave = getTipo();
-    return chave === 'SUPER_ADMIN' || nivel >= 100;
-  };
-
-  const menuBase = [
-    { id: 'mural', label: 'Mural', icon: '🏠', show: () => !!usuario },
-    { id: 'notificacoes', label: 'Notificações', icon: '🔔', show: () => !!usuario },
-    { id: 'perfil', label: 'Meu Perfil', icon: '👤', show: () => !!usuario },
-    { id: 'minhas-funcoes', label: 'Minhas Funções', icon: '🛠️', show: () => !!usuario && checkFreelaOuDual() },
-    { id: 'publicar', label: 'Publicar Vaga', icon: '➕', show: () => !!usuario && checkContratante() },
-    { id: 'trampos', label: 'Meus Trampos', icon: '💼', show: () => !!usuario },
-    { id: 'candidatos', label: 'Candidatos', icon: '👥', show: () => !!usuario && checkContratante() },
-    { id: 'transacoes', label: 'Transações', icon: '💰', show: () => !!usuario && checkContratanteOuAdmin() },
-    { id: 'pagamento', label: 'Pagamento', icon: '🧾', show: () => !!usuario && checkContratanteOuAdmin() },
-    { id: 'provedores-pagamento', label: 'Provedores de Pagamento', icon: '🏦', show: () => !!usuario && checkAdmin() },
-    { id: 'ganhos', label: 'Meus Ganhos', icon: '💵', show: () => !!usuario && checkFreelaOuDual() },
-    { id: 'pix', label: 'Meus Dados PIX', icon: '🔑', show: () => !!usuario }, // FREELA recebe por PIX; CONTRATANTE também pode cadastrar
-    { id: 'codigoFreela', label: 'Código Freela', icon: '🔗', show: () => true },
+  // CATEGORIAS (a ordem é a ordem de exibição). Cada item mantém o mesmo id de
+  // tela do App.tsx — a regra de quem vê o quê não mudou, só a organização.
+  const grupos: GrupoMenu[] = [
+    {
+      titulo: 'Início', icon: '🏠',
+      itens: [
+        { id: 'mural', label: 'Mural', icon: '🏠', show: () => !!usuario },
+        { id: 'notificacoes', label: 'Notificações', icon: '🔔', show: () => !!usuario },
+      ],
+    },
+    {
+      titulo: 'Meus trampos', icon: '💼',
+      itens: [
+        { id: 'trampos', label: 'Meus Trampos', icon: '💼', show: () => !!usuario },
+        { id: 'publicar', label: 'Publicar Vaga', icon: '➕', show: () => !!usuario && checkContratante() },
+        { id: 'candidatos', label: 'Candidatos', icon: '👥', show: () => !!usuario && checkContratante() },
+      ],
+    },
+    {
+      titulo: 'Financeiro', icon: '💰',
+      itens: [
+        { id: 'transacoes', label: 'Transações', icon: '💰', show: () => !!usuario && checkContratanteOuAdmin() },
+        { id: 'ganhos', label: 'Meus Ganhos', icon: '💵', show: () => !!usuario && checkFreelaOuDual() },
+      ],
+    },
+    {
+      titulo: 'Minha conta', icon: '👤',
+      itens: [
+        { id: 'perfil', label: 'Meu Perfil', icon: '👤', show: () => !!usuario },
+        { id: 'minhas-funcoes', label: 'Minhas Funções', icon: '🛠️', show: () => !!usuario && checkNaoContratante() },
+        { id: 'pix', label: 'Meus Dados PIX', icon: '🔑', show: () => !!usuario },
+      ],
+    },
+    {
+      titulo: 'Administração', icon: '⚙️',
+      itens: [
+        { id: 'cidades', label: 'Cidades', icon: '🏙️', show: () => !!usuario && checkAdmin() },
+        { id: 'expansao-cidades', label: 'Expansão', icon: '🚀', show: () => !!usuario && checkAdmin() },
+        { id: 'variaveis', label: 'Variáveis', icon: '⚙️', show: () => !!usuario && checkSuperAdmin() },
+        { id: 'financeiro', label: 'Financeiro', icon: '📊', show: () => !!usuario && checkSuperAdmin() },
+        { id: 'permissoes', label: 'Permissões', icon: '🔐', show: () => !!usuario && checkSuperAdmin() },
+      ],
+    },
+    {
+      titulo: 'Sobre', icon: 'ℹ️',
+      itens: [
+        { id: 'codigoFreela', label: 'Código Freela', icon: '🔗', show: () => true },
+      ],
+    },
   ];
 
-  const menuAdmin = [
-    { id: 'cidades', label: 'Cidades', icon: '🏙️', show: () => !!usuario && checkAdmin() },
-    { id: 'expansao', label: 'Expansão', icon: '🚀', show: () => !!usuario && checkAdmin() },
-  ];
-
-  const menuSuperAdmin = [
-    { id: 'variaveis', label: 'Variáveis', icon: '⚙️', show: () => !!usuario && checkSuperAdmin() },
-    { id: 'financeiro', label: 'Financeiro', icon: '📊', show: () => !!usuario && checkSuperAdmin() },
-    { id: 'permissoes', label: 'Permissões', icon: '🔐', show: () => !!usuario && checkSuperAdmin() },
-  ];
-
-  const menuCompleto = [...menuBase, ...menuAdmin, ...menuSuperAdmin];
-  const filtrado = menuCompleto.filter((m: any) => m.show());
+  // Só grupos com pelo menos 1 item visível aparecem. Visitante sem login só vê
+  // "Sobre → Código Freela" (o resto exige login).
+  const gruposVisiveis = grupos
+    .map((g) => ({ ...g, itens: g.itens.filter((i) => i.show()) }))
+    .filter((g) => g.itens.length > 0);
 
   const handleNav = (id: string) => {
-    // Publicar Vaga pelo MENU = vaga NOVA, tela limpa: apaga a chave de edicao.
-    // ANTES a chave velha de uma edicao anterior ficava no localStorage e a
-    // tela abria carregando a vaga editada, mesmo vindo pelo menu.
-    // Nao confundir com o fluxo EDITAR: os botoes Editar (Meus Trampos / Mural)
-    // gravam a chave DEPOIS deste clique e ai sim navegam para 'publicar' -
-    // eles nao passam por aqui, entao a edicao continua funcionando.
     if (id === 'publicar') localStorage.removeItem('uaifrila_vaga_editar');
     setTelaAtiva(id);
     setMenuAberto(false);
+    setDropdownAberto(null);
   };
+
+  const toggleGrupoHamburguer = (titulo: string) =>
+    setGruposRecolhidos((g) => ({ ...g, [titulo]: !g[titulo] }));
+
+  const seloNotificacoes = (item: ItemMenu) =>
+    item.id === 'notificacoes' && naoLidas > 0 ? (
+      <span className="ml-1 bg-red-600 text-white text-[9px] font-black px-1.5 py-0.5 border border-white">{naoLidas}</span>
+    ) : null;
 
   const getBadgeColor = () => {
     const tipo = getTipo();
@@ -133,17 +155,39 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
           )}
         </div>
 
+        {/* DESKTOP: uma aba por categoria; o dropdown lista as subcategorias. */}
         <div className="hidden xl:flex items-center gap-1">
-          {filtrado.map((item: any) => {
-            const ativo = telaAtiva === item.id;
+          {gruposVisiveis.map((grupo) => {
+            const aberto = dropdownAberto === grupo.titulo;
+            const temItemAtivo = grupo.itens.some((i) => telaAtiva === i.id);
             return (
-              <button
-                key={item.id}
-                onClick={() => handleNav(item.id)}
-                className={`text-[10px] font-black uppercase px-2.5 py-1.5 border-2 transition-all ${ativo ? 'bg-white text-black border-white' : 'bg-transparent text-white border-white hover:bg-white hover:text-black'}`}
-              >
-                {item.icon} {item.label}{item.id === 'notificacoes' && naoLidas > 0 && <span className="ml-1 bg-red-600 text-white text-[9px] font-black px-1.5 py-0.5 border border-white">{naoLidas}</span>}
-              </button>
+              <div key={grupo.titulo} className="relative">
+                <button
+                  onClick={() => setDropdownAberto(aberto ? null : grupo.titulo)}
+                  className={`text-[10px] font-black uppercase px-2.5 py-1.5 border-2 transition-all ${temItemAtivo || aberto ? 'bg-white text-black border-white' : 'bg-transparent text-white border-white hover:bg-white hover:text-black'}`}
+                >
+                  {grupo.icon} {grupo.titulo} {aberto ? '▴' : '▾'}
+                </button>
+                {aberto && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setDropdownAberto(null)} />
+                    <div className={`absolute left-0 top-full mt-1 z-50 w-56 border-2 ${isDark ? 'bg-zinc-900 border-zinc-700' : 'bg-black border-white'} p-1 flex flex-col gap-1`}>
+                      {grupo.itens.map((item) => {
+                        const ativo = telaAtiva === item.id;
+                        return (
+                          <button
+                            key={item.id}
+                            onClick={() => handleNav(item.id)}
+                            className={`w-full text-left text-[11px] font-black uppercase px-3 py-2.5 border-2 ${ativo ? 'bg-white text-black border-white' : 'bg-transparent text-white border-white hover:bg-white hover:text-black'}`}
+                          >
+                            {item.icon} {item.label}{seloNotificacoes(item)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
             );
           })}
         </div>
@@ -159,6 +203,7 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
           <button
             onClick={() => setMenuAberto(!menuAberto)}
             className="xl:hidden w-8 h-8 flex items-center justify-center border-2 border-white bg-black text-white"
+            title="Menu"
           >
             {menuAberto ? '✕' : '☰'}
           </button>
@@ -173,24 +218,43 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
         </div>
       </div>
 
+      {/* HAMBÚRGUER: categorias empilhadas, UM ITEM POR LINHA. */}
       {menuAberto && (
-        <div className={`xl:hidden border-t-2 ${isDark ? 'bg-zinc-900 border-zinc-700' : 'bg-black border-white'} p-2`}>
-          <div className="grid grid-cols-2 gap-2">
-            {filtrado.map((item: any) => {
-              const ativo = telaAtiva === item.id;
+        <div className={`xl:hidden border-t-2 ${isDark ? 'bg-zinc-900 border-zinc-700' : 'bg-black border-white'} p-2 max-h-[calc(100vh-56px)] overflow-y-auto`}>
+          <div className="flex flex-col gap-3">
+            {gruposVisiveis.map((grupo) => {
+              const recolhido = !!gruposRecolhidos[grupo.titulo];
               return (
-                <button key={item.id} onClick={() => handleNav(item.id)} className={`text-[11px] font-black uppercase px-3 py-3 border-2 text-left ${ativo ? 'bg-white text-black border-white' : 'bg-transparent text-white border-white'}`}>
-                  {item.icon} {item.label}{item.id === 'notificacoes' && naoLidas > 0 && <span className="ml-1 bg-red-600 text-white text-[9px] font-black px-1.5 py-0.5 border border-white">{naoLidas}</span>}
-                </button>
+                <div key={grupo.titulo} className="flex flex-col gap-1">
+                  <button
+                    onClick={() => toggleGrupoHamburguer(grupo.titulo)}
+                    className={`w-full flex items-center justify-between text-left text-[11px] font-black uppercase px-3 py-2 border-b-2 ${isDark ? 'text-zinc-300 border-zinc-700' : 'text-zinc-300 border-zinc-700'}`}
+                  >
+                    <span>{grupo.icon} {grupo.titulo}</span>
+                    <span>{recolhido ? '▸' : '▾'}</span>
+                  </button>
+                  {!recolhido && grupo.itens.map((item) => {
+                    const ativo = telaAtiva === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => handleNav(item.id)}
+                        className={`w-full text-left text-[12px] font-black uppercase px-3 py-3 border-2 ${ativo ? 'bg-white text-black border-white' : 'bg-transparent text-white border-white'}`}
+                      >
+                        {item.icon} {item.label}{seloNotificacoes(item)}
+                      </button>
+                    );
+                  })}
+                </div>
               );
             })}
             {usuario ? (
-              <button onClick={() => { setMenuAberto(false); onLogout(); }} className="col-span-2 mt-2 text-[11px] font-black uppercase bg-red-600 text-white border-2 border-white px-3 py-3">🚪 Sair ({usuario.nome_completo?.split(' ')[0] || usuario.email})</button>
+              <button onClick={() => { setMenuAberto(false); onLogout(); }} className="w-full mt-1 text-[12px] font-black uppercase bg-red-600 text-white border-2 border-white px-3 py-3">🚪 Sair ({usuario.nome_completo?.split(' ')[0] || usuario.email})</button>
             ) : (
-              <>
-                <button onClick={() => handleNav('login')} className="text-[11px] font-black uppercase bg-white text-black border-2 border-white px-3 py-3">Login</button>
-                <button onClick={() => handleNav('cadastro')} className="text-[11px] font-black uppercase bg-[#E53935] text-white border-2 border-white px-3 py-3">Cadastro</button>
-              </>
+              <div className="flex flex-col gap-1 mt-1">
+                <button onClick={() => handleNav('login')} className="w-full text-[12px] font-black uppercase bg-white text-black border-2 border-white px-3 py-3">Login</button>
+                <button onClick={() => handleNav('cadastro')} className="w-full text-[12px] font-black uppercase bg-[#E53935] text-white border-2 border-white px-3 py-3">Cadastro</button>
+              </div>
             )}
           </div>
         </div>

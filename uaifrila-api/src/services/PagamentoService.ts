@@ -59,7 +59,7 @@ export class PagamentoService extends BaseService<any> {
         valorCentavos: totalC, metodo: metodoFinal, pagadorEmail: cand.contratante_email, pagadorNome: cand.contratante_nome,
         expiraEm: expira, chaveIdempotencia: chave, tokenCartao, parcelas,
       }, { ...seg, accessToken: seg.accessToken });
-      return await this.repo.criarGenerico({
+      const criado = await this.repo.criarGenerico({
         candidatura_id: candidaturaId, vaga_id: cand.vaga_id, contratante_id: contratanteId,
         freela_id: cand.freela_id || cand.usuario_id, provedor: provedor.provedor,
         provedor_pagamento_id: cobranca.provedorPagamentoId, metodo: metodoFinal, status: 'AGUARDANDO_PAGAMENTO',
@@ -70,6 +70,23 @@ export class PagamentoService extends BaseService<any> {
         taxa_centavos: totalC - (Math.round(Number(calculo.valor_servico) * 100) + Math.round(Number(calculo.valor_transporte) * 100) + Math.round(Number(calculo.comissao) * 100)),
         total_centavos: totalC, qr_code: cobranca.qrCode, qr_code_url: cobranca.qrCodeUrl, checkout_url: cobranca.checkoutUrl, expira_em: expira,
       });
+      // Patch 12: espelho em `transacoes` JÁ na criação (antes só existia após
+      // a confirmação do provedor — pagamento em aberto não aparecia na tela).
+      try {
+        const pool2 = BaseRepository.getPool() as any;
+        const ex2 = await pool2.query(`SELECT id FROM transacoes WHERE pagamento_id = $1 LIMIT 1`, [criado.id]);
+        if (!ex2.rows[0]) {
+          await pool2.query(
+            `INSERT INTO transacoes (codigo, pagamento_id, vaga_id, freela_id, contratante_id, valor_base, valor_total_contratante, valor_liquido_freela, status, metodo_pagamento, observacoes, expira_em, criado_em) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'AGUARDANDO_PAGAMENTO',$9,$10,$11,NOW())`,
+            [`PG-${criado.id}`, criado.id, cand.vaga_id, cand.freela_id || cand.usuario_id, contratanteId,
+             Number(calculo.valor_servico) + Number(calculo.valor_transporte), totalC / 100,
+             Number(calculo.valor_servico) + Number(calculo.valor_transporte), metodoFinal,
+             `Pagamento #${criado.id} — candidatura #${candidaturaId}`, expira]
+          );
+        }
+      } catch (e2: any) { console.error('[PagamentoService] Espelho transacao (criação) falhou:', e2.message); }
+      return criado;
+
     } catch (e: any) { this.handleError(e, 'PagamentoService.criarOuObter'); }
   }
   async buscarPorCandidatura(candidaturaId: number, usuarioId: number, isAdmin = false): Promise<any> {
