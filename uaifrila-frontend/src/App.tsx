@@ -18,6 +18,8 @@ import PainelTransacoes from './components/PainelTransacoes';
 import PainelConfiguracaoCidades from './components/PainelConfiguracaoCidades';
 import PainelVariaveisAmbiente from './components/PainelVariaveisAmbiente';
 import PainelAdminFinanceiro from './components/PainelAdminFinanceiro';
+import TelaPagamento from './components/TelaPagamento';
+import PainelProvedoresPagamento from './components/PainelProvedoresPagamento';
 import PainelPermissoesCategorias from './components/PainelPermissoesCategorias';
 import PainelExpansaoCidades from './components/PainelExpansaoCidades';
 import CodigoFreela from './components/CodigoFreela';
@@ -122,6 +124,8 @@ function AppContent() {
       {telaAtiva === 'trampos' && (usuario ? <PainelMeusTrampos usuario={usuario} setTelaAtiva={navegar} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'candidatos' && (usuario ? <PainelGerenciarCandidatos /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'transacoes' && (usuario ? <PainelTransacoes usuario={usuario} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
+      {telaAtiva === 'pagamento' && (usuario ? <TelaPagamento usuario={usuario} candidaturaId={Number(localStorage.getItem('uaifrila_pagamento_candidatura') || 0)} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
+      {telaAtiva === 'provedores-pagamento' && (usuario ? <PainelProvedoresPagamento /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'cidades' && (usuario ? <PainelConfiguracaoCidades /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'variaveis' && (usuario ? <PainelVariaveisAmbiente /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'financeiro' && (usuario ? <PainelAdminFinanceiro /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}

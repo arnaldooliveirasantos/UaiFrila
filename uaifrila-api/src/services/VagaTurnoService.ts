@@ -24,7 +24,9 @@ export class VagaTurnoService extends BaseService<VagaTurnoModel> {
       if (duracao < 30 || duracao > 1440) continue;
       const valor = Number(tu.valor_servico ?? tu.valorServico ?? tu.valor ?? 0) || 0;
       if (valor < 0) continue;
-      out.push({ data, hora_inicio: hi, hora_fim: hf, atravessa_meia_noite: atravessa, duracao_minutos: duracao, valor_servico: valor });
+      const transporte = Number(tu.valor_transporte ?? tu.valorTransporte ?? 0) || 0;
+      if (transporte < 0) continue;
+      out.push({ data, hora_inicio: hi, hora_fim: hf, atravessa_meia_noite: atravessa, duracao_minutos: duracao, valor_servico: valor, valor_transporte: transporte });
     }
     out.sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : this.paraMin(a.hora_inicio) - this.paraMin(b.hora_inicio)));
     return out.map((x, i) => ({ ...x, ordem: i + 1, status: 'AGENDADO' }));
@@ -68,6 +70,11 @@ export class VagaTurnoService extends BaseService<VagaTurnoModel> {
       if (isNaN(v) || v < 0) throw new Error('Valor do turno inválido');
       patch.valor_servico = v;
     }
+    if (dados.valor_transporte !== undefined || dados.valorTransporte !== undefined) {
+      const vt = Number(dados.valor_transporte ?? dados.valorTransporte);
+      if (isNaN(vt) || vt < 0) throw new Error('Transporte do turno inválido');
+      patch.valor_transporte = vt;
+    }
     if (!Object.keys(patch).length) return atual;
     return await this.repo.atualizarGenerico(id, patch);
   }
@@ -80,6 +87,6 @@ export class VagaTurnoService extends BaseService<VagaTurnoModel> {
   async resumo(vagaId: number): Promise<any> {
     const lista = await this.listarPorVaga(vagaId);
     const dias = new Set(lista.map((x: any) => String(x.data).slice(0, 10))).size;
-    return { vaga_id: vagaId, dias, turnos: lista.length, minutos_total: lista.reduce((s: number, x: any) => s + Number(x.duracaoMinutos ?? x.duracao_minutos ?? 0), 0), valor_total: lista.reduce((s: number, x: any) => s + Number(x.valorServico ?? x.valor_servico ?? 0), 0), turnos: lista };
+    return { vaga_id: vagaId, dias, turnos: lista.length, minutos_total: lista.reduce((s: number, x: any) => s + Number(x.duracaoMinutos ?? x.duracao_minutos ?? 0), 0), valor_total: lista.reduce((s: number, x: any) => s + Number(x.valorServico ?? x.valor_servico ?? 0), 0), valor_transporte_total: lista.reduce((s: number, x: any) => s + Number((x as any).valorTransporte ?? (x as any).valor_transporte ?? 0), 0), turnos: lista };
   }
 }

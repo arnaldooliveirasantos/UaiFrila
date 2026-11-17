@@ -37,12 +37,36 @@ export class UsuarioPixService extends BaseService<UsuarioPixModel> {
     } catch (e: any) { this.handleError(e, 'UsuarioPixService.listarHistorico'); }
   }
 
-  async salvarPix(usuarioId: number, dados: any): Promise<UsuarioPixModel> {
+  async salvarPix(usuarioId: number, dados: any): Promise<any> {
     try {
       if (!usuarioId) throw new Error('Usuario ID obrigatorio');
+      // Validação de chave: formato + existência no provedor + titular.
+      const { PixValidacaoService } = await import('./PixValidacaoService');
+      const pixValSvc = new PixValidacaoService();
       const tipo = String(dados?.tipo_chave ?? dados?.tipoChave ?? '').toUpperCase();
-      if (!(TIPOS_CHAVE_PIX as readonly string[]).includes(tipo)) throw new Error('tipo_chave deve ser CPF, CNPJ, EMAIL, TELEFONE ou ALEATORIA');
       const chavePix = String(dados?.chave_pix ?? dados?.chavePix ?? '').trim();
+      const erroFormato = pixValSvc.validarFormato(tipo, chavePix);
+      if (erroFormato) throw new Error(erroFormato);
+      const pool = (await import('../repositories/BaseRepository')).BaseRepository.getPool() as any;
+      const ru = await pool.query(`SELECT id, nome_completo, cpf, email FROM usuarios WHERE id = $1`, [usuarioId]);
+      const usuarioDb = ru.rows[0];
+      if (!usuarioDb) throw new Error('Usuário não encontrado');
+      const existencia = await pixValSvc.verificarExistencia(chavePix);
+      if (existencia.verificavel && existencia.existe === false) throw new Error('Dados inválidos — esta chave Pix não existe. Confira e tente de novo.');
+      const titular = await pixValSvc.avaliarTitular(usuarioDb, dados);
+      if (titular.divergente) {
+        const jaValidado = await pixValSvc.buscarValidada(usuarioId, chavePix);
+        if (!jaValidado) {
+          if (!dados?.confirmar_uso_terceiro && !dados?.confirmarUsoTerceiro) {
+            const e: any = new Error('Pix de terceiro — confirme que a chave é de outra pessoa e valide por e-mail');
+            e.status = 409; e.precisa_confirmacao = true; e.motivo = titular.motivo;
+            throw e;
+          }
+          const iniciada = await pixValSvc.iniciarValidacao(usuarioDb, dados);
+          return { pendente_validacao: true, precisa_confirmacao: true, motivo: titular.motivo, ...iniciada };
+        }
+      }
+      if (!(TIPOS_CHAVE_PIX as readonly string[]).includes(tipo)) throw new Error('tipo_chave deve ser CPF, CNPJ, EMAIL, TELEFONE ou ALEATORIA');
       const erroChave = validarChave(tipo, chavePix);
       if (erroChave) throw new Error(erroChave);
       const nomeTitular = String(dados?.nome_titular ?? dados?.nomeTitular ?? '').trim();

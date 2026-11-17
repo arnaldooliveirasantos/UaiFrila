@@ -61,7 +61,7 @@ export class VagaController extends BaseController {
       const v = await this.service.buscarCompletaPorId(Number(req.params.id));
       if (!v) return this.error(res, 'Vaga não encontrada', 404);
       // CORREÇÃO: antes 'calculo' não existia no escopo - agora calcula de verdade
-      const calculo = await this.service.calcular(v);
+      const calculo = await this.service.calcular(v, this.isAdmin(req));
       return res.json({ success: true, data: { ...v, calculo } });
     } catch (e: any) { return this.handleError(res, e); }
   };
@@ -105,7 +105,7 @@ export class VagaController extends BaseController {
 
   calcular = async (req: AuthRequest, res: Response) => {
     try {
-      const calculo = await this.service.calcular(req.body);
+      const calculo = await this.service.calcular(req.body, this.isAdmin(req));
       return res.json({ success: true, calculo });
     } catch (e: any) { return this.handleError(res, e); }
   };

@@ -201,7 +201,7 @@ export default function TelaCadastroVaga(props: any) {
       const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo';
       const payload = {
         valor_servico: valorTotalTurnos,
-        valor_transporte: form.valorTransporteNum,
+        valor_transporte: turnos.reduce((s: number, x: any) => s + Number(x.valor_transporte || 0), 0),
         data_inicio_local: inicioWall,
         data_fim_local: fimWall,
         timezone,
@@ -251,45 +251,15 @@ export default function TelaCadastroVaga(props: any) {
             valorServicoStr: valorServ.toFixed(2).replace('.', ','), valorServicoNum: valorServ,
             valorTransporteStr: valorTransp.toFixed(2).replace('.', ','), valorTransporteNum: valorTransp,
             meioPagamento: vagaLocal.meio_pagamento || 'pix',
-            enderecoId: vagaLocal.endereco_id || null, // id resolvido p/ objeto logo abaixo (enderecoAtivo)
+            enderecoId: vagaLocal.endereco_id || null,
             quantidadeVagas: Number(vagaLocal.quantidade_vagas ?? vagaLocal.quantidadeVagas ?? 1) || 1,
             dataLimiteCandidatura: vagaLocal.data_limite_candidatura ? (() => { const d = new Date(vagaLocal.data_limite_candidatura); const p = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; })() : '',
           }));
-          // FONTE DA VERDADE (Patch 8): o endereco da vaga e o do VINCULO
-          // enderecos_vaga -> enderecos. NUNCA o ativo do usuario, NUNCA
-          // /enderecos/meus, NUNCA os campos do mural.
-          // 1) GET /api/enderecos-vaga/vaga/:id -> vinculo { endereco_id }
-          // 2) GET /api/enderecos/:endereco_id -> endereco cheio
-          // Sem vinculo, a edicao fica SEM endereco (aviso real) - nao inventa
-          // o ativo do usuario no lugar, senao o Atualizar salvaria a vaga em
-          // outro endereco sem o dono perceber.
-          try {
-            let endVaga: any = null;
-            let idEndVaga: number | null = null;
-            try {
-              const dVinc: any = await apiFetch(`/api/enderecos-vaga/vaga/${vagaLocal.id}`);
-              const listaVinc: any[] = Array.isArray(dVinc) ? dVinc : (dVinc?.enderecos || dVinc?.enderecos_vaga || dVinc?.data || []);
-              const vinc = (Array.isArray(listaVinc) ? listaVinc : []).find((x: any) => x.ativo !== false) || (Array.isArray(listaVinc) ? listaVinc[0] : null);
-              idEndVaga = Number(vinc?.endereco_id ?? vinc?.enderecoId) || null;
-            } catch (e: any) { console.warn('[TelaCadastroVaga] sem vinculo enderecos_vaga p/ vaga', vagaLocal.id, e?.message); }
-            if (idEndVaga) {
-              try {
-                const dEnd: any = await apiFetch(`/api/enderecos/${idEndVaga}`);
-                const raw = dEnd?.data ?? dEnd?.endereco ?? dEnd;
-                if (raw?.id) endVaga = raw;
-              } catch (e: any) { console.warn('[TelaCadastroVaga] nao foi possivel buscar endereco', idEndVaga, e?.message); }
-            }
-            if (endVaga?.id) setForm((f: any) => ({ ...f, enderecoId: Number(endVaga.id), enderecoAtivo: endVaga }));
-            else setForm((f: any) => ({ ...f, enderecoId: null, enderecoAtivo: null }));
-          } catch (e: any) { console.warn('[TelaCadastroVaga] nao foi possivel resolver endereco da vaga em edicao', e?.message); }
           // Agenda da edicao: turnos salvos, ou o intervalo unico convertido em 1 turno.
           if (Array.isArray(vagaLocal.turnos) && vagaLocal.turnos.length) {
-            setTurnos(vagaLocal.turnos.map((x: any) => {
-        const raw = x.data; const iso = raw instanceof Date ? raw.toISOString().slice(0, 10) : String(raw ?? '').match(/^\d{4}-\d{2}-\d{2}/)?.[0] || String(raw ?? '').slice(0, 10);
-        return { data: iso, hora_inicio: String(x.hora_inicio ?? x.horaInicio ?? '').slice(0, 5), hora_fim: String(x.hora_fim ?? x.horaFim ?? '').slice(0, 5), valor_servico: Number(x.valor_servico ?? x.valorServico ?? 0) };
-      }));
+            setTurnos(vagaLocal.turnos.map((x: any) => ({ data: String(x.data).slice(0, 10), hora_inicio: String(x.hora_inicio).slice(0, 5), hora_fim: String(x.hora_fim).slice(0, 5), valor_servico: Number(x.valor_servico || 0), valor_transporte: Number(x.valor_transporte ?? x.valorTransporte ?? 0) })));
           } else if (vagaLocal.data_inicio && vagaLocal.data_fim) {
-            setTurnos([{ data: inicioLocal.slice(0, 10), hora_inicio: inicioLocal.slice(11, 16), hora_fim: fimLocal.slice(11, 16), valor_servico: valorServ }]);
+            setTurnos([{ data: inicioLocal.slice(0, 10), hora_inicio: inicioLocal.slice(11, 16), hora_fim: fimLocal.slice(11, 16), valor_servico: valorServ, valor_transporte: Number(vagaLocal.valor_transporte || 0) }]);
           }
           setCarregandoEnderecoAtivo(false);
           return;
@@ -339,7 +309,7 @@ export default function TelaCadastroVaga(props: any) {
       const payload = {
         titulo: form.titulo, descricao: form.descricao, funcaoId: Number(form.funcaoId),
         valor_servico: valorTotalTurnos,
-        valor_transporte: form.valorTransporteNum,
+        valor_transporte: turnos.reduce((s: number, x: any) => s + Number(x.valor_transporte || 0), 0),
         data_inicio_local: inicioWall,
         data_fim_local: fimWall,
         timezone,
@@ -439,8 +409,7 @@ export default function TelaCadastroVaga(props: any) {
                 <p className={styles.typography.bodySmall}>Carregando endereço ativo...</p>
               </div>
             ) : (
-              <BlocoEndereco
-                enderecoFixo={form.enderecoAtivo}
+              <BlocoEndereco 
                 onEnderecoSelecionado={(id: number, end: any) => {
                   setForm(f => ({ ...f, enderecoId: id, enderecoAtivo: end }));
                 }}
@@ -470,7 +439,7 @@ export default function TelaCadastroVaga(props: any) {
             </div>
             <div>
               <label className={styles.label}>Ajuda Transporte R$</label>
-              <input value={form.valorTransporteStr} onChange={e => { const f = formatarMoedaInput(e.target.value); setForm({ ...form, valorTransporteStr: f, valorTransporteNum: parseMoedaParaNumero(f) }); }} className={styles.input} />
+                            <p className={styles.typography.bodySmall}>Transporte é por turno — defina em cada turno na agenda. Total: R$ {turnos.reduce((s: number, x: any) => s + Number(x.valor_transporte || 0), 0).toFixed(2)}</p>
             </div>
           </div>
 

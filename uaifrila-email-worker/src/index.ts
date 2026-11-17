@@ -6,6 +6,8 @@ import { WorkerLogger, mascararEmail } from './Logger';
 const pool = new Pool({ user: process.env.DB_USER, password: process.env.DB_PASSWORD, host: process.env.DB_HOST, port: Number(process.env.DB_PORT) || 5432, database: process.env.DB_NAME, max: 5 });
 const log = new WorkerLogger(pool);
 const transportador = nodemailer.createTransport({ host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT) || 587, secure: false, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } });
+import { processarPagamentos } from './PagamentoJob';
+import { processarRepasses, autoConfirmarTurnos } from './RepasseJob';
 const INTERVAL = Number(process.env.WORKER_INTERVAL_MS) || 10000;
 const BATCH = Number(process.env.WORKER_BATCH_SIZE) || 10;
 const MAX_TENTATIVAS = Number(process.env.MAX_TENTATIVAS) || 3;
@@ -36,9 +38,14 @@ async function tick() {
     const expirados = await client.query(`UPDATE email_historico_disparos SET status_id=(SELECT id FROM email_status WHERE chave='EXPIRADO'), atualizado_em=NOW(), ultimo_erro='Expirado: criado_em < NOW() - 15min' WHERE status_id=(SELECT id FROM email_status WHERE chave='EM_ESPERA') AND criado_em < NOW() - INTERVAL '15 minutes' RETURNING id`);
     if (expirados.rows.length) await log.info('expirados', { qtd: expirados.rows.length });
     await client.query('COMMIT');
+    try { await autoConfirmarTurnos(client, log); } catch (e: any) { await log.error('auto-confirmar turnos falhou', { erro: String(e?.message || e).slice(0, 500) }); }
+    try { await processarPagamentos(log); } catch (e: any) { await log.error('pagamentos job falhou', { erro: String(e?.message || e).slice(0, 500) }); }
+    try { await processarRepasses(log); } catch (e: any) { await log.error('repasses job falhou', { erro: String(e?.message || e).slice(0, 500) }); }
     await log.info('tick fim ok');
   } catch (e: any) { try { await client.query('ROLLBACK'); } catch {} await log.error('tick falhou, rollback', { erro: String(e?.message || e).slice(0, 500) }); }
   finally { client.release(); isProcessing = false; }
 }
 log.info('worker iniciado', { intervalMs: INTERVAL, batch: BATCH, maxTentativas: MAX_TENTATIVAS });
+// Jobs de pagamento/repasses rodam a cada tick, após o envio de e-mails (tick() já os chama no fim).
+
 tick(); setInterval(tick, INTERVAL);

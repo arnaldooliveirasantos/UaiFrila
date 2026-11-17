@@ -9,7 +9,7 @@
 --    marcação de falha de envio). Sem eles, as subqueries retornavam
 --    NULL e o código nunca era marcado como consumido.
 -- =====================================================================
-
+ 
 -- =====================================================================
 -- UAI FRILA - CRIAÇÃO COMPLETA DO BANCO - 00_CRIACAO_BANCO_NOVO_COMPLETO.sql
 -- PostgreSQL 14+
@@ -304,7 +304,36 @@ CREATE TABLE trampos (
   criado_em TIMESTAMP DEFAULT NOW(),
   atualizado_em TIMESTAMP DEFAULT NOW()
 );
-
+CREATE TABLE IF NOT EXISTS pagamentos (
+  id serial PRIMARY KEY,
+  candidatura_id int NOT NULL UNIQUE,
+  vaga_id int NOT NULL,
+  contratante_id int NOT NULL,
+  freela_id int NOT NULL,
+  provedor varchar(30) NOT NULL,
+  provedor_pagamento_id varchar(120),
+  metodo varchar(20) NOT NULL DEFAULT 'pix',
+  status varchar(30) NOT NULL DEFAULT 'AGUARDANDO_PAGAMENTO',
+  chave_idempotencia varchar(120) NOT NULL UNIQUE,
+  valor_servico_centavos int NOT NULL,
+  valor_transporte_centavos int NOT NULL,
+  comissao_centavos int NOT NULL,
+  taxa_centavos int NOT NULL,
+  total_centavos int NOT NULL,
+  qr_code text,
+  qr_code_url text,
+  checkout_url text,
+  expira_em timestamptz NOT NULL,
+  notificacao_60min_enviada boolean NOT NULL DEFAULT false,
+  pago_em timestamptz,
+  reembolsado_em timestamptz,
+  erro text,
+  tentativas int NOT NULL DEFAULT 0,
+  criado_em timestamptz NOT NULL DEFAULT NOW(),
+  atualizado_em timestamptz NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pagamentos_status ON pagamentos (status);
+CREATE INDEX IF NOT EXISTS idx_pagamentos_expira ON pagamentos (expira_em);
 -- ============================================================
 -- SEÇÃO 7 — TRANSAÇÕES
 -- ============================================================
@@ -335,6 +364,7 @@ CREATE TABLE IF NOT EXISTS transacoes (
   observacoes TEXT,
   motivo_cancelamento TEXT,
   usuario_id INT REFERENCES usuarios(id),
+  pagamento_id int REFERENCES pagamentos(id),
   criado_em TIMESTAMP DEFAULT NOW(),
   atualizado_em TIMESTAMP DEFAULT NOW()
   );
@@ -518,6 +548,7 @@ CREATE TABLE IF NOT EXISTS vaga_turnos (
   atravessa_meia_noite BOOLEAN NOT NULL DEFAULT false,
   duracao_minutos INT NOT NULL,             -- ex.: 420 (7h). Calculado na escrita.
   valor_servico NUMERIC(10,2) NOT NULL DEFAULT 0,  -- VALOR DO SERVICO DESTE TURNO (facilita o pagamento)
+  valor_transporte numeric(10,2) NOT NULL DEFAULT 0,
   ordem INT NOT NULL DEFAULT 1,             -- ordem de exibicao dentro da vaga
   status VARCHAR(20) NOT NULL DEFAULT 'AGENDADO',   -- AGENDADO | CANCELADO | CONCLUIDO
   criado_em TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -556,6 +587,9 @@ CREATE TABLE IF NOT EXISTS trampo_turnos (
   checkin_em TIMESTAMP NULL,
   checkout_em TIMESTAMP NULL,
   valor_servico NUMERIC(10,2) NOT NULL DEFAULT 0,  -- copia do valor do turno no aceite (congelado)
+  valor_transporte numeric(10,2) NOT NULL DEFAULT 0,
+  confirmado_em timestamptz,
+  confirmado_por int,
   criado_em TIMESTAMP NOT NULL DEFAULT NOW(),
   atualizado_em TIMESTAMP NOT NULL DEFAULT NOW(),
   CONSTRAINT trampo_turnos_unico UNIQUE (trampo_id, vaga_turno_id),
@@ -576,6 +610,62 @@ CREATE TABLE IF NOT EXISTS vaga_templates (
   criado_em TIMESTAMP NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_vaga_templates_funcao ON vaga_templates (funcao_id);
+
+CREATE TABLE IF NOT EXISTS provedores_pagamento (
+  id serial PRIMARY KEY, provedor varchar(30) NOT NULL UNIQUE,
+  ativo boolean NOT NULL DEFAULT false,
+  ambiente varchar(20) NOT NULL DEFAULT 'sandbox',
+  taxa_pix_percentual numeric(5,2) NOT NULL DEFAULT 1, taxa_cartao_percentual numeric(5,2) NOT NULL DEFAULT 4,
+  client_id text, client_secret_criptografado text, webhook_secret_criptografado text,
+  pix_chave_recebimento varchar(120), config_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  criado_em timestamptz NOT NULL DEFAULT NOW(), atualizado_em timestamptz NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_provedores_um_ativo ON provedores_pagamento (ativo) WHERE ativo = true;
+create table if not exists provedor_pagamento_auditoria (
+ id serial primary key,
+ provedor_id int not null references provedores_pagamento(id),
+ admin_id int not null,
+ acao varchar(40) not null,
+ de_ativo boolean,
+ para_ativo boolean,
+ criado_em timestamptz not null default NOW()
+);
+create table if not exists repasses (
+	id serial primary key,
+	trampo_turno_id int not null unique,
+	trampo_id int not null,
+	freela_id int not null,
+	provedor varchar(30) not null,
+	chave_idempotencia varchar(120) not null unique,
+	status varchar(30) not null default 'AGENDADO',
+	valor_centavos int not null,
+	agendar_para timestamptz not null,
+	pago_em timestamptz,
+	comprovante varchar(200),
+	erro text,
+	tentativas int not null default 0,
+	criado_em timestamptz not null default NOW(),
+	atualizado_em timestamptz not null default NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_repasses_agendar ON repasses (status, agendar_para);
+CREATE TABLE IF NOT EXISTS pix_validacoes (
+  id serial PRIMARY KEY,
+  usuario_id int NOT NULL,
+  tipo_chave varchar(20) NOT NULL,
+  chave_pix varchar(140) NOT NULL,
+  nome_titular varchar(200) NOT NULL,
+  cpf_cnpj_titular varchar(14),
+  banco varchar(100),
+  agencia varchar(20),
+  conta varchar(30),
+  tipo_conta varchar(20),
+  token varchar(10) NOT NULL,
+  status varchar(30) NOT NULL DEFAULT 'PENDENTE',
+  expira_em timestamptz NOT NULL,
+  criado_em timestamptz NOT NULL DEFAULT NOW(),
+  atualizado_em timestamptz NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pix_validacoes_token ON pix_validacoes (token, status);
 -- =====================================================================
 -- 8. FUNÇÕES E VIEWS
 -- =====================================================================
@@ -1031,6 +1121,30 @@ VALUES
    '[{"data":"","hora_inicio":"19:00","hora_fim":"01:00","valor_servico":250}]'::jsonb)
 ON CONFLICT (nome) DO NOTHING;
 
+INSERT INTO provedores_pagamento (provedor, ativo, ambiente, taxa_pix_percentual, taxa_cartao_percentual, config_json)
+VALUES ('MERCADO_PAGO', true, 'sandbox', 1, 4, '{"base_url":"https://api.mercadopago.com"}'::jsonb),
+       ('EFI', false, 'sandbox', 1, 4, '{"base_url":"https://api.efipay.com.br"}'::jsonb)
+ON CONFLICT (provedor) DO NOTHING;
+
+INSERT INTO variaveis_sistema (chave, valor, valor_numerico, tipo, descricao, categoria, editavel)
+VALUES
+  ('COMISSAO_PLATAFORMA_PERCENTUAL', '10', 10, 'numero', 'CANONICA 10% — comissão da plataforma sobre (serviço + transporte). Substitui TAXA_PLATAFORMA_PERCENTUAL e COMISSAO_APLICATIVO.', 'pagamento', true),
+  ('NOTIFICACAO_PAGAMENTO_ANTECEDENCIA_MINUTOS', '60', 60, 'numero', 'Aviso ao contratante X minutos antes de expirar o prazo de pagamento.', 'pagamento', true),
+  ('REPASSE_AGUARDAR_MINUTOS', '15', 15, 'numero', 'Repasse ao freela X minutos após confirmação do turno pelo contratante.', 'pagamento', true),
+  ('AUTOCONFIRMACAO_TURNO_HORAS', '24', 24, 'numero', 'Turno em AGUARDANDO_CONFIRMACAO confirma sozinho após X horas sem contestação.', 'pagamento', true),
+  ('PIX_VALIDACAO_EMAIL_MINUTOS', '30', 30, 'numero', 'Validade do token de e-mail para confirmar Pix de terceiro.', 'pagamento', true)
+ON CONFLICT (chave) DO NOTHING;
+UPDATE variaveis_sistema SET descricao = descricao || ' [DEPRECADA — usar COMISSAO_PLATAFORMA_PERCENTUAL]'
+WHERE chave IN ('TAXA_PLATAFORMA_PERCENTUAL', 'COMISSAO_APLICATIVO') AND descricao NOT LIKE '%DEPRECADA%';
+UPDATE variaveis_sistema SET descricao = descricao || ' [DEPRECADA — taxas vêm de provedores_pagamento]'
+WHERE chave IN ('TAXA_PIX_PERCENTUAL', 'TAXA_CARTAO_PERCENTUAL') AND descricao NOT LIKE '%DEPRECADA%';
+INSERT INTO email_templates (chave_uso, titulo_assunto, conteudo_corpo, email_remetente, nome_remetente)
+VALUES ('VALIDACAO_PIX_TERCEIRO',
+  'Confirme o Pix de {{NOME}} — UaiFrila',
+  '<p>Olá, {{NOME}}!</p><p>Você cadastrou uma chave Pix em nome de outra pessoa. Para usar essa chave, confirme com o código abaixo:</p><p><strong>{{CODIGO}}</strong></p><p>Código válido por {{TEMPO_EXPIRACAO}} minutos.</p><p><a href="{{LINK_VALIDAR}}">Confirmar no UaiFrila</a></p>',
+  'noreply@uaifrila.com.br', 'UAI FRILA')
+ON CONFLICT (chave_uso) DO NOTHING;
+
 -- GRANTS - USUARIOS DE BANCO PARA APLICAÇÃO
 CREATE ROLE uaifrila_app_dev WITH LOGIN PASSWORD 'UaiFrila@App2024!';
 CREATE ROLE uaifrila_readonly_dev WITH LOGIN PASSWORD 'UaiFrila@ead2024!';
@@ -1065,6 +1179,7 @@ GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO PUBLIC;
 
 ---rollback; 
 ---commit;
+
 
 
 

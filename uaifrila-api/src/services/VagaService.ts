@@ -5,7 +5,6 @@ import { VagaModel } from '../models/VagaModel';
 import { BaseRepository } from '../repositories/BaseRepository';
 import { VariavelSistemaService } from './VariavelSistemaService';
 import { EnderecoVagaService } from './EnderecoVagaService';
-import { VagaTurnoService } from './VagaTurnoService';
 
 // ATENÇÃO: NÃO use nome 'variavelService' aqui - BaseService antigo tinha 'protected variavelService'
 // Use 'variavelSvc' para não dar TS2415 (private vs protected)
@@ -62,76 +61,20 @@ export class VagaService extends BaseService<VagaModel> {
     } catch (e: any) { this.handleError(e, 'VagaService.buscarCompletaPorId'); }
   }
 
-  async calcular(dados: any): Promise<any> {
-    try {
-      this.validateRequired(dados, ['valor_servico']);
-      const vars: any[] = await this.variavelRepo.buscarTodos();
-      const findVar = (chave: string) => vars.find((v: any) => v.chave === chave);
-      const getNum = (chave: string, def: number) => {
-        const v = findVar(chave);
-        if (!v) return def;
-        const num = (v as any).valorNumerico ?? (v as any).valor_numerico ?? (v as any).valor;
-        const parsed = parseFloat(num);
-        if (isNaN(parsed)) throw new Error(`Variavel de sistema sem valor numerico: ${chave}`);
-        return parsed;
-      };
-      const VALOR_MINIMO = getNum('VALOR_MINIMO_VAGA', 75); // VALOR_MINIMO_VAGA deve existir; getNum lanca se ausente/sem numero
-      const TAXA_PIX = getNum('TAXA_PIX_PERCENTUAL', 1);
-      const TAXA_CARTAO = getNum('TAXA_CARTAO_PERCENTUAL', 4);
-      const COMISSAO = getNum('COMISSAO_APLICATIVO', getNum('TAXA_PLATAFORMA_PERCENTUAL', 10));
-
-      const iniStr = dados.data_inicio_local || dados.data_inicio || dados.dataInicio;
-      const fimStr = dados.data_fim_local || dados.data_fim || dados.dataFim;
-      let horas = 4;
-      if (iniStr && fimStr) {
-        const diffMs = new Date(fimStr).getTime() - new Date(iniStr).getTime();
-        horas = Math.round((diffMs / (1000 * 60 * 60)) * 100) / 100;
-        if (horas <= 0) throw { status: 400, message: 'Data fim deve ser maior que início' };
-      }
-      const base = Number(dados.valor_servico) + Number(dados.valor_transporte || 0);
-      const taxaPercent = dados.meio_pagamento === 'cartao' ? TAXA_CARTAO : TAXA_PIX;
-      const taxa_pagamento = (Number(dados.valor_servico) * taxaPercent / 100);
-      const comissao_app = (Number(dados.valor_servico) * COMISSAO / 100);
-      const total_contratante = base + taxa_pagamento + comissao_app;
-      const freela_recebe_liquido = Number(dados.valor_servico) + Number(dados.valor_transporte || 0) - taxa_pagamento - comissao_app;
-      const valor_hora_final = horas > 0 ? freela_recebe_liquido / horas : 0;
-      const valor_minimo_valido = freela_recebe_liquido >= VALOR_MINIMO;
-      // Campos que o mural API-only espera
-      const taxa_cartao = base * (TAXA_CARTAO / 100);
-      const comissao = base * (COMISSAO / 100);
-      const total_descontos = taxa_cartao + comissao;
-      const valor_a_receber = base - total_descontos;
-      return {
-        valor_servico: Number(dados.valor_servico),
-        valor_transporte: Number(dados.valor_transporte || 0),
-        base_calculo: base,
-        horas_estimadas: horas,
-        valor_hora_bruto: horas > 0 ? Number(dados.valor_servico) / horas : 0,
-        taxa_pix_percentual: TAXA_PIX, taxa_cartao_percentual: TAXA_CARTAO, comissao_percentual: COMISSAO,
-        taxa_pagamento, taxa_cartao, taxa_pagamento_cartao: taxa_cartao,
-        comissao_app, comissao, total_descontos,
-        total_contratante, contratante_paga: base,
-        freela_recebe_bruto: base, freela_recebe_liquido, valor_a_receber,
-        valor_servico_liquido: valor_a_receber - Number(dados.valor_transporte || 0),
-        valor_servico_liquido_cartao: valor_a_receber - Number(dados.valor_transporte || 0),
-        valor_hora_liquido: valor_hora_final, valor_hora_final, valor_minimo_valido,
-        mensagem_validacao: valor_minimo_valido ? undefined : `Valor mínimo R$ ${VALOR_MINIMO.toFixed(2)} - aumente o valor do serviço`,
-        meio_pagamento: 'cartao',
-      };
-    } catch (e: any) { this.handleError(e, 'VagaService.calcular'); }
-  }
-
-  // BUG CORRIGIDO (Patch 4): o pg devolve DATE como objeto Date, nao string.
-  // String(new Date(...)) = "Thu Nov 19 2026 ..." -> .slice(0,10) = "Thu Nov 19"
-  // -> split('-') = NaN -> "Invalid Date" no mural. Sempre normaliza para YYYY-MM-DD em UTC.
-  private dataISO(v: any): string {
-    if (v instanceof Date) return v.toISOString().slice(0, 10);
-    const s = String(v ?? '');
-    const m = s.match(/^\d{4}-\d{2}-\d{2}/);
-    if (m) return m[0];
-    const d = new Date(s);
-    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
-    return s;
+  // CALCULO — delega para CalculoPagamentoService (único lugar que calcula preço).
+  // Transporte é POR TURNO (soma dos turnos). Retorno NÃO-admin sem comissão/taxa.
+  async calcular(dados: any, isAdmin = false): Promise<any> {
+    const { CalculoPagamentoService } = await import('./CalculoPagamentoService');
+    const turnos = Array.isArray(dados.turnos) ? dados.turnos : (Array.isArray(dados.turnosVaga) ? dados.turnosVaga : undefined);
+    const entrada: any = { ...dados };
+    if (turnos) entrada.turnos = turnos;
+    else { entrada.valor_servico = Number(dados.valor_servico ?? dados.valorServico ?? 0); entrada.valor_transporte = Number(dados.valor_transporte ?? dados.valorTransporte ?? 0); }
+    if (turnos?.length && !entrada.data_inicio_local) {
+      const ord = [...turnos].sort((a: any, b: any) => String(a.data).localeCompare(String(b.data)));
+      entrada.data_inicio_local = `${ord[0].data}T${ord[0].hora_inicio || '00:00'}`;
+      entrada.data_fim_local = `${ord[ord.length - 1].data}T${ord[ord.length - 1].hora_fim || '00:00'}`;
+    }
+    return await new CalculoPagamentoService().calcular(entrada, isAdmin);
   }
 
   async listarMuralParaUsuario(usuarioId: number): Promise<any[]> {
@@ -152,7 +95,7 @@ export class VagaService extends BaseService<VagaModel> {
       // usuarioId NULL (visitante) deixa o ramo do dono inerte: contratante_id = NULL nunca é true.
       const r = await pool.query(`SELECT v.*, f.nome as funcao, sv.chave as status_chave, sv.nome_exibicao as status_nome, sv.cor_hex as status_cor, sv.permite_editar, sv.permite_cancelar, sv.permite_candidatar FROM vagas v LEFT JOIN funcoes f ON f.id = v.funcao_id JOIN status_vaga sv ON sv.id = v.status_vaga_id WHERE ((sv.chave IN ('AGUARDANDO_CANDIDATURA','AGUARDANDO_ACEITE') AND (v.data_inicio IS NULL OR DATE(v.data_inicio) >= CURRENT_DATE)) OR (v.contratante_id = $1 AND sv.chave <> 'CANCELADA')) ORDER BY v.criado_em DESC`, [usuarioId || null]);
       vagas = r.rows;
-    } catch (e: any) { console.error('[VagaService.listarMuralParaUsuario] falha na query do mural:', e?.message || e); vagas = await this.listarAbertas(); }
+    } catch { vagas = await this.listarAbertas(); }
 
     // A distancia NAO e calculada aqui: o front calcula (Haversine) a partir das
     // coordenadas do endereco ativo do usuario e do endereco da vaga.
@@ -161,26 +104,35 @@ export class VagaService extends BaseService<VagaModel> {
       try { const rc = await pool.query(`SELECT * FROM candidaturas WHERE (freela_id=$1 OR usuario_id=$1) AND status IN ('PENDENTE','ACEITA','EM_ANALISE')`, [usuarioId]); rc.rows.forEach((c: any) => minhasCandidaturas.set(Number(c.vaga_id), c)); } catch {}
     }
 
-    // BUG CORRIGIDO: listarMuralParaUsuario NUNCA devolvia `turnos`.
-    // O front (PainelMural.diasHorarios) lia vaga.turnos e, sem ele, caia para o
-    // fallback de data_inicio/data_fim (1 unico dia) - por isso "Dias e horarios"
-    // parou de mostrar os varios dias. Agora anexa os turnos em 1 query em lote.
+    
+    // Patch 11: anexa os turnos de cada vaga (1 query só, sem N+1). Sem isso o
+    // mural não tem como exibir dias/horários. Falha aqui não derruba o mural:
+    // o erro vai para o log e as vagas vêm sem turnos.
     const turnosPorVaga = new Map<number, any[]>();
-    if (pool && vagas.length) {
+    if (pool) {
       try {
-        const ids = vagas.map((x: any) => Number(x.id)).filter(Boolean);
-        const rt = await pool.query(`SELECT vaga_id, data, hora_inicio, hora_fim, valor_servico, ordem, status FROM vaga_turnos WHERE vaga_id = ANY($1::int[]) ORDER BY vaga_id, data, hora_inicio`, [ids]);
-        for (const row of rt.rows || []) {
-          const arr = turnosPorVaga.get(Number(row.vaga_id)) || [];
-          arr.push({ id: row.id, vaga_id: Number(row.vaga_id), data: this.dataISO(row.data), hora_inicio: String(row.hora_inicio).slice(0, 5), hora_fim: String(row.hora_fim).slice(0, 5), valor_servico: Number(row.valor_servico || 0), ordem: row.ordem, status: row.status });
-          turnosPorVaga.set(Number(row.vaga_id), arr);
+        const ids = (vagas || []).map((x: any) => Number(x.id)).filter((n: number) => !isNaN(n));
+        if (ids.length) {
+          const rt = await pool.query(`SELECT vaga_id, data, hora_inicio, hora_fim, valor_servico, valor_transporte FROM vaga_turnos WHERE vaga_id = ANY($1) ORDER BY vaga_id, data, hora_inicio`, [ids]);
+          for (const row of (rt.rows || [])) {
+            const lista = turnosPorVaga.get(Number(row.vaga_id)) || [];
+            lista.push({ data: String(row.data).slice(0, 10), hora_inicio: String(row.hora_inicio).slice(0, 5), hora_fim: String(row.hora_fim).slice(0, 5), valor_servico: Number(row.valor_servico || 0), valor_transporte: Number(row.valor_transporte || 0) });
+            turnosPorVaga.set(Number(row.vaga_id), lista);
+          }
         }
-      } catch (e: any) { console.error('[VagaService.listarMuralParaUsuario] falha ao carregar turnos do mural:', e?.message || e); throw e; }
+      } catch (e: any) { console.error('[VagaService] listarMuralParaUsuario: falha ao carregar turnos', e?.message); }
     }
 
     const result: any[] = [];
     for (const v of vagas) {
-      const calculo = await this.calcular(v);
+      // Patch 9: 1 vaga com cálculo quebrado NÃO pode derrubar a lista inteira em 500.
+      // O erro vai para o log da API (procure por '[VagaService] calcular falhou na vaga').
+      let calculo: any;
+      try { calculo = await this.calcular(v); } catch (e: any) {
+        console.error('[VagaService] calcular falhou na vaga', v.id, '-', e?.message);
+        const base = Number(v.valor_servico || 0) + Number(v.valor_transporte || 0);
+        calculo = { contratante_paga: base, total_pix: base, total_cartao: base, valor_a_receber: base, valor_servico_liquido: base };
+      }
       let enderecoVaga: any = null;
       if (pool) {
         try { const re = await pool.query(`SELECT e.*, c.nome as cidade_nome, e2.sigla as cidade_estado FROM enderecos_vaga ev JOIN enderecos e ON e.id=ev.endereco_id LEFT JOIN cidades c ON c.id=e.cidade_id LEFT JOIN estados e2 ON e2.id=c.estado_id WHERE ev.vaga_id=$1 AND ev.ativo=true LIMIT 1`, [v.id]); enderecoVaga = re.rows[0] || null; } catch {}
@@ -207,8 +159,8 @@ export class VagaService extends BaseService<VagaModel> {
         permite_cancelar: v.permite_cancelar ?? !['EM_ANDAMENTO','FINALIZADA','CANCELADA','FECHADA'].includes(statusChave),
         permite_candidatar: v.permite_candidatar ?? true,
         data_inicio: v.data_inicio, data_fim: v.data_fim,
-        turnos: turnosPorVaga.get(Number(v.id)) || [],
         valor_servico: v.valor_servico, valor_transporte: v.valor_transporte,
+        turnos: turnosPorVaga.get(Number(v.id)) || [],
         calculo,
         bairro: enderecoVaga?.bairro, cidade_nome: enderecoVaga?.cidade_nome, cidade_estado: enderecoVaga?.cidade_estado,
         // Id do endereco da vaga (so do dono): a TelaCadastroVaga em modo edicao
@@ -228,6 +180,8 @@ export class VagaService extends BaseService<VagaModel> {
     }
     return result;
   }
+
+  // Cancelar vaga do dono - com trava via status_vaga
 
   // Cancelar vaga do dono - com trava via status_vaga
   async cancelarVaga(vagaId: number, usuarioId: number, motivo?: string): Promise<any> {
@@ -293,23 +247,13 @@ export class VagaService extends BaseService<VagaModel> {
     const calculo = await this.calcular({ ...dados, data_inicio_local: iniWall, data_fim_local: fimWall });
     const funcaoId = Number(dados.funcao_id ?? dados.funcaoId);
     if (!funcaoId || isNaN(funcaoId)) throw new Error('funcao_id obrigatorio (use /api/funcoes para listar; nao existe coluna funcao em vagas)');
-    // BUG CORRIGIDO: o front (TelaCadastroVaga) SEMPRE mandou `turnos` no payload,
-    // mas criar() ignorava e nunca gravava em vaga_turnos. A agenda sumia do mural.
-    // Agora: normaliza antes de criar; se vieram turnos e nenhum e valido, explode.
-    const turnoSvc = new VagaTurnoService();
-    let turnosNormalizados: any[] = [];
-    if (dados.turnos !== undefined && dados.turnos !== null) {
-      if (!Array.isArray(dados.turnos)) throw new Error('turnos deve ser um array');
-      turnosNormalizados = turnoSvc.normalizarTurnos(dados.turnos);
-      if (dados.turnos.length > 0 && !turnosNormalizados.length) throw new Error('Nenhum turno valido (dia + periodo + valor). Verifique os dias e horarios.');
-    }
     const payload = {
       contratante_id: contratanteId,
       titulo: String(dados.titulo).trim(),
       descricao: dados.descricao || '',
       funcao_id: funcaoId,
       valor_servico: valorServico,
-      valor_transporte: Number(dados.valor_transporte ?? dados.valorTransporte ?? 0) || 0,
+      valor_transporte: Number(calculo.valor_transporte || 0),
       valor_hora: Number(calculo.valor_hora_bruto || 0),
       total_freela: Number(calculo.freela_recebe_liquido || 0),
       status_vaga_id: 1,
@@ -318,12 +262,6 @@ export class VagaService extends BaseService<VagaModel> {
     };
     const criada: any = await this.getRepo().criarGenerico(payload);
     const vagaId = Number((criada as any)?.id);
-    // Grava a agenda. Se falhar, desfaz a vaga (igual ao vinculo de endereco):
-    // vaga sem turnos nao pode ir para o mural com "Dias e horarios" vazio.
-    if (turnosNormalizados.length) {
-      try { await turnoSvc.substituirAgenda(vagaId, contratanteId, turnosNormalizados); }
-      catch (e: any) { try { await this.deletar(vagaId); } catch {} throw new Error('Nao foi possivel salvar os turnos da vaga: ' + (e.message || 'erro desconhecido')); }
-    }
     try {
       await new EnderecoVagaService().vincular(vagaId, enderecoId);
     } catch (e: any) {
@@ -331,6 +269,14 @@ export class VagaService extends BaseService<VagaModel> {
       try { await this.deletar(vagaId); } catch {}
       throw new Error('Não foi possível vincular o endereço à vaga: ' + (e.message || 'erro desconhecido'));
     }
+    // Salva a agenda (turnos com transporte por turno) — fonte dos valores do cálculo.
+    try {
+      const turnosPayload = Array.isArray(dados.turnos) ? dados.turnos : [];
+      if (turnosPayload.length) {
+        const { VagaTurnoService } = await import('./VagaTurnoService');
+        await new VagaTurnoService().substituirAgenda(vagaId, contratanteId, turnosPayload);
+      }
+    } catch (e: any) { try { await this.deletar(vagaId); } catch {} throw new Error('Não foi possível salvar os turnos da vaga: ' + (e.message || 'erro desconhecido')); }
     return criada;
   }
 
@@ -363,14 +309,10 @@ export class VagaService extends BaseService<VagaModel> {
       patch.total_freela = Number(calculo.freela_recebe_liquido || 0);
     }
     const atualizada: any = await this.getRepo().atualizarGenerico(id, patch);
-    // Edicao da agenda: se o front mandou turnos, substitui a agenda inteira.
-    // (A TelaCadastroVaga tambem chama PUT /api/vagas/:id/turnos separado; os dois
-    // caminhos usam a mesma normalizacao e terminam com a mesma agenda.)
-    if (dados.turnos !== undefined && dados.turnos !== null) {
-      if (!Array.isArray(dados.turnos)) throw new Error('turnos deve ser um array');
-      const norm = new VagaTurnoService().normalizarTurnos(dados.turnos);
-      if (dados.turnos.length > 0 && !norm.length) throw new Error('Nenhum turno valido (dia + periodo + valor). Verifique os dias e horarios.');
-      if (norm.length) await new VagaTurnoService().substituirAgenda(id, Number(existente.contratante_id ?? existente.contratanteId), norm);
+    if (Array.isArray(dados.turnos) && dados.turnos.length) {
+      const { VagaTurnoService } = await import('./VagaTurnoService');
+      const donoId = Number((existente as any).contratanteId ?? (existente as any).contratante_id);
+      await new VagaTurnoService().substituirAgenda(id, donoId, dados.turnos);
     }
     const enderecoId = Number(dados.endereco_id || dados.enderecoId);
     if (enderecoId && !isNaN(enderecoId)) {

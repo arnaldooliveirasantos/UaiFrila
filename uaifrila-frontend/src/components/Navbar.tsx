@@ -74,6 +74,8 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
     { id: 'trampos', label: 'Meus Trampos', icon: '💼', show: () => !!usuario },
     { id: 'candidatos', label: 'Candidatos', icon: '👥', show: () => !!usuario && checkContratante() },
     { id: 'transacoes', label: 'Transações', icon: '💰', show: () => !!usuario && checkContratanteOuAdmin() },
+    { id: 'pagamento', label: 'Pagamento', icon: '🧾', show: () => !!usuario && checkContratanteOuAdmin() },
+    { id: 'provedores-pagamento', label: 'Provedores de Pagamento', icon: '🏦', show: () => !!usuario && checkAdmin() },
     { id: 'ganhos', label: 'Meus Ganhos', icon: '💵', show: () => !!usuario && checkFreelaOuDual() },
     { id: 'pix', label: 'Meus Dados PIX', icon: '🔑', show: () => !!usuario }, // FREELA recebe por PIX; CONTRATANTE também pode cadastrar
     { id: 'codigoFreela', label: 'Código Freela', icon: '🔗', show: () => true },

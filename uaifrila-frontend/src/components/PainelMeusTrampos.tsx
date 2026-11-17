@@ -57,7 +57,7 @@ export default function PainelMeusTrampos({ usuario: usuarioProp, setTelaAtiva }
       setTurnosDados((p) => ({ ...p, [cand.id]: d.data || d }));
     } catch (e: any) { setMsg(e.message || 'Não foi possível carregar os turnos'); } finally { setCarregandoTurnosId(null); }
   };
-  const acaoTurno = async (cand: any, turno: any, acao: 'checkin' | 'checkout' | 'falta') => {
+  const acaoTurno = async (cand: any, turno: any, acao: 'checkin' | 'checkout' | 'falta' | 'confirmar') => {
     setAcaoTurnoId(turno.id);
     try { await apiFetch(`/api/trampo-turnos/${turno.id}/${acao}`, { method: 'PUT' }); await carregarTurnosFechado(cand); }
     catch (e: any) { setMsg(e.message || 'Não foi possível atualizar o turno'); } finally { setAcaoTurnoId(null); }
@@ -271,6 +271,7 @@ export default function PainelMeusTrampos({ usuario: usuarioProp, setTelaAtiva }
                                 <span className={styles.badge(st === 'CONCLUIDO' ? 'success' : st === 'CANCELADO' || st === 'FALTOU' ? 'danger' : 'warning')}>{tt.status}</span>
                                 {st === 'AGENDADO' && <button onClick={() => acaoTurno(c, tt, 'checkin')} disabled={acaoTurnoId === tt.id} className={styles.buttonSecondary}>Check-in</button>}
                                 {st === 'EM_ANDAMENTO' && <button onClick={() => acaoTurno(c, tt, 'checkout')} disabled={acaoTurnoId === tt.id} className={styles.buttonSecondary}>Check-out (concluir)</button>}
+                                {st === 'AGUARDANDO_CONFIRMACAO' && <button onClick={() => acaoTurno(c, tt, 'confirmar')} disabled={acaoTurnoId === tt.id} className={styles.buttonPrimary(acaoTurnoId === tt.id)}>Confirmar turno (libera repasse)</button>}
                                 {(st === 'AGENDADO' || st === 'EM_ANDAMENTO') && <button onClick={() => acaoTurno(c, tt, 'falta')} disabled={acaoTurnoId === tt.id} className={styles.buttonGhost}>Falta</button>}
                               </div>
                             );

@@ -6,7 +6,7 @@ import { apiFetch } from '../utils/Api';
 // REGRA: candidatura e TUDO-OU-NADA (todos os dias). O valor por turno serve
 // so para o acerto em caso de IMPREVISTO (freela nao pode continuar).
 // Turno que passa da meia-noite pertence ao dia em que COMECA.
-export type Turno = { data: string; hora_inicio: string; hora_fim: string; valor_servico: number };
+export type Turno = { data: string; hora_inicio: string; hora_fim: string; valor_servico: number; valor_transporte?: number };
 const PRESETS = [
   { nome: 'Manhã', inicio: '08:00', fim: '12:00' },
   { nome: 'Tarde', inicio: '13:00', fim: '18:00' },
@@ -16,19 +16,19 @@ const PRESETS = [
 ];
 const EXEMPLOS: Record<string, Turno[]> = {
   natal: [
-    { data: '2026-12-24', hora_inicio: '08:00', hora_fim: '15:00', valor_servico: 150 },
-    { data: '2026-12-25', hora_inicio: '08:00', hora_fim: '15:00', valor_servico: 150 },
+    { data: '2026-12-24', hora_inicio: '08:00', hora_fim: '15:00', valor_servico: 150, valor_transporte: 0 },
+    { data: '2026-12-25', hora_inicio: '08:00', hora_fim: '15:00', valor_servico: 150, valor_transporte: 0 },
   ],
   chacara: [
-    { data: '2026-11-20', hora_inicio: '18:00', hora_fim: '00:00', valor_servico: 180 },
-    { data: '2026-11-21', hora_inicio: '18:00', hora_fim: '00:00', valor_servico: 180 },
-    { data: '2026-11-22', hora_inicio: '18:00', hora_fim: '00:00', valor_servico: 180 },
+    { data: '2026-11-20', hora_inicio: '18:00', hora_fim: '00:00', valor_servico: 180, valor_transporte: 0 },
+    { data: '2026-11-21', hora_inicio: '18:00', hora_fim: '00:00', valor_servico: 180, valor_transporte: 0 },
+    { data: '2026-11-22', hora_inicio: '18:00', hora_fim: '00:00', valor_servico: 180, valor_transporte: 0 },
   ],
   show: [
-    { data: '2026-11-20', hora_inicio: '18:00', hora_fim: '00:00', valor_servico: 200 },
-    { data: '2026-11-21', hora_inicio: '00:00', hora_fim: '06:00', valor_servico: 220 },
-    { data: '2026-11-21', hora_inicio: '18:00', hora_fim: '00:00', valor_servico: 200 },
-    { data: '2026-11-22', hora_inicio: '00:00', hora_fim: '06:00', valor_servico: 220 },
+    { data: '2026-11-20', hora_inicio: '18:00', hora_fim: '00:00', valor_servico: 200, valor_transporte: 0 },
+    { data: '2026-11-21', hora_inicio: '00:00', hora_fim: '06:00', valor_servico: 220, valor_transporte: 0 },
+    { data: '2026-11-21', hora_inicio: '18:00', hora_fim: '00:00', valor_servico: 200, valor_transporte: 0 },
+    { data: '2026-11-22', hora_inicio: '00:00', hora_fim: '06:00', valor_servico: 220, valor_transporte: 0 },
   ],
 };
 const paraMin = (h: string) => { const [a, b] = h.split(':').map(Number); return a * 60 + b; };
@@ -43,39 +43,44 @@ export default function TelaAgendaVaga({ turnosIniciais = [], onConfirmar, onCan
   const [novoInicio, setNovoInicio] = useState('18:00');
   const [novoFim, setNovoFim] = useState('00:00');
   const [novoValor, setNovoValor] = useState('150');
+  const [novoTransporte, setNovoTransporte] = useState('15');
   const [valorTodos, setValorTodos] = useState('');
+  const [valorTransporteTodos, setValorTransporteTodos] = useState('');
   // Rascunho do período PERSONALIZADO de cada dia (início/fim/valor próprios).
   // O "Adicionar a todos" continua usando novoInicio/novoFim/novoValor — nada muda nele.
-  const [customDia, setCustomDia] = useState<Record<string, { inicio: string; fim: string; valor: string }>>({});
-  const draftDia = (d: string) => customDia[d] || { inicio: '18:00', fim: '00:00', valor: '' };
+  const [customDia, setCustomDia] = useState<Record<string, { inicio: string; fim: string; valor: string; transporte?: string }>>({});
+  const draftDia = (d: string) => customDia[d] || { inicio: '18:00', fim: '00:00', valor: '', transporte: '' };
   const setDraftDia = (d: string, patch: Partial<{ inicio: string; fim: string; valor: string }>) => setCustomDia((c) => ({ ...c, [d]: { ...draftDia(d), ...patch } }));
   const adicionarCustomNoDia = (d: string) => {
     const r = draftDia(d);
     // Valor em branco = usa o valor do campo "Adicionar a todos" (novoValor).
-    adicionarNoDia(d, r.inicio, r.fim, Number((r.valor || novoValor).replace(',', '.')) || 0);
+    adicionarNoDia(d, r.inicio, r.fim, Number((r.valor || novoValor).replace(',', '.')) || 0, Number((r.transporte || novoTransporte).replace(',', '.')) || 0);
   };
   const [erro, setErro] = useState('');
   const dias = useMemo(() => Object.keys(porDia).sort(), [porDia]);
   const totalHorasMin = useMemo(() => Object.values(porDia).flat().reduce((s, t) => s + duracaoMin(t.hora_inicio, t.hora_fim), 0), [porDia]);
   const totalValor = useMemo(() => Object.values(porDia).flat().reduce((s, t) => s + Number(t.valor_servico || 0), 0), [porDia]);
+  const totalTransporte = useMemo(() => Object.values(porDia).flat().reduce((s, t) => s + Number(t.valor_transporte || 0), 0), [porDia]);
   const totalTurnos = useMemo(() => Object.values(porDia).flat().length, [porDia]);
   // Dias anteriores a hoje: NAO selecionaveis (botao desabilitado + toggle travado).
   const hojeDt = new Date();
   const hojeISO = `${hojeDt.getFullYear()}-${String(hojeDt.getMonth() + 1).padStart(2, '0')}-${String(hojeDt.getDate()).padStart(2, '0')}`;
   const toggleDia = (iso: string) => { if (iso < hojeISO) return; setPorDia((p) => { const n = { ...p }; if (n[iso]) delete n[iso]; else n[iso] = []; return n; }); };
-  const adicionarParaTodos = (inicio: string, fim: string, valor: number) => {
+  const adicionarParaTodos = (inicio: string, fim: string, valor: number, transporte = 0) => {
     if (!dias.length) { setErro('Selecione pelo menos um dia no calendário.'); return; }
     if (duracaoMin(inicio, fim) < 30) { setErro('Período mínimo de 30 minutos.'); return; }
     setErro('');
-    setPorDia((p) => { const n: Record<string, Turno[]> = {}; for (const d of dias) { const ja = (p[d] || []).some((x) => x.hora_inicio === inicio && x.hora_fim === fim); n[d] = ja ? p[d] : [...(p[d] || []), { data: d, hora_inicio: inicio, hora_fim: fim, valor_servico: valor }].sort((a, b) => paraMin(a.hora_inicio) - paraMin(b.hora_inicio)); } return n; });
+    setPorDia((p) => { const n: Record<string, Turno[]> = {}; for (const d of dias) { const ja = (p[d] || []).some((x) => x.hora_inicio === inicio && x.hora_fim === fim); n[d] = ja ? p[d] : [...(p[d] || []), { data: d, hora_inicio: inicio, hora_fim: fim, valor_servico: valor, valor_transporte: transporte }].sort((a, b) => paraMin(a.hora_inicio) - paraMin(b.hora_inicio)); } return n; });
   };
-  const adicionarNoDia = (dia: string, inicio: string, fim: string, valor: number) => {
+  const adicionarNoDia = (dia: string, inicio: string, fim: string, valor: number, transporte = 0) => {
     if (duracaoMin(inicio, fim) < 30) { setErro('Período mínimo de 30 minutos.'); return; }
     setErro('');
-    setPorDia((p) => { const lista = p[dia] || []; if (lista.some((x) => x.hora_inicio === inicio && x.hora_fim === fim)) { setErro('Esse período já existe neste dia.'); return p; } return { ...p, [dia]: [...lista, { data: dia, hora_inicio: inicio, hora_fim: fim, valor_servico: valor }].sort((a, b) => paraMin(a.hora_inicio) - paraMin(b.hora_inicio)) }; });
+    setPorDia((p) => { const lista = p[dia] || []; if (lista.some((x) => x.hora_inicio === inicio && x.hora_fim === fim)) { setErro('Esse período já existe neste dia.'); return p; } return { ...p, [dia]: [...lista, { data: dia, hora_inicio: inicio, hora_fim: fim, valor_servico: valor, valor_transporte: transporte }].sort((a, b) => paraMin(a.hora_inicio) - paraMin(b.hora_inicio)) }; });
   };
   const removerTurno = (dia: string, idx: number) => setPorDia((p) => ({ ...p, [dia]: p[dia].filter((_, i) => i !== idx) }));
-  const alterarValor = (dia: string, idx: number, valor: number) => setPorDia((p) => ({ ...p, [dia]: p[dia].map((t, i) => i === idx ? { ...t, valor_servico: valor } : t) }));
+  const alterarValor = (dia: string, idx: number, valor: number) => setPorDia((p) => ({ ...p, [dia]: p[dia].map((x, i) => i === idx ? { ...x, valor_servico: valor } : x) }));
+  const alterarTransporte = (dia: string, idx: number, transporte: number) => setPorDia((p) => ({ ...p, [dia]: p[dia].map((x, i) => i === idx ? { ...x, valor_transporte: transporte } : x) }));
+  const aplicarTransporteTodos = () => { const v = Number(valorTransporteTodos.replace(',', '.')); if (v < 0 || isNaN(v)) { setErro('Informe um transporte válido para aplicar a todos.'); return; } setErro(''); setPorDia((p) => { const n: Record<string, Turno[]> = {}; for (const d of Object.keys(p)) n[d] = p[d].map((x) => ({ ...x, valor_transporte: v })); return n; }); };
   const aplicarValorTodos = () => { const v = Number(valorTodos.replace(',', '.')); if (!v || v < 0) { setErro('Informe um valor válido para aplicar a todos.'); return; } setErro(''); setPorDia((p) => { const n: Record<string, Turno[]> = {}; for (const d of Object.keys(p)) n[d] = p[d].map((t) => ({ ...t, valor_servico: v })); return n; }); };
   const carregarExemplo = (chave: keyof typeof EXEMPLOS) => { setPorDia(agrupar(EXEMPLOS[chave])); const p = EXEMPLOS[chave][0].data; const [y, m] = p.split('-').map(Number); setMesCursor({ y, m: m - 1 }); setErro(''); };
   const confirmar = async () => {
@@ -131,16 +136,19 @@ export default function TelaAgendaVaga({ turnosIniciais = [], onConfirmar, onCan
       <div className={styles.card + ' mt-4'}>
         <p className={styles.typography.h3}>Período para todos os dias selecionados</p>
         <p className={styles.typography.caption + ' mt-1'}>Um toque adiciona o período em todos os dias. Depois ajuste cada dia abaixo, se precisar.</p>
-        <div className="flex flex-wrap gap-2 mt-3">{PRESETS.map((p) => <button key={p.nome} onClick={() => adicionarParaTodos(p.inicio, p.fim, Number(novoValor) || 0)} className={styles.badge('warning')}>{p.nome} {p.inicio}–{p.fim}</button>)}</div>
+        <div className="flex flex-wrap gap-2 mt-3">{PRESETS.map((p) => <button key={p.nome} onClick={() => adicionarParaTodos(p.inicio, p.fim, Number(novoValor) || 0, Number(novoTransporte.replace(',', '.')) || 0)} className={styles.badge('warning')}>{p.nome} {p.inicio}–{p.fim}</button>)}</div>
         <div className="flex flex-wrap items-end gap-2 mt-3">
           <div><label className={styles.label}>Início</label><input type="time" value={novoInicio} onChange={(e) => setNovoInicio(e.target.value)} className={styles.input} /></div>
           <div><label className={styles.label}>Fim</label><input type="time" value={novoFim} onChange={(e) => setNovoFim(e.target.value)} className={styles.input} /></div>
           <div><label className={styles.label}>Valor por turno R$</label><input inputMode="decimal" value={novoValor} onChange={(e) => setNovoValor(e.target.value.replace(/[^0-9.,]/g, ''))} className={styles.input} /></div>
-          <button onClick={() => adicionarParaTodos(novoInicio, novoFim, Number(novoValor.replace(',', '.')) || 0)} className={styles.buttonSecondary}>Adicionar a todos</button>
+          <div><label className={styles.label}>Transporte por turno R$</label><input inputMode="decimal" value={novoTransporte} onChange={(e) => setNovoTransporte(e.target.value.replace(/[^0-9.,]/g, ''))} className={styles.input} /></div>
+          <button onClick={() => adicionarParaTodos(novoInicio, novoFim, Number(novoValor.replace(',', '.')) || 0, Number(novoTransporte.replace(',', '.')) || 0)} className={styles.buttonSecondary}>Adicionar a todos</button>
         </div>
         <div className="flex flex-wrap items-end gap-2 mt-3">
           <div><label className={styles.label}>Aplicar valor R$ a todos os turnos</label><input inputMode="decimal" value={valorTodos} onChange={(e) => setValorTodos(e.target.value.replace(/[^0-9.,]/g, ''))} placeholder="Ex.: 150" className={styles.input} /></div>
           <button onClick={aplicarValorTodos} className={styles.buttonSecondary}>Aplicar valor a todos</button>
+          <div><label className={styles.label}>Aplicar transporte R$ a todos os turnos</label><input inputMode="decimal" value={valorTransporteTodos} onChange={(e) => setValorTransporteTodos(e.target.value.replace(/[^0-9.,]/g, ''))} placeholder="Ex.: 15" className={styles.input} /></div>
+          <button onClick={aplicarTransporteTodos} className={styles.buttonSecondary}>Aplicar transporte a todos</button>
         </div>
       </div>
       {dias.length > 0 && <div className="mt-4 grid gap-4">{dias.map((d) => (
@@ -153,20 +161,23 @@ export default function TelaAgendaVaga({ turnosIniciais = [], onConfirmar, onCan
               <span className={styles.typography.caption}>{fmtHoras(duracaoMin(t.hora_inicio, t.hora_fim))}{duracaoMin(t.hora_inicio, t.hora_fim) > 0 && paraMin(t.hora_fim) <= paraMin(t.hora_inicio) ? ' • atravessa a meia-noite' : ''}</span>
               <label className={styles.label + ' ml-auto'}>Valor do turno R$</label>
               <input inputMode="decimal" value={String(t.valor_servico)} onChange={(e) => alterarValor(d, idx, Number(e.target.value.replace(',', '.')) || 0)} className={styles.input + ' w-28'} />
+              <label className={styles.label}>Transporte R$</label>
+              <input inputMode="decimal" value={String(t.valor_transporte ?? 0)} onChange={(e) => alterarTransporte(d, idx, Number(e.target.value.replace(',', '.')) || 0)} className={styles.input + ' w-28'} />
               <button onClick={() => removerTurno(d, idx)} className={styles.buttonGhost}>✕</button>
             </div>))}
-          <div className="flex flex-wrap gap-2 mt-3">{PRESETS.map((p) => <button key={p.nome} onClick={() => adicionarNoDia(d, p.inicio, p.fim, Number(novoValor) || 0)} className={styles.badge('default')}>+ {p.nome}</button>)}</div>
+          <div className="flex flex-wrap gap-2 mt-3">{PRESETS.map((p) => <button key={p.nome} onClick={() => adicionarNoDia(d, p.inicio, p.fim, Number(novoValor) || 0, Number(novoTransporte.replace(',', '.')) || 0)} className={styles.badge('default')}>+ {p.nome}</button>)}</div>
           <div className="flex flex-wrap items-end gap-2 mt-3">
             <div><label className={styles.label}>Início deste dia</label><input type="time" value={draftDia(d).inicio} onChange={(e) => setDraftDia(d, { inicio: e.target.value })} className={styles.input} /></div>
             <div><label className={styles.label}>Fim deste dia</label><input type="time" value={draftDia(d).fim} onChange={(e) => setDraftDia(d, { fim: e.target.value })} className={styles.input} /></div>
             <div><label className={styles.label}>Valor deste turno R$</label><input inputMode="decimal" value={draftDia(d).valor} onChange={(e) => setDraftDia(d, { valor: e.target.value.replace(/[^0-9.,]/g, '') })} placeholder={novoValor || 'Ex.: 150'} className={styles.input} /></div>
+            <div><label className={styles.label}>Transporte deste turno R$</label><input inputMode="decimal" value={draftDia(d).transporte || ''} onChange={(e) => setDraftDia(d, { transporte: e.target.value.replace(/[^0-9.,]/g, '') })} placeholder={novoTransporte || 'Ex.: 15'} className={styles.input} /></div>
             <button onClick={() => adicionarCustomNoDia(d)} className={styles.buttonSecondary}>Adicionar neste dia</button>
           </div>
         </div>))}
       </div>}
       <div className={styles.cardSmall + ' mt-4'}>
         <p className={styles.typography.h3}>Resumo</p>
-        <p className={styles.typography.body + ' mt-1'}>{dias.length} dia{dias.length === 1 ? '' : 's'} • {totalTurnos} turno{totalTurnos === 1 ? '' : 's'} • {fmtHoras(totalHorasMin)} no total</p>
+        <p className={styles.typography.body + ' mt-1'}>{dias.length} dia{dias.length === 1 ? '' : 's'} • {totalTurnos} turno{totalTurnos === 1 ? '' : 's'} • {fmtHoras(totalHorasMin)} no total • Transporte total R$ {totalTransporte.toFixed(2)}</p>
         <p className={styles.typography.body + ' font-black'}>Valor total do serviço: R$ {totalValor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
         <p className={styles.typography.caption + ' mt-1'}>A candidatura vale para todos os dias. O valor por turno só é usado no acerto se houver imprevisto e o freela não puder continuar.</p>
       </div>

@@ -29,7 +29,7 @@ export class TrampoTurnoService extends BaseService<TrampoTurnoModel> {
     for (const vt of rv.rows || []) {
       const ja = await (this.repo as TrampoTurnoRepository).buscarPorTrampoETurno(trampoId, Number(vt.id));
       if (ja) { criados.push(ja); continue; }
-      criados.push(await this.repo.criarGenerico({ trampo_id: trampoId, vaga_turno_id: Number(vt.id), status: 'AGENDADO', valor_servico: Number(vt.valor_servico || 0) }));
+      criados.push(await this.repo.criarGenerico({ trampo_id: trampoId, vaga_turno_id: Number(vt.id), status: 'AGENDADO', valor_servico: Number(vt.valor_servico || 0), valor_transporte: Number(vt.valor_transporte || 0) }));
     }
     return criados;
   }
@@ -45,7 +45,9 @@ export class TrampoTurnoService extends BaseService<TrampoTurnoModel> {
     const trampo = await this.buscarTrampo(Number((item as any).trampoId ?? (item as any).trampo_id));
     if (Number(trampo.freela_id) !== Number(usuarioId)) throw new Error('Só o freela pode fazer check-out');
     if (String((item as any).status).toUpperCase() !== 'EM_ANDAMENTO') throw new Error(`Turno com status ${(item as any).status} - check-out não permitido`);
-    return await this.repo.atualizarGenerico(id, { status: 'CONCLUIDO', checkout_em: new Date() });
+    // Checkout NÃO confirma pagamento: vai para AGUARDANDO_CONFIRMACAO. O contratante confirma
+    // (ou o worker auto-confirma após AUTOCONFIRMACAO_TURNO_HORAS) e aí o repasse agenda.
+    return await this.repo.atualizarGenerico(id, { status: 'AGUARDANDO_CONFIRMACAO', checkout_em: new Date() });
   }
   async marcarFalta(id: number, usuarioId: number): Promise<TrampoTurnoModel | null> {
     const item = await this.buscarPorId(id);
@@ -54,6 +56,17 @@ export class TrampoTurnoService extends BaseService<TrampoTurnoModel> {
     if (String((item as any).status).toUpperCase() === 'CONCLUIDO') throw new Error('Turno já concluído - não pode marcar falta');
     return await this.repo.atualizarGenerico(id, { status: 'FALTOU' });
   }
+  // Contratante confirma o turno (checkout já feito). Agenda o repasse (+15 min).
+  async confirmarTurno(id: number, usuarioId: number): Promise<any> {
+    const item = await this.buscarPorId(id);
+    const trampo = await this.buscarTrampo(Number((item as any).trampoId ?? (item as any).trampo_id));
+    if (Number(trampo.contratante_id) !== Number(usuarioId)) throw new Error('Só o contratante pode confirmar o turno');
+    if (String((item as any).status).toUpperCase() !== 'AGUARDANDO_CONFIRMACAO') throw new Error(`Turno com status ${(item as any).status} - confirmação não permitida`);
+    const atualizado = await this.repo.atualizarGenerico(id, { status: 'CONFIRMADO', confirmado_em: new Date(), confirmado_por: usuarioId });
+    try { const { RepasseService } = await import('./RepasseService'); await new RepasseService().agendarParaTurno(id); } catch (e: any) { console.error('[TrampoTurno] agendar repasse falhou:', e.message); }
+    return atualizado;
+  }
+
   // IMPREVISTO: freela nao pode continuar. Cancela os turnos restantes
   // (AGENDADO/EM_ANDAMENTO); os CONCLUIDOS ficam pagos. So o freela ou o
   // contratante do trampo pode acionar.
@@ -71,7 +84,7 @@ export class TrampoTurnoService extends BaseService<TrampoTurnoModel> {
     for (const x of lista) {
       const st = String((x as any).status).toUpperCase();
       porStatus[st] = (porStatus[st] || 0) + 1;
-      if (st === 'CONCLUIDO') pago += Number((x as any).valorServico ?? (x as any).valor_servico ?? 0);
+      if (['CONCLUIDO', 'CONFIRMADO', 'AGUARDANDO_CONFIRMACAO'].includes(st)) pago += Number((x as any).valorServico ?? (x as any).valor_servico ?? 0) + Number((x as any).valorTransporte ?? (x as any).valor_transporte ?? 0);
     }
     return { trampo_id: trampoId, turnos_total: lista.length, por_status: porStatus, valor_a_pagar: pago, turnos: lista };
   }

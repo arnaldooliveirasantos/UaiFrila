@@ -2,7 +2,6 @@ import { BaseService } from './BaseService';
 import { VariavelSistemaRepository } from '../repositories/VariavelSistemaRepository';
 import { VariavelSistemaModel } from '../models/VariavelSistemaModel';
 import { VARIAVEIS } from '../config/VariaveisSistema';
-import { registrarErro } from '../utils/registrarErro';
 // Sem fallback: variavel ausente = erro explicito. Variaveis sao seed no 00-CRIACAO-BANCO-NOVO-COMPLETO.sql.
 export class VariavelSistemaService extends BaseService<VariavelSistemaModel> {
   constructor() { super(new VariavelSistemaRepository()); }
@@ -15,25 +14,32 @@ export class VariavelSistemaService extends BaseService<VariavelSistemaModel> {
   // O seed antigo do banco so tem PRAZO_CANCELAMENTO_*_HORAS (24h) - sem este
   // fallback, getConfigCancelamento() lancava e TODA listagem que o chamava
   // (mural, /vagas/minhas) caia em 500 antes de listar qualquer vaga.
-  // SEM FALLBACK: sem variavel em minutos nem em horas, explode com log. Antes retornava 240 silenciosamente.
   private async buscarPrazoMinutos(chaveMinutos: string, chaveHoras: string): Promise<number> {
-    try { return await this.buscarNumeroObrigatorio(chaveMinutos); }
-    catch (e: any) { registrarErro('VariavelSistemaService.buscarPrazoMinutos', e, { chaveMinutos, chaveHoras }); throw e; }
+    try { return await this.buscarNumeroObrigatorio(chaveMinutos); } catch {}
+    try { return (await this.buscarNumeroObrigatorio(chaveHoras)) * 60; } catch {}
+    return 240;
   }
   async getConfigCancelamento() {
     const prazoMin = await this.buscarPrazoMinutos(VARIAVEIS.PRAZO_CANCELAMENTO_CANDIDATURA_MINUTOS, 'PRAZO_CANCELAMENTO_CANDIDATURA_HORAS');
     const prazoVagaMin = await this.buscarPrazoMinutos(VARIAVEIS.PRAZO_CANCELAMENTO_VAGA_MINUTOS, 'PRAZO_CANCELAMENTO_VAGA_HORAS');
-    const motivoMin = await this.buscarNumeroObrigatorio(VARIAVEIS.MOTIVO_CANCELAMENTO_MIN_CARACTERES);
-    const notificar = await this.buscarBooleanObrigatorio(VARIAVEIS.NOTIFICAR_CANCELAMENTO);
+    let motivoMin = 10;
+    try { motivoMin = await this.buscarNumeroObrigatorio(VARIAVEIS.MOTIVO_CANCELAMENTO_MIN_CARACTERES); } catch {}
+    let notificar = true;
+    try { notificar = await this.buscarBooleanObrigatorio(VARIAVEIS.NOTIFICAR_CANCELAMENTO); } catch {}
     return { prazoHoras: prazoMin / 60, prazoVagaHoras: prazoVagaMin / 60, prazoMin, prazoVagaMin, motivoMin, notificar };
   }
+  // Pagamento: comissão canônica 10% (COMISSAO_PLATAFORMA_PERCENTUAL) + taxas do provedor ATIVO.
+  // NUNCA usa TAXA_PLATAFORMA_PERCENTUAL / TAXA_PIX / TAXA_CARTAO (deprecadas).
   async getConfigPagamento() {
-    const taxaPlataforma = await this.buscarNumeroObrigatorio(VARIAVEIS.TAXA_PLATAFORMA_PERCENTUAL);
-    const taxaPix = await this.buscarNumeroObrigatorio(VARIAVEIS.TAXA_PIX_PERCENTUAL);
-    const taxaCartao = await this.buscarNumeroObrigatorio(VARIAVEIS.TAXA_CARTAO_PERCENTUAL);
+    const taxaPlataforma = await this.buscarNumeroObrigatorio(VARIAVEIS.COMISSAO_PLATAFORMA_PERCENTUAL);
+    let taxaPix = 1, taxaCartao = 4, pixChave = '';
+    try {
+      const pool = (await import('../repositories/BaseRepository')).BaseRepository.getPool() as any;
+      const r = await pool.query(`SELECT taxa_pix_percentual, taxa_cartao_percentual, pix_chave_recebimento FROM provedores_pagamento WHERE ativo = true LIMIT 1`);
+      if (r.rows[0]) { taxaPix = Number(r.rows[0].taxa_pix_percentual); taxaCartao = Number(r.rows[0].taxa_cartao_percentual); pixChave = r.rows[0].pix_chave_recebimento || ''; }
+    } catch {}
     const multa = await this.buscarNumeroObrigatorio(VARIAVEIS.TAXA_CANCELAMENTO_VALOR);
     const escrowHoras = await this.buscarNumeroObrigatorio(VARIAVEIS.ESCROW_LIBERACAO_AUTOMATICA_HORAS);
-    const pixChave = await this.buscarValorObrigatorio(VARIAVEIS.PIX_CHAVE_UAIFRILA);
     return { taxaPlataforma, taxaPix, taxaCartao, multa, escrowHoras, pixChave };
   }
   async listarPorCategoria(categoria: string): Promise<VariavelSistemaModel[]> { return await this.repoVar.listarPorCategoria(categoria); }

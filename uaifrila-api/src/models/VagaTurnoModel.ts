@@ -14,6 +14,7 @@ export class VagaTurnoModel extends BaseModel {
   @Column({ name: "atravessa_meia_noite", type: "boolean" }) atravessaMeiaNoite: boolean = false;
   @Column({ name: "duracao_minutos", type: "int" }) duracaoMinutos!: number;
   @Column({ name: "valor_servico" }) valorServico: number = 0;
+  @Column({ name: "valor_transporte" }) valorTransporte: number = 0;
   @Column({ name: "ordem", type: "int" }) ordem: number = 1;
   @Column({ name: "status" }) status: string = "AGENDADO";
   @Column({ name: "criado_em", type: "timestamp" }) criadoEm?: Date;

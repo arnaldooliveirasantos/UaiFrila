@@ -12,6 +12,7 @@ export class TrampoTurnoModel extends BaseModel {
   @Column({ name: "checkin_em", type: "timestamp" }) checkinEm?: Date;
   @Column({ name: "checkout_em", type: "timestamp" }) checkoutEm?: Date;
   @Column({ name: "valor_servico" }) valorServico: number = 0;
+  @Column({ name: "valor_transporte" }) valorTransporte: number = 0;
   @Column({ name: "criado_em", type: "timestamp" }) criadoEm?: Date;
   @Column({ name: "atualizado_em", type: "timestamp" }) atualizadoEm?: Date;
   constructor(data?: any) { super(); this.fill(data); }

@@ -14,6 +14,10 @@ export default function DadosPix() {
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState(''); const [ok, setOk] = useState('');
+  const [pendenteTerceiro, setPendenteTerceiro] = useState(false);
+  const [motivoTerceiro, setMotivoTerceiro] = useState('');
+  const [tokenValidacao, setTokenValidacao] = useState('');
+  const [enviandoCodigo, setEnviandoCodigo] = useState(false);
   useEffect(() => { (async () => {
     try {
       const d = await apiFetch('/api/usuario/pix');
@@ -28,7 +32,9 @@ export default function DadosPix() {
       else setErro(e.message || 'Não foi possível carregar seus dados PIX');
     } finally { setCarregando(false); }
   })(); }, []);
-  const salvar = async () => { setSalvando(true); setErro(''); setOk(''); try { const d = await apiFetch('/api/usuario/pix', { method: 'POST', body: JSON.stringify(form) }); const p = d?.pix || d?.data; if (p) setForm({ tipo_chave: p.tipo_chave, chave_pix: p.chave_pix, nome_titular: p.nome_titular, cpf_cnpj_titular: p.cpf_cnpj_titular || '', banco: p.banco || '', agencia: p.agencia || '', conta: p.conta || '', tipo_conta: p.tipo_conta || 'CORRENTE' }); setTemPix(true); setOk('Dados PIX salvos. É para essa chave que seus trampos serão pagos.'); } catch (e: any) { setErro(e.message); } finally { setSalvando(false); } };
+  const salvar = async () => { setSalvando(true); setErro(''); setOk(''); try { const d = await apiFetch('/api/usuario/pix', { method: 'POST', body: JSON.stringify(form) }); const p = d?.pix || d?.data; if (p?.pendente_validacao) { setPendenteTerceiro(true); setOk('Código de confirmação enviado para seu e-mail. Digite o código abaixo.'); return; } if (p) setForm({ tipo_chave: p.tipo_chave, chave_pix: p.chave_pix, nome_titular: p.nome_titular, cpf_cnpj_titular: p.cpf_cnpj_titular || '', banco: p.banco || '', agencia: p.agencia || '', conta: p.conta || '', tipo_conta: p.tipo_conta || 'CORRENTE' }); setTemPix(true); setOk('Dados PIX salvos. É para essa chave que seus trampos serão pagos.'); } catch (e: any) { const msg = e.message || ''; if (msg.includes('Pix de terceiro') || msg.includes('409')) { setPendenteTerceiro(true); setMotivoTerceiro(msg); setErro(msg + ' — marque abaixo que é de outra pessoa e clique em Enviar código.'); } else setErro(msg); } finally { setSalvando(false); } };
+  const enviarCodigoTerceiro = async () => { setEnviandoCodigo(true); setErro(''); try { const d = await apiFetch('/api/usuario/pix', { method: 'POST', body: JSON.stringify({ ...form, confirmar_uso_terceiro: true }) }); if (d?.pix?.pendente_validacao || d?.data?.pendente_validacao) setOk('Código enviado para seu e-mail. Digite o código abaixo.'); } catch (e: any) { setErro(e.message); } finally { setEnviandoCodigo(false); } };
+  const confirmarCodigo = async () => { try { await apiFetch('/api/usuario/pix/validar', { method: 'POST', body: JSON.stringify({ token: tokenValidacao }) }); setOk('Pix de terceiro confirmado. Clique em Salvar dados PIX de novo para concluir.'); setPendenteTerceiro(false); } catch (e: any) { setErro(e.message); } };
   const excluir = async () => { if (!confirm('Remover seus dados PIX?')) return; try { await apiFetch('/api/usuario/pix', { method: 'DELETE' }); setForm({ ...FORM_VAZIO }); setTemPix(false); setOk('Dados PIX removidos.'); } catch (e: any) { setErro(e.message); } };
   if (carregando) return <div className={styles.pageContainer}><div className={styles.card}><p className="animate-pulse">Carregando dados PIX...</p></div></div>;
   return (<div className={styles.pageContainer}><h1 className={styles.typography.h1}>Meus Dados PIX</h1><p className={styles.typography.body + ' mt-2'}>Para receber o pagamento dos trampos realizados. 1 chave ativa por usuário.</p>
@@ -45,5 +51,6 @@ export default function DadosPix() {
       <div><label className={styles.label}>Conta</label><input value={form.conta} onChange={e => setForm({ ...form, conta: e.target.value })} className={styles.input} placeholder="000000-0" /></div>
       <div><label className={styles.label}>Tipo da conta</label><select value={form.tipo_conta} onChange={e => setForm({ ...form, tipo_conta: e.target.value })} className={styles.select}><option value="CORRENTE">Corrente</option><option value="POUPANCA">Poupança</option></select></div>
     </div>
+    {pendenteTerceiro && <div className={styles.cardSmall + ' mt-4'}><p className={styles.typography.bodySmall}>Esta chave é de outra pessoa{motivoTerceiro ? ` (${motivoTerceiro})` : ''}. Confirme que você quer usá-la e valide por e-mail.</p><div className="flex gap-2 mt-2 flex-wrap"><button onClick={enviarCodigoTerceiro} disabled={enviandoCodigo} className={styles.buttonSecondary}>{enviandoCodigo ? 'Enviando...' : 'Enviar código por e-mail'}</button><input value={tokenValidacao} onChange={e => setTokenValidacao(e.target.value.replace(/\D/g, '').slice(0, 6))} className={styles.input} placeholder="Código de 6 dígitos" inputMode="numeric" style={{ maxWidth: 180 }} /><button onClick={confirmarCodigo} className={styles.buttonPrimary(false)}>Confirmar código</button></div></div>}
     <div className="flex gap-2 mt-4"><button onClick={salvar} disabled={salvando} className={styles.buttonPrimary(salvando)}>{salvando ? 'Salvando...' : 'Salvar dados PIX'}</button>{temPix && <button onClick={excluir} className={styles.buttonDanger}>Remover</button>}</div></div></div>);
 }
