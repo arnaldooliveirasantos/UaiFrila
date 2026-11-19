@@ -5,6 +5,10 @@ export interface CobrancaEntrada {
   descricao: string; valorCentavos: number; metodo: 'pix' | 'cartao';
   pagadorEmail: string; pagadorNome: string; expiraEm: Date;
   chaveIdempotencia: string; tokenCartao?: string; parcelas?: number;
+  // Patch 22 — Checkout Bricks: o Brick devolve bandeira, emissor e identificação.
+  // Antes o payment_method_id era fixo 'master' (bug: cartão não-Master falhava).
+  paymentMethodId?: string; issuerId?: string;
+  identificationTipo?: string; identificationNumero?: string;
 }
 export interface CobrancaSaida { provedorPagamentoId: string; status: string; qrCode?: string; qrCodeUrl?: string; checkoutUrl?: string; }
 export interface ChavePixInfo { existe: boolean | null; nomeTitular?: string; cpfCnpjTitular?: string; verificavel: boolean }

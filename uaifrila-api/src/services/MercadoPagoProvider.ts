@@ -18,8 +18,13 @@ export class MercadoPagoProvider implements ProvedorPagamento {
       const tx = r.point_of_interaction?.transaction_data || {};
       return { provedorPagamentoId: String(r.id), status: String(r.status || 'pending'), qrCode: tx.qr_code_base64, qrCodeUrl: tx.qr_code, checkoutUrl: tx.ticket_url };
     }
-    if (!e.tokenCartao) throw new Error('Token do cartão obrigatório — gere no front com o MP.js do Mercado Pago (o backend nunca recebe número de cartão)');
-    const r = await chamarApi(`${BASE}/v1/payments`, { method: 'POST', headers: this.headers(s.accessToken, e.chaveIdempotencia), body: JSON.stringify({ transaction_amount: e.valorCentavos / 100, token: e.tokenCartao, installments: Number(e.parcelas || 1), payment_method_id: 'master', payer: { email: e.pagadorEmail }, description: e.descricao, external_reference: e.chaveIdempotencia }) });
+    if (!e.tokenCartao) throw new Error('Token do cartão obrigatório — gere no front com o Checkout Bricks do Mercado Pago (o backend nunca recebe número de cartão)');
+    // Patch 22: bandeira/emissor/identificação VÊM DO BRICK. Sem paymentMethodId, não há
+    // como cobrar (o 'master' fixo antigo fazia cartão não-Master falhar ou pagar errado).
+    if (!e.paymentMethodId) throw new Error('Bricks não devolveu a bandeira do cartão (payment_method_id) — recarregue a tela de pagamento e tente de novo');
+    const payer: any = { email: e.pagadorEmail };
+    if (e.identificationNumero) payer.identification = { type: e.identificationTipo || 'CPF', number: String(e.identificationNumero) };
+    const r = await chamarApi(`${BASE}/v1/payments`, { method: 'POST', headers: this.headers(s.accessToken, e.chaveIdempotencia), body: JSON.stringify({ transaction_amount: e.valorCentavos / 100, token: e.tokenCartao, installments: Number(e.parcelas || 1), payment_method_id: e.paymentMethodId, issuer_id: e.issuerId || undefined, payer, description: e.descricao, external_reference: e.chaveIdempotencia }) });
     return { provedorPagamentoId: String(r.id), status: String(r.status || 'pending') };
   }
   async consultarCobranca(id: string, s: { accessToken: string }): Promise<{ status: string; valorCentavos: number }> {

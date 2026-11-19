@@ -141,6 +141,9 @@ export default function Navbar({ telaAtiva, setTelaAtiva, usuario, onLogout }: a
         { id: 'variaveis', label: 'Variáveis', icon: '⚙️', show: () => !!usuario && checkSuperAdmin() },
         { id: 'financeiro', label: 'Financeiro', icon: '📊', show: () => !!usuario && checkSuperAdmin() },
         { id: 'permissoes', label: 'Permissões', icon: '🔐', show: () => !!usuario && checkSuperAdmin() },
+        // Patch 24 (= Patch 23, mas sobre o Navbar certo): item que faltava para abrir a tela.
+        // Só admin (checkAdmin), igual a Cidades/Expansão. Aparece no hambúrguer e no desktop.
+        { id: 'provedores-pagamento', label: 'Provedores de Pagamento', icon: '🏦', show: () => !!usuario && checkAdmin() },
       ],
     },
     {

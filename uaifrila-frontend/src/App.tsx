@@ -18,11 +18,10 @@ import PainelTransacoes from './components/PainelTransacoes';
 import PainelConfiguracaoCidades from './components/PainelConfiguracaoCidades';
 import PainelVariaveisAmbiente from './components/PainelVariaveisAmbiente';
 import PainelAdminFinanceiro from './components/PainelAdminFinanceiro';
-import TelaPagamento from './components/TelaPagamento';
-import PainelProvedoresPagamento from './components/PainelProvedoresPagamento';
 import PainelPermissoesCategorias from './components/PainelPermissoesCategorias';
 import PainelExpansaoCidades from './components/PainelExpansaoCidades';
 import CodigoFreela from './components/CodigoFreela';
+import PainelProvedoresPagamento from './components/PainelProvedoresPagamento'; // Patch 23: tela de provedores
 import { useUaiFrilaStyles } from './styles/uaifrila.styles';
 import { apiFetch, apiGetPublic, setToken, clearAuth, getToken } from './utils/Api';
 
@@ -77,10 +76,7 @@ function AppContent() {
         // AGORA: extractor aceita as 4 formas (usuario / data.usuario / data / direto).
         const u = (data?.usuario?.id ? data.usuario : data?.data?.usuario?.id ? data.data.usuario : data?.data?.id ? data.data : data?.id ? data : null);
         console.log('[App] /auth/me -> usuario id=', (u as any)?.id, 'email=', (u as any)?.email);
-        // Patch 18: refresh com usuário logado vai para o Mural, não para a landing.
-        // (Não mexe no fluxo de código/cancelar do link do e-mail.)
-        if ((u as any)?.id) { setUsuario(u); if (!codigo && !cancelar) setTelaAtiva('mural'); }
-        else { console.warn('[App] /auth/me sem id, resposta=', data); clearAuth(); }
+        if ((u as any)?.id) setUsuario(u); else { console.warn('[App] /auth/me sem id, resposta=', data); clearAuth(); }
       } catch { clearAuth(); setUsuario(null); } finally { setCarregandoSessao(false); }
     })();
   }, []);
@@ -127,13 +123,13 @@ function AppContent() {
       {telaAtiva === 'trampos' && (usuario ? <PainelMeusTrampos usuario={usuario} setTelaAtiva={navegar} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'candidatos' && (usuario ? <PainelGerenciarCandidatos /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'transacoes' && (usuario ? <PainelTransacoes usuario={usuario} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
-      {telaAtiva === 'pagamento' && (usuario ? <TelaPagamento usuario={usuario} candidaturaId={Number(localStorage.getItem('uaifrila_pagamento_candidatura') || 0)} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
-      {telaAtiva === 'provedores-pagamento' && (usuario ? <PainelProvedoresPagamento /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'cidades' && (usuario ? <PainelConfiguracaoCidades /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'variaveis' && (usuario ? <PainelVariaveisAmbiente /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'financeiro' && (usuario ? <PainelAdminFinanceiro /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'permissoes' && (usuario ? <PainelPermissoesCategorias /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'expansao-cidades' && (usuario ? <PainelExpansaoCidades /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
+      {/* Patch 23: tela de Provedores de Pagamento (admin). ANTES: não havia import nem rota — clicar no menu (quando existia) não abria nada, e o menu nem existia no Navbar real. */}
+      {telaAtiva === 'provedores-pagamento' && (usuario ? <PainelProvedoresPagamento /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
     </div>
   );
 }

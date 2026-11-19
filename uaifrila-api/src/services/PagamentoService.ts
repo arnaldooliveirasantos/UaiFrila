@@ -28,7 +28,7 @@ export class PagamentoService extends BaseService<any> {
   }
   private async carregarCandidatura(candidaturaId: number): Promise<any> {
     const pool = BaseRepository.getPool() as any;
-    const r = await pool.query(`SELECT c.*, v.titulo as vaga_titulo, v.data_inicio, v.data_fim, u.email as contratante_email, u.nome_completo as contratante_nome FROM candidaturas c JOIN vagas v ON v.id = c.vaga_id JOIN usuarios u ON u.id = v.contratante_id WHERE c.id = $1`, [candidaturaId]);
+    const r = await pool.query(`SELECT c.*, v.contratante_id, v.titulo as vaga_titulo, v.data_inicio, v.data_fim, u.email as contratante_email, u.nome_completo as contratante_nome FROM candidaturas c JOIN vagas v ON v.id = c.vaga_id JOIN usuarios u ON u.id = v.contratante_id WHERE c.id = $1`, [candidaturaId]);
     if (!r.rows[0]) throw new Error('Candidatura não encontrada');
     return r.rows[0];
   }
@@ -37,7 +37,12 @@ export class PagamentoService extends BaseService<any> {
     if (cand.data_inicio) return new Date(cand.data_inicio);
     return new Date(Date.now() + 24 * 60 * 60 * 1000);
   }
-  async criarOuObter(candidaturaId: number, contratanteId: number, metodo = 'pix', tokenCartao?: string, parcelas?: number): Promise<any> {
+  // Patch 22 — Checkout Bricks: dadosCartao agora é um objeto com o que o Brick devolve
+  // (token, parcelas, bandeira, emissor, identificação). Aceita string no 4º arg por
+  // compatibilidade com chamadas antigas (só token).
+  async criarOuObter(candidaturaId: number, contratanteId: number, metodo = 'pix', dadosCartao?: string | { tokenCartao?: string; parcelas?: number; paymentMethodId?: string; issuerId?: string; identificationTipo?: string; identificationNumero?: string }): Promise<any> {
+    const dc: any = typeof dadosCartao === 'string' ? { tokenCartao: dadosCartao } : (dadosCartao || {});
+    const tokenCartao = dc.tokenCartao; const parcelas = dc.parcelas;
     try {
       const cand = await this.carregarCandidatura(candidaturaId);
       if (Number(cand.contratante_id) !== Number(contratanteId)) throw new Error('Só o contratante da vaga pode pagar');
@@ -58,8 +63,10 @@ export class PagamentoService extends BaseService<any> {
         descricao: `UaiFrila — Vaga #${cand.vaga_id} ${cand.vaga_titulo || ''}`.slice(0, 140),
         valorCentavos: totalC, metodo: metodoFinal, pagadorEmail: cand.contratante_email, pagadorNome: cand.contratante_nome,
         expiraEm: expira, chaveIdempotencia: chave, tokenCartao, parcelas,
+        paymentMethodId: dc.paymentMethodId, issuerId: dc.issuerId,
+        identificationTipo: dc.identificationTipo, identificationNumero: dc.identificationNumero,
       }, { ...seg, accessToken: seg.accessToken });
-      const criado = await this.repo.criarGenerico({
+      return await this.repo.criarGenerico({
         candidatura_id: candidaturaId, vaga_id: cand.vaga_id, contratante_id: contratanteId,
         freela_id: cand.freela_id || cand.usuario_id, provedor: provedor.provedor,
         provedor_pagamento_id: cobranca.provedorPagamentoId, metodo: metodoFinal, status: 'AGUARDANDO_PAGAMENTO',
@@ -70,24 +77,35 @@ export class PagamentoService extends BaseService<any> {
         taxa_centavos: totalC - (Math.round(Number(calculo.valor_servico) * 100) + Math.round(Number(calculo.valor_transporte) * 100) + Math.round(Number(calculo.comissao) * 100)),
         total_centavos: totalC, qr_code: cobranca.qrCode, qr_code_url: cobranca.qrCodeUrl, checkout_url: cobranca.checkoutUrl, expira_em: expira,
       });
-      // Patch 12: espelho em `transacoes` JÁ na criação (antes só existia após
-      // a confirmação do provedor — pagamento em aberto não aparecia na tela).
-      try {
-        const pool2 = BaseRepository.getPool() as any;
-        const ex2 = await pool2.query(`SELECT id FROM transacoes WHERE pagamento_id = $1 LIMIT 1`, [criado.id]);
-        if (!ex2.rows[0]) {
-          await pool2.query(
-            `INSERT INTO transacoes (codigo, pagamento_id, vaga_id, freela_id, contratante_id, valor_base, valor_total_contratante, valor_liquido_freela, status, metodo_pagamento, observacoes, expira_em, criado_em) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'AGUARDANDO_PAGAMENTO',$9,$10,$11,NOW())`,
-            [`PG-${criado.id}`, criado.id, cand.vaga_id, cand.freela_id || cand.usuario_id, contratanteId,
-             Number(calculo.valor_servico) + Number(calculo.valor_transporte), totalC / 100,
-             Number(calculo.valor_servico) + Number(calculo.valor_transporte), metodoFinal,
-             `Pagamento #${criado.id} — candidatura #${candidaturaId}`, expira]
-          );
-        }
-      } catch (e2: any) { console.error('[PagamentoService] Espelho transacao (criação) falhou:', e2.message); }
-      return criado;
-
     } catch (e: any) { this.handleError(e, 'PagamentoService.criarOuObter'); }
+  }
+  // Patch 22 — Resumo para a tela de pagamento: totais por método SEM criar cobrança.
+  // Retorno é o público do cálculo (NUNCA comissão/taxa — sigilo comercial).
+  // Usado para exibir "Pix economiza R$ X" e o amount do Brick ANTES de pagar.
+  async resumo(candidaturaId: number, usuarioId: number): Promise<any> {
+    try {
+      const cand = await this.carregarCandidatura(candidaturaId);
+      const ehParticipante = Number(cand.contratante_id) === Number(usuarioId) || Number(cand.freela_id || cand.usuario_id) === Number(usuarioId);
+      if (!ehParticipante) throw new Error('Você não participa deste pagamento');
+      const pool = BaseRepository.getPool() as any;
+      const rt = await pool.query(`SELECT COALESCE(SUM(valor_servico),0) AS s, COALESCE(SUM(valor_transporte),0) AS t FROM vaga_turnos WHERE vaga_id = $1`, [cand.vaga_id]);
+      const calculo: any = await this.calculoSvc.calcular({ valor_servico: Number(rt.rows[0]?.s || 0), valor_transporte: Number(rt.rows[0]?.t || 0), data_inicio_local: cand.data_inicio, data_fim_local: cand.data_fim }, false);
+      const { provedor } = await this.provedorSvc.buscarAtivoComSegredos();
+      return {
+        candidatura_id: candidaturaId, vaga_id: cand.vaga_id, status_candidatura: cand.status,
+        valor_servico: calculo.valor_servico, valor_transporte: calculo.valor_transporte,
+        total_pix: calculo.total_pix, total_cartao: calculo.total_cartao, economia_pix: calculo.economia_pix,
+        provedor: provedor.provedor,
+      };
+    } catch (e: any) { this.handleError(e, 'PagamentoService.resumo'); }
+  }
+  // Patch 22 — Public Key do provedor ativo para o front inicializar o Checkout Bricks.
+  // Public Key é pública por definição: pode ir para o front. Sem ela, o Brick não renderiza.
+  async chavePublica(): Promise<any> {
+    try {
+      const { provedor } = await this.provedorSvc.buscarAtivoComSegredos();
+      return { provedor: provedor.provedor, ambiente: provedor.ambiente, public_key: (provedor as any).publicKey ?? (provedor as any).public_key ?? null };
+    } catch (e: any) { this.handleError(e, 'PagamentoService.chavePublica'); }
   }
   async buscarPorCandidatura(candidaturaId: number, usuarioId: number, isAdmin = false): Promise<any> {
     const p: any = await this.repo.buscarPorCandidatura(candidaturaId);

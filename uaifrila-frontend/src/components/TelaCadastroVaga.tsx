@@ -4,8 +4,6 @@ import BlocoEndereco from './BlocoEndereco';
 import TelaAgendaVaga, { Turno } from './TelaAgendaVaga';
 import { apiFetch, apiGetPublic } from '../utils/Api';
 
-type MeioPagamento = 'pix' | 'cartao';
-
 interface CalculoBackend {
   valor_servico: number;
   valor_transporte: number;
@@ -18,6 +16,9 @@ interface CalculoBackend {
   taxa_pagamento: number;
   comissao_app: number;
   total_contratante: number;
+  total_pix: number;
+  total_cartao: number;
+  economia_pix: number;
   freela_recebe_bruto: number;
   freela_recebe_liquido: number;
   valor_hora_liquido: number;
@@ -26,10 +27,11 @@ interface CalculoBackend {
   mensagem_validacao?: string;
 }
 
+// Patch 22: telas NÃO escolhem método de pagamento — o método só é escolhido na
+// hora do pagamento. O cálculo das telas usa SEMPRE a taxa do cartão do provedor
+// ativo (vem do backend). Sem taxa fixada no front.
 const TAXAS_DEFAULT = {
   valor_minimo_vaga: 75.00,
-  taxa_pix_percentual: 1.00,
-  taxa_cartao_percentual: 4.00,
   comissao_percentual: 10.00,
 };
 
@@ -68,7 +70,6 @@ export default function TelaCadastroVaga(props: any) {
     valorTransporteStr: '15,00', valorTransporteNum: 15,
     enderecoId: null as number | null,
     enderecoAtivo: null as any,
-    meioPagamento: 'pix' as MeioPagamento,
     // Fases 1 e 3: quantas pessoas a vaga precisa + até quando dá para se candidatar.
     quantidadeVagas: 1,
     dataLimiteCandidatura: '',
@@ -124,9 +125,7 @@ export default function TelaCadastroVaga(props: any) {
       const find = (ch: string) => vars.find((x: any) => x.chave === ch);
       setTaxas({
         valor_minimo_vaga: parseFloat(find('VALOR_MINIMO_VAGA')?.valor_numerico || '75'),
-        taxa_pix_percentual: parseFloat(find('TAXA_PIX_PERCENTUAL')?.valor_numerico || '1'),
-        taxa_cartao_percentual: parseFloat(find('TAXA_CARTAO_PERCENTUAL')?.valor_numerico || '4'),
-        comissao_percentual: parseFloat((find('COMISSAO_APLICATIVO') || find('TAXA_PLATAFORMA_PERCENTUAL'))?.valor_numerico || '10'),
+        comissao_percentual: parseFloat((find('COMISSAO_PLATAFORMA_PERCENTUAL') || find('COMISSAO_APLICATIVO') || find('TAXA_PLATAFORMA_PERCENTUAL'))?.valor_numerico || '10'),
       });
       const ant = find('VAGA_ANTECEDENCIA_MINUTOS');
       if (ant) { const min = parseInt(ant.valor_numerico || ant.valor); if (min > 0) { setAntecedenciaMinutos(min); setMinDateTime(getMinDateTimeLocal(min)); } }
@@ -205,7 +204,7 @@ export default function TelaCadastroVaga(props: any) {
         data_inicio_local: inicioWall,
         data_fim_local: fimWall,
         timezone,
-        meio_pagamento: form.meioPagamento
+        // Patch 22: sem meio_pagamento — o backend calcula SEMPRE com a taxa do cartão.
       };
       const data = await apiFetch('/api/vagas/calcular', {
         method: 'POST',
@@ -225,7 +224,7 @@ export default function TelaCadastroVaga(props: any) {
   useEffect(() => {
     const timer = setTimeout(() => recalcularNoBackend(), 500);
     return () => clearTimeout(timer);
-  }, [valorTotalTurnos, form.valorTransporteNum, inicioWall, fimWall, form.meioPagamento]);
+  }, [valorTotalTurnos, form.valorTransporteNum, inicioWall, fimWall]);
 
   useEffect(() => {
     const init = async () => {
@@ -250,16 +249,15 @@ export default function TelaCadastroVaga(props: any) {
             dataHoraInicio: inicioLocal, dataHoraFim: fimLocal,
             valorServicoStr: valorServ.toFixed(2).replace('.', ','), valorServicoNum: valorServ,
             valorTransporteStr: valorTransp.toFixed(2).replace('.', ','), valorTransporteNum: valorTransp,
-            meioPagamento: vagaLocal.meio_pagamento || 'pix',
             enderecoId: vagaLocal.endereco_id || null,
             quantidadeVagas: Number(vagaLocal.quantidade_vagas ?? vagaLocal.quantidadeVagas ?? 1) || 1,
             dataLimiteCandidatura: vagaLocal.data_limite_candidatura ? (() => { const d = new Date(vagaLocal.data_limite_candidatura); const p = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; })() : '',
           }));
           // Agenda da edicao: turnos salvos, ou o intervalo unico convertido em 1 turno.
           if (Array.isArray(vagaLocal.turnos) && vagaLocal.turnos.length) {
-            setTurnos(vagaLocal.turnos.map((x: any) => ({ data: String(x.data).slice(0, 10), hora_inicio: String(x.hora_inicio).slice(0, 5), hora_fim: String(x.hora_fim).slice(0, 5), valor_servico: Number(x.valor_servico || 0), valor_transporte: Number(x.valor_transporte ?? x.valorTransporte ?? 0) })));
+            setTurnos(vagaLocal.turnos.map((x: any) => ({ data: String(x.data).slice(0, 10), hora_inicio: String(x.hora_inicio).slice(0, 5), hora_fim: String(x.hora_fim).slice(0, 5), valor_servico: Number(x.valor_servico || 0) })));
           } else if (vagaLocal.data_inicio && vagaLocal.data_fim) {
-            setTurnos([{ data: inicioLocal.slice(0, 10), hora_inicio: inicioLocal.slice(11, 16), hora_fim: fimLocal.slice(11, 16), valor_servico: valorServ, valor_transporte: Number(vagaLocal.valor_transporte || 0) }]);
+            setTurnos([{ data: inicioLocal.slice(0, 10), hora_inicio: inicioLocal.slice(11, 16), hora_fim: fimLocal.slice(11, 16), valor_servico: valorServ }]);
           }
           setCarregandoEnderecoAtivo(false);
           return;
@@ -295,7 +293,7 @@ export default function TelaCadastroVaga(props: any) {
     localStorage.removeItem('uaifrila_vaga_editar');
     setIsEditando(false); setVagaEdicao(null);
     setTurnos([]); setMostrarAgenda(false);
-    setForm({ funcaoId: funcoes[0]?.id ?? null, titulo: '', descricao: '', dataHoraInicio: '', dataHoraFim: '', valorServicoStr: '75,00', valorServicoNum: 75.00, valorTransporteStr: '15,00', valorTransporteNum: 15, enderecoId: null, enderecoAtivo: null, meioPagamento: 'pix', quantidadeVagas: 1, dataLimiteCandidatura: '' });
+    setForm({ funcaoId: funcoes[0]?.id ?? null, titulo: '', descricao: '', dataHoraInicio: '', dataHoraFim: '', valorServicoStr: '75,00', valorServicoNum: 75.00, valorTransporteStr: '15,00', valorTransporteNum: 15, enderecoId: null, enderecoAtivo: null, quantidadeVagas: 1, dataLimiteCandidatura: '' });
     setErro(''); setSucesso('');
     carregarEnderecoAtivoAutomatico();
   };
@@ -313,7 +311,6 @@ export default function TelaCadastroVaga(props: any) {
         data_inicio_local: inicioWall,
         data_fim_local: fimWall,
         timezone,
-        meio_pagamento: form.meioPagamento,
         quantidade_vagas: Number(form.quantidadeVagas) || 1,
         data_limite_candidatura: form.dataLimiteCandidatura ? new Date(form.dataLimiteCandidatura).toISOString() : null,
         endereco_id: form.enderecoId,
@@ -355,18 +352,12 @@ export default function TelaCadastroVaga(props: any) {
             <label className={styles.label}>Descricao *</label>
             <textarea value={form.descricao} onChange={e => setForm({ ...form, descricao: e.target.value.slice(0,500) })} rows={4} placeholder="Descreva o trabalho, uniforme, horário de chegada..." className={styles.textarea} />
           </div>
-          <div className={styles.grid2Cols}>
-            <div>
-              <label className={styles.label}>Funcao *</label>
-              <select value={form.funcaoId ?? ''} onChange={e => setForm({ ...form, funcaoId: Number(e.target.value) || null })} disabled={carregandoFuncoes} className={styles.select}>
-                <option value="">{carregandoFuncoes ? 'Carregando funcoes...' : 'Selecione a funcao'}</option>
-                {funcoes.map((f: any) => (<option key={f.id} value={f.id}>{f.nome}</option>))}
-              </select>
-            </div>
-            <div>
-              <label className={styles.label}>Meio Pagamento *</label>
-              <select value={form.meioPagamento} onChange={e => setForm({ ...form, meioPagamento: e.target.value as MeioPagamento })} className={styles.select}><option value="pix">PIX (taxa {taxas.taxa_pix_percentual}%)</option><option value="cartao">Cartão (taxa {taxas.taxa_cartao_percentual}%)</option></select>
-            </div>
+          <div>
+            <label className={styles.label}>Funcao *</label>
+            <select value={form.funcaoId ?? ''} onChange={e => setForm({ ...form, funcaoId: Number(e.target.value) || null })} disabled={carregandoFuncoes} className={styles.select}>
+              <option value="">{carregandoFuncoes ? 'Carregando funcoes...' : 'Selecione a funcao'}</option>
+              {funcoes.map((f: any) => (<option key={f.id} value={f.id}>{f.nome}</option>))}
+            </select>
           </div>
           <div>
             <label className={styles.label}>Template de vaga (opcional)</label>
@@ -443,14 +434,27 @@ export default function TelaCadastroVaga(props: any) {
             </div>
           </div>
 
-          {calculoBackend && (
-            <div className={styles.valorBox}>
-              <span>Serviço: R$ {calculoBackend.valor_servico.toFixed(2)}</span>
-              <span>Transporte: R$ {calculoBackend.valor_transporte.toFixed(2)}</span>
-              <span>Taxa: R$ {calculoBackend.taxa_pagamento.toFixed(2)}</span>
-              <span>Freela recebe: R$ {calculoBackend.freela_recebe_liquido.toFixed(2)}</span>
-            </div>
-          )}
+          {calculoBackend && (() => {
+            // Patch 22: valores POR VAGA (por candidato) + totais x Q.
+            // Total geral = Q x (S + T + C) / (1 - M_cartão) = Q x total_cartao (vem do backend).
+            const Q = Number(form.quantidadeVagas) || 1;
+            const S = calculoBackend.valor_servico;
+            const T = calculoBackend.valor_transporte;
+            const totalGeralCartao = (calculoBackend.total_cartao || calculoBackend.total_contratante) * Q;
+            const totalGeralPix = (calculoBackend.total_pix || 0) * Q;
+            const economiaGeral = (calculoBackend.economia_pix || 0) * Q;
+            const fmtB = (n: number) => `R$ ${n.toFixed(2).replace('.', ',')}`;
+            return (
+              <div className={styles.valorBox}>
+                <p className={styles.typography.body}><strong>Por vaga (por candidato):</strong> Serviço {fmtB(S)} • Transporte {fmtB(T)}</p>
+                <p className={styles.typography.body}>Total para {Q} vaga(s): Serviço {fmtB(S * Q)} • Transporte {fmtB(T * Q)}</p>
+                <p className={styles.typography.body}><strong>Total geral a pagar (cartão): {fmtB(totalGeralCartao)}</strong></p>
+                {totalGeralPix > 0 && <p className={styles.typography.bodySmall}>Se pagar com Pix: {fmtB(totalGeralPix)} — você economiza {fmtB(economiaGeral)}</p>}
+                <p className={styles.typography.bodySmall}>Freela recebe por vaga: {fmtB(calculoBackend.freela_recebe_liquido)}</p>
+                <p className={styles.typography.caption}>O método de pagamento é escolhido só na hora de pagar. O total acima usa a taxa do cartão do provedor ativo.</p>
+              </div>
+            );
+          })()}
 
           <button onClick={publicar} disabled={carregando || !form.enderecoId || !form.funcaoId} className={styles.buttonPrimary(carregando || !form.enderecoId)}>
             {carregando ? 'Publicando...' : isEditando ? 'Atualizar Vaga' : form.enderecoId ? `Publicar Vaga em ${form.enderecoAtivo?.bairro || form.enderecoAtivo?.cidade_nome || 'endereço ativo'}` : 'Selecione um endereço para publicar'}

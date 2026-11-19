@@ -41,6 +41,9 @@ export default function PainelProvedoresPagamento() {
           <div><label className={styles.label}>Access token / Client secret {p.tem_client_secret ? '(já cadastrado — deixe em branco para manter)' : '(obrigatório para ativar)'}</label><input type="password" onChange={e => set('client_secret', e.target.value)} className={styles.input} placeholder="••••••••" /></div>
           <div><label className={styles.label}>Webhook secret {p.tem_webhook_secret ? '(já cadastrado)' : '(obrigatório para validar webhooks)'}</label><input type="password" onChange={e => set('webhook_secret', e.target.value)} className={styles.input} placeholder="••••••••" /></div>
           <div><label className={styles.label}>Chave Pix de recebimento</label><input defaultValue={p.pix_chave_recebimento || p.pixChaveRecebimento || ''} onChange={e => set('pix_chave_recebimento', e.target.value)} className={styles.input} /></div>
+          {/* Patch 22: Public Key do Mercado Pago (chave PÚBLICA — pode ficar em texto puro).
+              O front usa ela para inicializar o Checkout Bricks. Sem ela, o cartão via Bricks não renderiza. */}
+          <div><label className={styles.label}>Public Key (Mercado Pago — para o Checkout Bricks)</label><input defaultValue={p.public_key || p.publicKey || ''} onChange={e => set('public_key', e.target.value)} className={styles.input} placeholder="APP_USR-..." /><p className={styles.typography.caption + ' mt-1'}>Só usada quando o provedor ativo é o Mercado Pago. Pegue em Mercado Pago → Suas integrações → Credenciais.</p></div>
         </div>
         <div className="flex gap-2 mt-4"><button onClick={() => salvar(prov)} className={styles.buttonPrimary(false)}>Salvar</button>{!p.ativo && <button onClick={() => ativar(prov)} className={styles.buttonSecondary}>Ativar este provedor</button>}</div>
       </div>); })}

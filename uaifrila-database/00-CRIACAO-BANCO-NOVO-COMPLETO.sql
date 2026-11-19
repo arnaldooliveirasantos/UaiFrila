@@ -628,6 +628,7 @@ create table if not exists provedor_pagamento_auditoria (
  acao varchar(40) not null,
  de_ativo boolean,
  para_ativo boolean,
+ public_key text,
  criado_em timestamptz not null default NOW()
 );
 create table if not exists repasses (
@@ -1122,8 +1123,8 @@ VALUES
 ON CONFLICT (nome) DO NOTHING;
 
 INSERT INTO provedores_pagamento (provedor, ativo, ambiente, taxa_pix_percentual, taxa_cartao_percentual, config_json)
-VALUES ('MERCADO_PAGO', true, 'sandbox', 1, 4, '{"base_url":"https://api.mercadopago.com"}'::jsonb),
-       ('EFI', false, 'sandbox', 1, 4, '{"base_url":"https://api.efipay.com.br"}'::jsonb)
+VALUES ('MERCADO_PAGO', true, 'sandbox', 1, 5, '{"base_url":"https://api.mercadopago.com"}'::jsonb),
+       ('EFI', false, 'sandbox', 1, 5, '{"base_url":"https://api.efipay.com.br"}'::jsonb)
 ON CONFLICT (provedor) DO NOTHING;
 
 INSERT INTO variaveis_sistema (chave, valor, valor_numerico, tipo, descricao, categoria, editavel)

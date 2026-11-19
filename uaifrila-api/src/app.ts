@@ -38,8 +38,7 @@ import { PagamentoController } from './controllers/PagamentoController';
 import { ProvedorPagamentoController } from './controllers/ProvedorPagamentoController';
 import { PixValidacaoController } from './controllers/PixValidacaoController';
 import { RepasseController } from './controllers/RepasseController';
-import { TrampoTurnoController } from './controllers/TrampoTurnoController';
-
+import { TrampoTurnoController } from "./controllers/TrampoTurnoController";
 
 import { EnderecoVagaController } from './controllers/EnderecoVagaController';
 
@@ -91,7 +90,11 @@ export class App {
     setAuthPool(this.pool);
     globalPool = this.pool;
     this.expressApp.use(cors());
-    this.expressApp.use(express.json({ limit: '10mb' }));
+    // Webhook: o HMAC do provedor é calculado sobre os BYTES exatos do corpo.
+    // Sem `verify`, o express.json() descartava o corpo bruto e o controller caía
+    // no JSON.stringify — que reordena/re-espaça o JSON e invalida a assinatura.
+    // Resultado: webhook rejeitado e pagamento travado em AGUARDANDO_PAGAMENTO.
+    this.expressApp.use(express.json({ limit: '10mb', verify: (req: any, _res, buf) => { req.rawBody = buf.toString('utf8'); } }));
     this.routes();
   }
   public getApp() { return this.expressApp; }
@@ -131,7 +134,6 @@ export class App {
     const pixValidacaoCtrl: any = new PixValidacaoController();
     const repasseCtrl: any = new RepasseController();
     const trampoTurnoCtrl: any = new TrampoTurnoController();
-
     this.expressApp.post('/api/auth/register', (req, res) => authCtrl.register(req, res));
     this.expressApp.post('/api/auth/login', (req, res) => authCtrl.login(req, res));
     // SEM MOCK: login por código vai DIRETO para os controllers REAIS, não passa pelo AuthController.
@@ -150,6 +152,9 @@ export class App {
     this.expressApp.post('/api/pagamentos', authMiddleware, (req, res) => pagamentoCtrl.criar(req, res));
     this.expressApp.get('/api/pagamentos/meus', authMiddleware, (req, res) => pagamentoCtrl.meus(req, res));
     this.expressApp.get('/api/pagamentos/candidatura/:candidaturaId', authMiddleware, (req, res) => pagamentoCtrl.buscarPorCandidatura(req, res));
+    // Patch 22 — Bricks: resumo (totais Pix/cartão + economia) e public key do provedor ativo.
+    this.expressApp.get('/api/pagamentos/candidatura/:candidaturaId/resumo', authMiddleware, (req, res) => pagamentoCtrl.resumo(req, res));
+    this.expressApp.get('/api/pagamentos/chave-publica', authMiddleware, (req, res) => pagamentoCtrl.chavePublica(req, res));
     this.expressApp.post('/api/pagamentos/:id/reembolsar', authMiddleware, (req, res) => pagamentoCtrl.reembolsar(req, res));
     this.expressApp.post('/api/interno/pagamentos/processar', (req, res) => pagamentoCtrl.processarJobs(req, res));
     // Provedores (admin): segredos criptografados na entrada, mascarados na saída.
@@ -158,6 +163,7 @@ export class App {
     this.expressApp.post('/api/admin/provedores-pagamento/:provedor/ativar', authMiddleware, (req, res) => provedorPagamentoCtrl.ativar(req, res));
     // Pix de terceiro: confirmação por e-mail (token 6 dígitos).
     this.expressApp.post('/api/usuario/pix/validar', authMiddleware, (req, res) => pixValidacaoCtrl.confirmar(req, res));
+
     // Trampo-turnos (rotas que faltavam: o controller existia sem registro no App).
     this.expressApp.get('/api/trampo-turnos/trampo/:trampoId', authMiddleware, (req, res) => trampoTurnoCtrl.listarPorTrampo(req, res));
     this.expressApp.post('/api/trampo-turnos/trampo/:trampoId/gerar', authMiddleware, (req, res) => trampoTurnoCtrl.gerar(req, res));
@@ -167,6 +173,7 @@ export class App {
     this.expressApp.put('/api/trampo-turnos/:id/falta', authMiddleware, (req, res) => trampoTurnoCtrl.falta(req, res));
     this.expressApp.put('/api/trampo-turnos/:id/confirmar', authMiddleware, (req, res) => trampoTurnoCtrl.confirmar(req, res));
     this.expressApp.put('/api/trampos/:trampoId/turnos/cancelar-restantes', authMiddleware, (req, res) => trampoTurnoCtrl.cancelarRestantes(req, res));
+
     // Repasses (worker, X-Worker-Secret).
     this.expressApp.post('/api/interno/repasses/processar', (req, res) => repasseCtrl.processarJobs(req, res));
 
@@ -238,9 +245,10 @@ export class App {
     this.expressApp.delete('/api/enderecos-vaga', (req, res) => enderecoVagaCtrl.desvincular(req, res));
 
     // VAGAS - ORDEM FIXA
-    this.expressApp.get('/api/vagas/abertas', (req, res) => vagaCtrl.listar(req, res));
+    // (a rota pública /api/vagas/abertas já está acima, antes do authMiddleware —
+    //  a duplicata que estava aqui nunca executava, pois o Express casa a primeira.)
     this.expressApp.get('/api/vagas/minhas', (req, res) => vagaCtrl.minhasVagas(req, res));
-    this.expressApp.get('/api/vagas/minhas-publicadas', (req, res) => vagaCtrl.minhasPublicadas ? vagaCtrl.minhasPublicadas(req, res) : vagaCtrl.minhasVagas(req, res));
+    // Removido: /api/vagas/minhas-publicadas (regra do projeto — só /api/vagas/minhas).
     this.expressApp.get('/api/vagas/todas', (req, res) => vagaCtrl.listarTodas(req, res));
     this.expressApp.get('/api/vagas/contratante/:contratanteId', (req, res) => vagaCtrl.listarPorContratante(req, res));
     this.expressApp.post('/api/vagas/calcular', (req, res) => vagaCtrl.calcular ? vagaCtrl.calcular(req, res) : res.json({ success: true, calculo: {} }));

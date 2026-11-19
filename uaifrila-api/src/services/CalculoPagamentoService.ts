@@ -33,7 +33,7 @@ export class CalculoPagamentoService extends BaseService<any> {
       const valorMinimo = await this.variavelSvc.buscarNumeroObrigatorio('VALOR_MINIMO_VAGA').catch(() => 75);
       const provedor = await this.provedorSvc.buscarAtivo();
       const taxaPix = Number((provedor as any).taxaPixPercentual ?? (provedor as any).taxa_pix_percentual ?? 1);
-      const taxaCartao = Number((provedor as any).taxaCartaoPercentual ?? (provedor as any).taxa_cartao_percentual ?? 4);
+      const taxaCartao = Number((provedor as any).taxaCartaoPercentual ?? (provedor as any).taxa_cartao_percentual ?? 5);
       const comissaoC = comissaoCentavos(servicoC, transporteC, comissaoPct);
       const baseComComissaoC = servicoC + transporteC + comissaoC;
       const totalPixC = grossUpCentavos(baseComComissaoC, taxaPix);
@@ -82,7 +82,7 @@ export class CalculoPagamentoService extends BaseService<any> {
     const comissaoPct = await this.variavelSvc.buscarNumeroObrigatorio('COMISSAO_PLATAFORMA_PERCENTUAL');
     const provedor = await this.provedorSvc.buscarAtivo();
     const taxa = metodo === 'cartao'
-      ? Number((provedor as any).taxaCartaoPercentual ?? (provedor as any).taxa_cartao_percentual ?? 4)
+      ? Number((provedor as any).taxaCartaoPercentual ?? (provedor as any).taxa_cartao_percentual ?? 5)
       : Number((provedor as any).taxaPixPercentual ?? (provedor as any).taxa_pix_percentual ?? 1);
     const s = reaisParaCentavos(servicoReais), t = reaisParaCentavos(transporteReais);
     return grossUpCentavos(s + t + comissaoCentavos(s, t, comissaoPct), taxa);

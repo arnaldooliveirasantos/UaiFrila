@@ -12,6 +12,8 @@ export class ProvedorPagamentoModel extends BaseModel {
   @Column({ name: 'client_secret_criptografado', hidden: true }) clientSecretCriptografado?: string;
   @Column({ name: 'webhook_secret_criptografado', hidden: true }) webhookSecretCriptografado?: string;
   @Column({ name: 'pix_chave_recebimento' }) pixChaveRecebimento?: string;
+  // Patch 22: Public Key (Mercado Pago) — chave PÚBLICA para o Checkout Bricks. Não é segredo.
+  @Column({ name: 'public_key' }) publicKey?: string;
   @Column({ name: 'config_json' }) configJson?: any;
   @Column({ name: 'criado_em', type: 'timestamp' }) criadoEm?: Date;
   @Column({ name: 'atualizado_em', type: 'timestamp' }) atualizadoEm?: Date;

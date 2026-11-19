@@ -5,6 +5,7 @@ import { VagaModel } from '../models/VagaModel';
 import { BaseRepository } from '../repositories/BaseRepository';
 import { VariavelSistemaService } from './VariavelSistemaService';
 import { EnderecoVagaService } from './EnderecoVagaService';
+import { ProvedorPagamentoRepository } from '../repositories/ProvedorPagamentoRepository';
 
 // ATENÇÃO: NÃO use nome 'variavelService' aqui - BaseService antigo tinha 'protected variavelService'
 // Use 'variavelSvc' para não dar TS2415 (private vs protected)
@@ -61,20 +62,74 @@ export class VagaService extends BaseService<VagaModel> {
     } catch (e: any) { this.handleError(e, 'VagaService.buscarCompletaPorId'); }
   }
 
-  // CALCULO — delega para CalculoPagamentoService (único lugar que calcula preço).
-  // Transporte é POR TURNO (soma dos turnos). Retorno NÃO-admin sem comissão/taxa.
-  async calcular(dados: any, isAdmin = false): Promise<any> {
-    const { CalculoPagamentoService } = await import('./CalculoPagamentoService');
-    const turnos = Array.isArray(dados.turnos) ? dados.turnos : (Array.isArray(dados.turnosVaga) ? dados.turnosVaga : undefined);
-    const entrada: any = { ...dados };
-    if (turnos) entrada.turnos = turnos;
-    else { entrada.valor_servico = Number(dados.valor_servico ?? dados.valorServico ?? 0); entrada.valor_transporte = Number(dados.valor_transporte ?? dados.valorTransporte ?? 0); }
-    if (turnos?.length && !entrada.data_inicio_local) {
-      const ord = [...turnos].sort((a: any, b: any) => String(a.data).localeCompare(String(b.data)));
-      entrada.data_inicio_local = `${ord[0].data}T${ord[0].hora_inicio || '00:00'}`;
-      entrada.data_fim_local = `${ord[ord.length - 1].data}T${ord[ord.length - 1].hora_fim || '00:00'}`;
-    }
-    return await new CalculoPagamentoService().calcular(entrada, isAdmin);
+  // Patch 22 — Cálculo canônico (mesma regra do pagamento):
+  // C = COMISSAO_PLATAFORMA_PERCENTUAL x (S + T). Total(método) = (S + T + C) / (1 - M).
+  // Telas SEMPRE usam a taxa do CARTÃO do provedor ativo (sem campo meio_pagamento:
+  // o método só é escolhido na hora do pagamento). Freela recebe S + T.
+  // Q (quantidade de vagas) é aplicado NO FRONT: total geral = Q x total por vaga.
+  async calcular(dados: any): Promise<any> {
+    try {
+      this.validateRequired(dados, ['valor_servico']);
+      const vars: any[] = await this.variavelRepo.buscarTodos();
+      const findVar = (chave: string) => vars.find((v: any) => v.chave === chave);
+      const getNum = (chave: string, def: number) => {
+        const v = findVar(chave);
+        if (!v) return def;
+        const num = (v as any).valorNumerico ?? (v as any).valor_numerico ?? (v as any).valor;
+        const parsed = parseFloat(num);
+        if (isNaN(parsed)) throw new Error(`Variavel de sistema sem valor numerico: ${chave}`);
+        return parsed;
+      };
+      const VALOR_MINIMO = getNum('VALOR_MINIMO_VAGA', 75);
+      // Comissão: chave canônica COMISSAO_PLATAFORMA_PERCENTUAL (10). Fallbacks legados só se ausente.
+      const COMISSAO = getNum('COMISSAO_PLATAFORMA_PERCENTUAL', getNum('COMISSAO_APLICATIVO', getNum('TAXA_PLATAFORMA_PERCENTUAL', 10)));
+      // Taxas: SEMPRE do provedor de pagamento ativo (fonte única). Sem provedor ativo, erro explícito.
+      const provedorRepo = new ProvedorPagamentoRepository();
+      const provedor: any = await provedorRepo.buscarAtivo();
+      if (!provedor) throw new Error('Nenhum provedor de pagamento ativo — configure em Provedores de Pagamento (admin)');
+      const TAXA_PIX = Number(provedor.taxaPixPercentual ?? provedor.taxa_pix_percentual ?? 1);
+      const TAXA_CARTAO = Number(provedor.taxaCartaoPercentual ?? provedor.taxa_cartao_percentual ?? 5);
+
+      const iniStr = dados.data_inicio_local || dados.data_inicio || dados.dataInicio;
+      const fimStr = dados.data_fim_local || dados.data_fim || dados.dataFim;
+      let horas = 4;
+      if (iniStr && fimStr) {
+        const diffMs = new Date(fimStr).getTime() - new Date(iniStr).getTime();
+        horas = Math.round((diffMs / (1000 * 60 * 60)) * 100) / 100;
+        if (horas <= 0) throw { status: 400, message: 'Data fim deve ser maior que início' };
+      }
+      const S = Number(dados.valor_servico);
+      const T = Number(dados.valor_transporte || 0);
+      const base = S + T;
+      const comissao = base * (COMISSAO / 100);
+      const baseComComissao = base + comissao;
+      // Gross-up por método (valores POR VAGA / por candidato — o front multiplica por Q).
+      const total_pix = baseComComissao / (1 - TAXA_PIX / 100);
+      const total_cartao = baseComComissao / (1 - TAXA_CARTAO / 100);
+      const taxa_pagamento = total_cartao - baseComComissao; // taxa do cartão (padrão das telas)
+      const economia_pix = total_cartao - total_pix;
+      const freela_recebe_liquido = base; // S + T (plataforma absorve comissão e taxa no total)
+      const valor_minimo_valido = freela_recebe_liquido >= VALOR_MINIMO;
+      const valor_hora_final = horas > 0 ? freela_recebe_liquido / horas : 0;
+      return {
+        valor_servico: S,
+        valor_transporte: T,
+        base_calculo: base,
+        horas_estimadas: horas,
+        valor_hora_bruto: horas > 0 ? S / horas : 0,
+        taxa_pix_percentual: TAXA_PIX, taxa_cartao_percentual: TAXA_CARTAO, comissao_percentual: COMISSAO,
+        taxa_pagamento, taxa_cartao: taxa_pagamento, taxa_pagamento_cartao: taxa_pagamento,
+        comissao_app: comissao, comissao, total_descontos: comissao + taxa_pagamento,
+        total_contratante: total_cartao, contratante_paga: total_cartao,
+        total_pix, total_cartao, economia_pix,
+        freela_recebe_bruto: base, freela_recebe_liquido, valor_a_receber: base,
+        valor_servico_liquido: base - T,
+        valor_servico_liquido_cartao: base - T,
+        valor_hora_liquido: valor_hora_final, valor_hora_final, valor_minimo_valido,
+        mensagem_validacao: valor_minimo_valido ? undefined : `Valor mínimo R$ ${VALOR_MINIMO.toFixed(2)} - aumente o valor do serviço`,
+        meio_pagamento: 'cartao',
+      };
+    } catch (e: any) { this.handleError(e, 'VagaService.calcular'); }
   }
 
   async listarMuralParaUsuario(usuarioId: number): Promise<any[]> {
@@ -104,35 +159,9 @@ export class VagaService extends BaseService<VagaModel> {
       try { const rc = await pool.query(`SELECT * FROM candidaturas WHERE (freela_id=$1 OR usuario_id=$1) AND status IN ('PENDENTE','ACEITA','EM_ANALISE')`, [usuarioId]); rc.rows.forEach((c: any) => minhasCandidaturas.set(Number(c.vaga_id), c)); } catch {}
     }
 
-    
-    // Patch 11: anexa os turnos de cada vaga (1 query só, sem N+1). Sem isso o
-    // mural não tem como exibir dias/horários. Falha aqui não derruba o mural:
-    // o erro vai para o log e as vagas vêm sem turnos.
-    const turnosPorVaga = new Map<number, any[]>();
-    if (pool) {
-      try {
-        const ids = (vagas || []).map((x: any) => Number(x.id)).filter((n: number) => !isNaN(n));
-        if (ids.length) {
-          const rt = await pool.query(`SELECT vaga_id, data, hora_inicio, hora_fim, valor_servico, valor_transporte FROM vaga_turnos WHERE vaga_id = ANY($1) ORDER BY vaga_id, data, hora_inicio`, [ids]);
-          for (const row of (rt.rows || [])) {
-            const lista = turnosPorVaga.get(Number(row.vaga_id)) || [];
-            lista.push({ data: String(row.data).slice(0, 10), hora_inicio: String(row.hora_inicio).slice(0, 5), hora_fim: String(row.hora_fim).slice(0, 5), valor_servico: Number(row.valor_servico || 0), valor_transporte: Number(row.valor_transporte || 0) });
-            turnosPorVaga.set(Number(row.vaga_id), lista);
-          }
-        }
-      } catch (e: any) { console.error('[VagaService] listarMuralParaUsuario: falha ao carregar turnos', e?.message); }
-    }
-
     const result: any[] = [];
     for (const v of vagas) {
-      // Patch 9: 1 vaga com cálculo quebrado NÃO pode derrubar a lista inteira em 500.
-      // O erro vai para o log da API (procure por '[VagaService] calcular falhou na vaga').
-      let calculo: any;
-      try { calculo = await this.calcular(v); } catch (e: any) {
-        console.error('[VagaService] calcular falhou na vaga', v.id, '-', e?.message);
-        const base = Number(v.valor_servico || 0) + Number(v.valor_transporte || 0);
-        calculo = { contratante_paga: base, total_pix: base, total_cartao: base, valor_a_receber: base, valor_servico_liquido: base };
-      }
+      const calculo = await this.calcular(v);
       let enderecoVaga: any = null;
       if (pool) {
         try { const re = await pool.query(`SELECT e.*, c.nome as cidade_nome, e2.sigla as cidade_estado FROM enderecos_vaga ev JOIN enderecos e ON e.id=ev.endereco_id LEFT JOIN cidades c ON c.id=e.cidade_id LEFT JOIN estados e2 ON e2.id=c.estado_id WHERE ev.vaga_id=$1 AND ev.ativo=true LIMIT 1`, [v.id]); enderecoVaga = re.rows[0] || null; } catch {}
@@ -160,7 +189,6 @@ export class VagaService extends BaseService<VagaModel> {
         permite_candidatar: v.permite_candidatar ?? true,
         data_inicio: v.data_inicio, data_fim: v.data_fim,
         valor_servico: v.valor_servico, valor_transporte: v.valor_transporte,
-        turnos: turnosPorVaga.get(Number(v.id)) || [],
         calculo,
         bairro: enderecoVaga?.bairro, cidade_nome: enderecoVaga?.cidade_nome, cidade_estado: enderecoVaga?.cidade_estado,
         // Id do endereco da vaga (so do dono): a TelaCadastroVaga em modo edicao
@@ -180,8 +208,6 @@ export class VagaService extends BaseService<VagaModel> {
     }
     return result;
   }
-
-  // Cancelar vaga do dono - com trava via status_vaga
 
   // Cancelar vaga do dono - com trava via status_vaga
   async cancelarVaga(vagaId: number, usuarioId: number, motivo?: string): Promise<any> {
@@ -253,7 +279,7 @@ export class VagaService extends BaseService<VagaModel> {
       descricao: dados.descricao || '',
       funcao_id: funcaoId,
       valor_servico: valorServico,
-      valor_transporte: Number(calculo.valor_transporte || 0),
+      valor_transporte: Number(dados.valor_transporte ?? dados.valorTransporte ?? 0) || 0,
       valor_hora: Number(calculo.valor_hora_bruto || 0),
       total_freela: Number(calculo.freela_recebe_liquido || 0),
       status_vaga_id: 1,
@@ -269,14 +295,6 @@ export class VagaService extends BaseService<VagaModel> {
       try { await this.deletar(vagaId); } catch {}
       throw new Error('Não foi possível vincular o endereço à vaga: ' + (e.message || 'erro desconhecido'));
     }
-    // Salva a agenda (turnos com transporte por turno) — fonte dos valores do cálculo.
-    try {
-      const turnosPayload = Array.isArray(dados.turnos) ? dados.turnos : [];
-      if (turnosPayload.length) {
-        const { VagaTurnoService } = await import('./VagaTurnoService');
-        await new VagaTurnoService().substituirAgenda(vagaId, contratanteId, turnosPayload);
-      }
-    } catch (e: any) { try { await this.deletar(vagaId); } catch {} throw new Error('Não foi possível salvar os turnos da vaga: ' + (e.message || 'erro desconhecido')); }
     return criada;
   }
 
@@ -309,11 +327,6 @@ export class VagaService extends BaseService<VagaModel> {
       patch.total_freela = Number(calculo.freela_recebe_liquido || 0);
     }
     const atualizada: any = await this.getRepo().atualizarGenerico(id, patch);
-    if (Array.isArray(dados.turnos) && dados.turnos.length) {
-      const { VagaTurnoService } = await import('./VagaTurnoService');
-      const donoId = Number((existente as any).contratanteId ?? (existente as any).contratante_id);
-      await new VagaTurnoService().substituirAgenda(id, donoId, dados.turnos);
-    }
     const enderecoId = Number(dados.endereco_id || dados.enderecoId);
     if (enderecoId && !isNaN(enderecoId)) {
       const evSvc = new EnderecoVagaService();

@@ -57,7 +57,7 @@ export default function PainelMeusTrampos({ usuario: usuarioProp, setTelaAtiva }
       setTurnosDados((p) => ({ ...p, [cand.id]: d.data || d }));
     } catch (e: any) { setMsg(e.message || 'Não foi possível carregar os turnos'); } finally { setCarregandoTurnosId(null); }
   };
-  const acaoTurno = async (cand: any, turno: any, acao: 'checkin' | 'checkout' | 'falta' | 'confirmar') => {
+  const acaoTurno = async (cand: any, turno: any, acao: 'checkin' | 'checkout' | 'falta') => {
     setAcaoTurnoId(turno.id);
     try { await apiFetch(`/api/trampo-turnos/${turno.id}/${acao}`, { method: 'PUT' }); await carregarTurnosFechado(cand); }
     catch (e: any) { setMsg(e.message || 'Não foi possível atualizar o turno'); } finally { setAcaoTurnoId(null); }
@@ -234,13 +234,15 @@ export default function PainelMeusTrampos({ usuario: usuarioProp, setTelaAtiva }
           ) : (
             <div className="space-y-3 mt-4">{candidaturas.map((c: any) => {
               const titulo = c.vaga_titulo || c.titulo || `Vaga #${c.vaga_id}`;
-              const aReceber = c.valor_a_receber ?? c.calculo?.valor_a_receber ?? c.vaga_valor_servico;
+              // Patch 22: candidatura (não criou a vaga) -> só Serviço + Transporte por candidato.
+              const servCand = Number(c.vaga_valor_servico ?? c.calculo?.valor_servico ?? c.valor_servico ?? 0);
+              const transpCand = Number(c.vaga_valor_transporte ?? c.calculo?.valor_transporte ?? c.valor_transporte ?? 0);
               const aceita = String(c.status || '').toUpperCase() === 'ACEITA';
               return (
                 <div key={c.id} className={styles.cardSmall}>
                   <div className="flex justify-between"><h3 className={styles.typography.h3}>{titulo}</h3><span className={styles.badge('warning')}>{rotuloCandidatura(c.status)}</span></div>
                   <p className={styles.typography.bodySmall}>{(c.vaga_descricao || '').slice(0, 100)}</p>
-                  <p className={styles.typography.caption}>{c.vaga_data_inicio ? new Date(c.vaga_data_inicio).toLocaleDateString() : ''} • Você recebe {fmtReais(aReceber)}</p>
+                  <p className={styles.typography.caption}>{c.vaga_data_inicio ? new Date(c.vaga_data_inicio).toLocaleDateString() : ''} • Serviço {fmtReais(servCand)} • Transporte {fmtReais(transpCand)} por candidato</p>
                   {String(c.status || '').toUpperCase() === 'SELECIONADO' && (
                     <div className={`${styles.cardSmall} mt-3`}>
                       <p className={styles.typography.bodySmall}><b>Você foi selecionado!</b> Confirme até {c.prazo_resposta_ate ? new Date(c.prazo_resposta_ate).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'} — sem confirmar, a vaga chama o próximo da fila.</p>
@@ -267,16 +269,15 @@ export default function PainelMeusTrampos({ usuario: usuarioProp, setTelaAtiva }
                               <div key={tt.id} className="flex flex-wrap items-center gap-2 mt-2">
                                 <span className="capitalize font-bold">{dtT.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })}</span>
                                 <span>{String(tt.hora_inicio).slice(0, 5)}–{String(tt.hora_fim).slice(0, 5)}</span>
-                                <span>{fmtReais(tt.valor_servico)}</span>
+                                <span>Serviço {fmtReais(tt.valor_servico)}{Number(tt.valor_transporte || 0) > 0 ? ` • Transporte ${fmtReais(tt.valor_transporte)}` : ''}</span>
                                 <span className={styles.badge(st === 'CONCLUIDO' ? 'success' : st === 'CANCELADO' || st === 'FALTOU' ? 'danger' : 'warning')}>{tt.status}</span>
                                 {st === 'AGENDADO' && <button onClick={() => acaoTurno(c, tt, 'checkin')} disabled={acaoTurnoId === tt.id} className={styles.buttonSecondary}>Check-in</button>}
                                 {st === 'EM_ANDAMENTO' && <button onClick={() => acaoTurno(c, tt, 'checkout')} disabled={acaoTurnoId === tt.id} className={styles.buttonSecondary}>Check-out (concluir)</button>}
-                                {st === 'AGUARDANDO_CONFIRMACAO' && <button onClick={() => acaoTurno(c, tt, 'confirmar')} disabled={acaoTurnoId === tt.id} className={styles.buttonPrimary(acaoTurnoId === tt.id)}>Confirmar turno (libera repasse)</button>}
                                 {(st === 'AGENDADO' || st === 'EM_ANDAMENTO') && <button onClick={() => acaoTurno(c, tt, 'falta')} disabled={acaoTurnoId === tt.id} className={styles.buttonGhost}>Falta</button>}
                               </div>
                             );
                           })}
-                          <p className={styles.typography.bodySmall + ' mt-2 font-black'}>Valor a pagar pelos turnos concluídos: {fmtReais(turnosDados[c.id].valor_a_pagar)}</p>
+                          <p className={styles.typography.bodySmall + ' mt-2 font-black'}>Valor a receber pelos turnos concluídos: {fmtReais(turnosDados[c.id].valor_a_pagar)}</p>
                           {turnosDados[c.id].trampo?.id && (
                             <div className="flex flex-wrap gap-2 mt-3">
                               {turnosDados[c.id].trampo.presenca_confirmada_em ? (

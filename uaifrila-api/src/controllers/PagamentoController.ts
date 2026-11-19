@@ -5,7 +5,8 @@ export class PagamentoController extends BaseController {
   private service = new PagamentoService();
   criar = async (req: AuthRequest, res: Response) => {
     try {
-      const p = await this.service.criarOuObter(Number(req.body?.candidatura_id ?? req.body?.candidaturaId), Number(req.usuario!.id), req.body?.metodo || 'pix', req.body?.token_cartao, Number(req.body?.parcelas || 1));
+      // Patch 22 — Bricks: o front manda token + bandeira + emissor + identificação do Brick.
+      const p = await this.service.criarOuObter(Number(req.body?.candidatura_id ?? req.body?.candidaturaId), Number(req.usuario!.id), req.body?.metodo || 'pix', { tokenCartao: req.body?.token_cartao, parcelas: Number(req.body?.parcelas || 1), paymentMethodId: req.body?.payment_method_id, issuerId: req.body?.issuer_id, identificationTipo: req.body?.identification_tipo, identificationNumero: req.body?.identification_numero });
       return res.status(201).json({ success: true, data: p, pagamento: p });
     } catch (e: any) { return this.handleError(res, e); }
   };
@@ -13,6 +14,19 @@ export class PagamentoController extends BaseController {
     try {
       const p = await this.service.buscarPorCandidatura(Number(req.params.candidaturaId), Number(req.usuario!.id), this.isAdmin(req));
       return res.json({ success: true, data: p, pagamento: p });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
+  // Patch 22 — resumo (totais por método, sem criar cobrança) + public key do Brick.
+  resumo = async (req: AuthRequest, res: Response) => {
+    try {
+      const r = await this.service.resumo(Number(req.params.candidaturaId), Number(req.usuario!.id));
+      return res.json({ success: true, data: r, resumo: r });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
+  chavePublica = async (req: AuthRequest, res: Response) => {
+    try {
+      const r = await this.service.chavePublica();
+      return res.json({ success: true, data: r });
     } catch (e: any) { return this.handleError(res, e); }
   };
   meus = async (req: AuthRequest, res: Response) => {

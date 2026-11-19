@@ -33,6 +33,9 @@ export class ProvedorPagamentoService extends BaseService<any> {
     if (dados.client_secret) patch.client_secret_criptografado = criptografar(String(dados.client_secret));
     if (dados.webhook_secret) patch.webhook_secret_criptografado = criptografar(String(dados.webhook_secret));
     if (dados.pix_chave_recebimento !== undefined) patch.pix_chave_recebimento = String(dados.pix_chave_recebimento);
+    // Patch 22: Public Key do Mercado Pago (chave PÚBLICA, não é segredo — vai no banco em texto puro,
+    // o front precisa dela para inicializar o Checkout Bricks). Vazia = Bricks não renderiza.
+    if (dados.public_key !== undefined) patch.public_key = String(dados.public_key || '');
     if (dados.config_json) patch.config_json = dados.config_json;
     const salvo = await this.repo.atualizarGenerico(Number(atual.id), patch);
     await this.repo.registrarAuditoria(Number(atual.id), adminId, 'ATUALIZAR', !!atual.ativo, !!atual.ativo);

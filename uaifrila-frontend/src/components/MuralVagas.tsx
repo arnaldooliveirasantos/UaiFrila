@@ -5,55 +5,6 @@ import { apiFetch, getToken } from '../utils/Api';
 // Mural - PÚBLICO, chama SÓ /vagas/abertas (não /vagas/mural)
 // Se der 401, mostra o erro real em vez de tela em branco
 
-const fmtData = (iso: string) => {
-  const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
-};
-const fmtHora = (h: string) => String(h || '').slice(0, 5);
-const fmtBRL = (v: any) => `R$ ${(Number(v) || 0).toFixed(2).replace('.', ',')}`;
-
-// Turnos e horários da vaga, agrupados por dia.
-// Com turnos: uma linha por dia (dia + horários + transporte de cada turno).
-// Sem turnos (vaga antiga): cai para a data/hora única da vaga.
-function DiasHorarios({ vaga }: { vaga: any }) {
-  const styles = useUaiFrilaStyles();
-  if (Array.isArray(vaga.turnos) && vaga.turnos.length) {
-    const porDia: Record<string, any[]> = {};
-    for (const x of vaga.turnos) {
-      const d = String(x.data).slice(0, 10);
-      (porDia[d] = porDia[d] || []).push(x);
-    }
-    return (
-      <div className="mt-2">
-        {Object.keys(porDia).sort().map((d) => (
-          <div key={d} className={styles.typography.bodySmall}>
-            <b className="capitalize">{fmtData(d)}</b>
-            {' — '}
-            {porDia[d].map((x: any, i: number) => (
-              <span key={i}>
-                {i > 0 && ' • '}
-                {fmtHora(x.hora_inicio)}–{fmtHora(x.hora_fim)}
-                {Number(x.valor_transporte) > 0 && <> (transporte {fmtBRL(x.valor_transporte)})</>}
-              </span>
-            ))}
-          </div>
-        ))}
-      </div>
-    );
-  }
-  if (vaga.data_inicio) {
-    const ini = new Date(vaga.data_inicio);
-    const fim = vaga.data_fim ? new Date(vaga.data_fim) : null;
-    return (
-      <p className={styles.typography.bodySmall + ' mt-2'}>
-        {ini.toLocaleDateString('pt-BR')} às {ini.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-        {fim && <> até {fim.toLocaleDateString('pt-BR')} às {fim.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</>}
-      </p>
-    );
-  }
-  return null;
-}
-
 export default function MuralVagas({ onSelecionarVaga }: { onSelecionarVaga?: (v: any) => void }) {
   const styles = useUaiFrilaStyles();
   const [vagas, setVagas] = useState<any[]>([]);
@@ -110,9 +61,10 @@ export default function MuralVagas({ onSelecionarVaga }: { onSelecionarVaga?: (v
         {vagas.map((v: any) => (
           <div key={v.id} className={styles.card} onClick={() => onSelecionarVaga?.(v)} style={{ cursor: 'pointer' }}>
             <h3 className={styles.typography.h3}>{v.titulo || v.descricao || `Vaga #${v.id}`}</h3>
-            <p className={styles.typography.bodySmall}>{v.bairro || ''} {v.cidade || ''} • {v.valor_total ? `R$ ${v.valor_total}` : ''}</p>
-            <DiasHorarios vaga={v} />
-            {v.calculo && <p className={styles.typography.bodySmall}>Recebe: R$ {v.calculo.valor_receber ?? v.calculo.valorReceber ?? '-'} • Transporte: R$ {v.calculo.valor_transporte ?? '-'}</p>}
+            <p className={styles.typography.bodySmall}>{v.bairro || ''} {v.cidade || ''}</p>
+            {/* Patch 22: no mural, para quem NÃO criou a vaga, só Serviço + Transporte POR CANDIDATO.
+                Sem total, sem taxa, sem comissão (sigilo comercial). */}
+            {(v.calculo || v.valor_servico != null) && <p className={styles.typography.bodySmall}>Serviço: R$ {Number(v.calculo?.valor_servico ?? v.valor_servico ?? 0).toFixed(2).replace('.', ',')} • Transporte: R$ {Number(v.calculo?.valor_transporte ?? v.valor_transporte ?? 0).toFixed(2).replace('.', ',')} por candidato</p>}
           </div>
         ))}
       </div>
