@@ -832,22 +832,22 @@ ON CONFLICT (sigla, pais_id) DO UPDATE SET
   ativo = CASE WHEN EXCLUDED.sigla = 'MG' THEN true ELSE false END;
 
 INSERT INTO cidades (nome, estado_id, ativa, lat, lng, raio_km, regiao, codigo_ibge, populacao, status_expansao, demanda_score) VALUES
-( 'Uberlândia',  (SELECT id FROM estados WHERE sigla='MG'), true, -18.9186, -48.2772, 25, 'Triângulo Mineiro', '3170206', 713232, 'ATIVA', 100),
-('Uberaba', (SELECT id FROM estados WHERE sigla='MG'),  false, -19.7476, -47.9381, 20, 'Triângulo Mineiro', '3170107', 337836, 'ATIVA', 80),
+( 'Uberlândia',  (SELECT id FROM estados WHERE sigla='MG'), true, -18.9186, -48.2772, 25, 'Triângulo Mineiro', '3170206', 713232, 'ATIVA', 100);
+/*,('Uberaba', (SELECT id FROM estados WHERE sigla='MG'),  false, -19.7476, -47.9381, 20, 'Triângulo Mineiro', '3170107', 337836, 'ATIVA', 80),
 ('Araguari', (SELECT id FROM estados WHERE sigla='MG'),  false, -18.6455, -48.1873, 15, 'Triângulo Mineiro', '3103504', 117825, 'ATIVA', 60),
 ( 'Ituiutaba',  (SELECT id FROM estados WHERE sigla='MG'), false, -18.9689, -49.4656, 15, 'Triângulo Mineiro', '3134202', 105818, 'INATIVA', 20),
-('Patrocínio', (SELECT id FROM estados WHERE sigla='MG'),  false, -18.9443, -46.9936, 15, 'Triângulo Mineiro', '3144607', 91995, 'INATIVA', 15);
+('Patrocínio', (SELECT id FROM estados WHERE sigla='MG'),  false, -18.9443, -46.9936, 15, 'Triângulo Mineiro', '3144607', 91995, 'INATIVA', 15);*/
 
 
 --'Em dev'
-INSERT INTO expansao_cidades (cidade_nome, estado_sigla, populacao, demanda_solicitacoes, demanda_vagas, status, prioridade, motivo) VALUES
+/*INSERT INTO expansao_cidades (cidade_nome, estado_sigla, populacao, demanda_solicitacoes, demanda_vagas, status, prioridade, motivo) VALUES
 ('Araguari', 'MG', 117825, 23, 15, 'SOLICITADA', 2, 'Cidade vizinha com alta demanda de garçons'),
 ('Uberaba', 'MG', 337836, 45, 32, 'EM_ANALISE', 3, 'Polo regional com muitos eventos'),
 ('Patrocínio', 'MG', 91995, 12, 8, 'SOLICITADA', 1, 'Demanda crescente de freelas'),
 ('Ituiutaba', 'MG', 105818, 18, 10, 'SOLICITADA', 1, 'Eventos agropecuários'),
 ('São Paulo', 'SP', 12396372, 156, 98, 'APROVADA', 3, 'Capital com demanda nacional'),
 ('Goiânia', 'GO', 1554879, 89, 56, 'EM_ANALISE', 2, 'Expansão centro-oeste');
-
+*/
 INSERT INTO tipos_usuario (chave, nome_exibicao, descricao, nivel_permissao) VALUES
 ('FREELA', 'Freela', 'Prestador de serviço autônomo - pode ver mural e se candidatar', 0),
 ('CONTRATANTE', 'Contratante', 'Contrata freelas - pode publicar vagas', 10),
