@@ -40,10 +40,8 @@ export class DateUtil {
 
       return new Date(utcGuess).toISOString();
     } catch (e: any) {
-      // Fallback: tenta Date direto
-      const d = new Date(dataLocal);
-      if (isNaN(d.getTime())) throw new Error(`Data inválida: ${dataLocal}`);
-      return d.toISOString();
+      console.error('[DateUtil.paraUTC0] Falha ao converter data local', { dataLocal, timezone, erro: e });
+      throw new Error(`Data inválida: ${dataLocal}`);
     }
   }
 

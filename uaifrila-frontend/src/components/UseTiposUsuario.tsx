@@ -40,14 +40,9 @@ export function useTiposUsuario() {
         console.log('[useTiposUsuario] Carregados', cacheTipos.length, 'tipos');
         return cacheTipos;
       })
-      .catch(() => {
-        // Fallback
-        cacheTipos = [
-          { id: 1, chave: 'FREELA', nome_exibicao: 'Freela', nivel_permissao: 0 },
-          { id: 2, chave: 'CONTRATANTE', nome_exibicao: 'Contratante', nivel_permissao: 10 },
-          { id: 3, chave: 'DUAL', nome_exibicao: 'Ambos', nivel_permissao: 20 },
-        ];
-        return cacheTipos;
+      .catch((e: any) => {
+        cacheTipos = null; cachePromise = null;
+        throw new Error(e?.message || 'Falha ao carregar tipos de usuário em /api/tipos-usuario');
       });
       
     cachePromise

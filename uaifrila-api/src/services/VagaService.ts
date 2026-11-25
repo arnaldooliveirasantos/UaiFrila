@@ -70,25 +70,17 @@ export class VagaService extends BaseService<VagaModel> {
   async calcular(dados: any): Promise<any> {
     try {
       this.validateRequired(dados, ['valor_servico']);
-      const vars: any[] = await this.variavelRepo.buscarTodos();
-      const findVar = (chave: string) => vars.find((v: any) => v.chave === chave);
-      const getNum = (chave: string, def: number) => {
-        const v = findVar(chave);
-        if (!v) return def;
-        const num = (v as any).valorNumerico ?? (v as any).valor_numerico ?? (v as any).valor;
-        const parsed = parseFloat(num);
-        if (isNaN(parsed)) throw new Error(`Variavel de sistema sem valor numerico: ${chave}`);
-        return parsed;
-      };
-      const VALOR_MINIMO = getNum('VALOR_MINIMO_VAGA', 75);
-      // Comissão: chave canônica COMISSAO_PLATAFORMA_PERCENTUAL (10). Fallbacks legados só se ausente.
-      const COMISSAO = getNum('COMISSAO_PLATAFORMA_PERCENTUAL', getNum('COMISSAO_APLICATIVO', getNum('TAXA_PLATAFORMA_PERCENTUAL', 10)));
+      const getNum = async (chave: string) => { return await this.variavelSvc.buscarNumeroObrigatorio(chave); };
+      const VALOR_MINIMO = await getNum('VALOR_MINIMO_VAGA');
+      // Comissão: chave canônica COMISSAO_PLATAFORMA_PERCENTUAL (10). Sem fallback para chaves legadas.
+      const COMISSAO = await getNum('COMISSAO_PLATAFORMA_PERCENTUAL'); // Unica chave canonica. Chaves legadas deprecadas, sem fallback.
       // Taxas: SEMPRE do provedor de pagamento ativo (fonte única). Sem provedor ativo, erro explícito.
       const provedorRepo = new ProvedorPagamentoRepository();
       const provedor: any = await provedorRepo.buscarAtivo();
       if (!provedor) throw new Error('Nenhum provedor de pagamento ativo — configure em Provedores de Pagamento (admin)');
-      const TAXA_PIX = Number(provedor.taxaPixPercentual ?? provedor.taxa_pix_percentual ?? 1);
-      const TAXA_CARTAO = Number(provedor.taxaCartaoPercentual ?? provedor.taxa_cartao_percentual ?? 5);
+      const TAXA_PIX = Number(provedor.taxaPixPercentual ?? provedor.taxa_pix_percentual);
+      const TAXA_CARTAO = Number(provedor.taxaCartaoPercentual ?? provedor.taxa_cartao_percentual);
+      if (!Number.isFinite(TAXA_PIX) || !Number.isFinite(TAXA_CARTAO)) throw new Error('Provedor ativo sem taxa_pix_percentual / taxa_cartao_percentual');
 
       const iniStr = dados.data_inicio_local || dados.data_inicio || dados.dataInicio;
       const fimStr = dados.data_fim_local || dados.data_fim || dados.dataFim;

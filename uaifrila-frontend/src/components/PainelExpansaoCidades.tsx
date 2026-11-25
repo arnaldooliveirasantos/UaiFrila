@@ -30,7 +30,7 @@ export default function PainelExpansaoCidades() {
           <p className="mt-6 text-sm">Nenhuma cidade em expansao no momento.</p>
         )}
         {!carregando && !erro && cidades.length > 0 && (
-          <div className="mt-6 grid grid-cols-3 gap-4">
+          <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {cidades.map((c: any) => (
               <div key={c.id} className={styles.cardSmall}>
                 <p className="font-black">{c.cidade_nome}</p>

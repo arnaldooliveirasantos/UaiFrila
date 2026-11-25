@@ -2,6 +2,7 @@ import { BaseService } from './BaseService';
 import { VariavelSistemaRepository } from '../repositories/VariavelSistemaRepository';
 import { VariavelSistemaModel } from '../models/VariavelSistemaModel';
 import { VARIAVEIS } from '../config/VariaveisSistema';
+import { ProvedorPagamentoRepository } from '../repositories/ProvedorPagamentoRepository';
 // Sem fallback: variavel ausente = erro explicito. Variaveis sao seed no 00-CRIACAO-BANCO-NOVO-COMPLETO.sql.
 export class VariavelSistemaService extends BaseService<VariavelSistemaModel> {
   constructor() { super(new VariavelSistemaRepository()); }
@@ -15,29 +16,28 @@ export class VariavelSistemaService extends BaseService<VariavelSistemaModel> {
   // fallback, getConfigCancelamento() lancava e TODA listagem que o chamava
   // (mural, /vagas/minhas) caia em 500 antes de listar qualquer vaga.
   private async buscarPrazoMinutos(chaveMinutos: string, chaveHoras: string): Promise<number> {
-    try { return await this.buscarNumeroObrigatorio(chaveMinutos); } catch {}
-    try { return (await this.buscarNumeroObrigatorio(chaveHoras)) * 60; } catch {}
-    return 240;
+    try { return await this.buscarNumeroObrigatorio(chaveMinutos); } catch (e: any) { console.error(`[VariavelSistemaService.buscarPrazoMinutos] ${chaveMinutos} ausente, tentando ${chaveHoras}`, e); }
+    const horas = await this.buscarNumeroObrigatorio(chaveHoras);
+    return horas * 60;
   }
   async getConfigCancelamento() {
     const prazoMin = await this.buscarPrazoMinutos(VARIAVEIS.PRAZO_CANCELAMENTO_CANDIDATURA_MINUTOS, 'PRAZO_CANCELAMENTO_CANDIDATURA_HORAS');
     const prazoVagaMin = await this.buscarPrazoMinutos(VARIAVEIS.PRAZO_CANCELAMENTO_VAGA_MINUTOS, 'PRAZO_CANCELAMENTO_VAGA_HORAS');
-    let motivoMin = 10;
-    try { motivoMin = await this.buscarNumeroObrigatorio(VARIAVEIS.MOTIVO_CANCELAMENTO_MIN_CARACTERES); } catch {}
-    let notificar = true;
-    try { notificar = await this.buscarBooleanObrigatorio(VARIAVEIS.NOTIFICAR_CANCELAMENTO); } catch {}
+    const motivoMin = await this.buscarNumeroObrigatorio(VARIAVEIS.MOTIVO_CANCELAMENTO_MIN_CARACTERES);
+    const notificar = await this.buscarBooleanObrigatorio(VARIAVEIS.NOTIFICAR_CANCELAMENTO);
     return { prazoHoras: prazoMin / 60, prazoVagaHoras: prazoVagaMin / 60, prazoMin, prazoVagaMin, motivoMin, notificar };
   }
   // Pagamento: comissão canônica 10% (COMISSAO_PLATAFORMA_PERCENTUAL) + taxas do provedor ATIVO.
   // NUNCA usa TAXA_PLATAFORMA_PERCENTUAL / TAXA_PIX / TAXA_CARTAO (deprecadas).
   async getConfigPagamento() {
     const taxaPlataforma = await this.buscarNumeroObrigatorio(VARIAVEIS.COMISSAO_PLATAFORMA_PERCENTUAL);
-    let taxaPix = 1, taxaCartao = 4, pixChave = '';
-    try {
-      const pool = (await import('../repositories/BaseRepository')).BaseRepository.getPool() as any;
-      const r = await pool.query(`SELECT taxa_pix_percentual, taxa_cartao_percentual, pix_chave_recebimento FROM provedores_pagamento WHERE ativo = true LIMIT 1`);
-      if (r.rows[0]) { taxaPix = Number(r.rows[0].taxa_pix_percentual); taxaCartao = Number(r.rows[0].taxa_cartao_percentual); pixChave = r.rows[0].pix_chave_recebimento || ''; }
-    } catch {}
+    const provedorRepo = new ProvedorPagamentoRepository();
+    const provedor: any = await provedorRepo.buscarAtivo();
+    if (!provedor) throw new Error('Nenhum provedor de pagamento ativo — configure em Provedores de Pagamento (admin)');
+    const taxaPix = Number(provedor.taxaPixPercentual ?? provedor.taxa_pix_percentual);
+    const taxaCartao = Number(provedor.taxaCartaoPercentual ?? provedor.taxa_cartao_percentual);
+    if (!Number.isFinite(taxaPix) || !Number.isFinite(taxaCartao)) throw new Error('Provedor ativo sem taxa_pix_percentual / taxa_cartao_percentual');
+    const pixChave = provedor.pixChaveRecebimento ?? provedor.pix_chave_recebimento ?? '';
     const multa = await this.buscarNumeroObrigatorio(VARIAVEIS.TAXA_CANCELAMENTO_VALOR);
     const escrowHoras = await this.buscarNumeroObrigatorio(VARIAVEIS.ESCROW_LIBERACAO_AUTOMATICA_HORAS);
     return { taxaPlataforma, taxaPix, taxaCartao, multa, escrowHoras, pixChave };

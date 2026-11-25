@@ -102,7 +102,7 @@ export default function LandingPage({ setTelaAtiva }: { setTelaAtiva: (t: string
             <div className="bg-[#FFC700] border-4 border-black p-5 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]">
               <p className="text-[11px] font-black uppercase opacity-60">04 — Transporte</p>
               <h3 className="font-black uppercase text-sm mt-1">Por turno</h3>
-              <p className="text-xs mt-2 font-medium leading-snug">Transporte é por turno. 3 turnos no mesmo dia = 3 transportes. Pode ser R$0 se combinar. Serviço e transporte multiplicados pela quantidade de vagas.</p>
+              <p className="text-xs mt-2 font-medium leading-snug">Pode ser R$0 se combinar. Serviço e transporte multiplicados pela quantidade de vagas.</p>
             </div>
           </div>
         </div>

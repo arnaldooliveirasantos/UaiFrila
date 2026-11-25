@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 import { apiFetch } from '../utils/Api';
+import { WizardNavegacao } from './WizardEtapas';
 // Tela SEPARADA de agenda da vaga: dias + periodos + valor POR TURNO.
 // A TelaCadastroVaga abre esta tela e volta com as escolhas (onConfirmar).
 // REGRA: candidatura e TUDO-OU-NADA (todos os dias). O valor por turno serve
@@ -14,29 +15,15 @@ const PRESETS = [
   { nome: 'Madrugada', inicio: '00:00', fim: '06:00' },
   { nome: 'Dia todo', inicio: '08:00', fim: '18:00' },
 ];
-const EXEMPLOS: Record<string, Turno[]> = {
-  natal: [
-    { data: '2026-12-24', hora_inicio: '08:00', hora_fim: '15:00', valor_servico: 150, valor_transporte: 0 },
-    { data: '2026-12-25', hora_inicio: '08:00', hora_fim: '15:00', valor_servico: 150, valor_transporte: 0 },
-  ],
-  chacara: [
-    { data: '2026-11-20', hora_inicio: '18:00', hora_fim: '00:00', valor_servico: 180, valor_transporte: 0 },
-    { data: '2026-11-21', hora_inicio: '18:00', hora_fim: '00:00', valor_servico: 180, valor_transporte: 0 },
-    { data: '2026-11-22', hora_inicio: '18:00', hora_fim: '00:00', valor_servico: 180, valor_transporte: 0 },
-  ],
-  show: [
-    { data: '2026-11-20', hora_inicio: '18:00', hora_fim: '00:00', valor_servico: 200, valor_transporte: 0 },
-    { data: '2026-11-21', hora_inicio: '00:00', hora_fim: '06:00', valor_servico: 220, valor_transporte: 0 },
-    { data: '2026-11-21', hora_inicio: '18:00', hora_fim: '00:00', valor_servico: 200, valor_transporte: 0 },
-    { data: '2026-11-22', hora_inicio: '00:00', hora_fim: '06:00', valor_servico: 220, valor_transporte: 0 },
-  ],
-};
+
 const paraMin = (h: string) => { const [a, b] = h.split(':').map(Number); return a * 60 + b; };
 const duracaoMin = (hi: string, hf: string) => { const d = paraMin(hf) - paraMin(hi); return d <= 0 ? d + 1440 : d; };
 const fmtData = (iso: string) => { const [y, m, d] = iso.split('-').map(Number); const dt = new Date(y, m - 1, d); return dt.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' }); };
 const fmtHoras = (min: number) => { const h = Math.floor(min / 60); const mm = min % 60; return mm ? `${h}h${String(mm).padStart(2, '0')}` : `${h}h`; };
 function agrupar(turnos: Turno[]): Record<string, Turno[]> { const g: Record<string, Turno[]> = {}; for (const t of turnos) { (g[t.data] = g[t.data] || []).push({ ...t }); } for (const k of Object.keys(g)) g[k].sort((a, b) => paraMin(a.hora_inicio) - paraMin(b.hora_inicio)); return g; }
-export default function TelaAgendaVaga({ turnosIniciais = [], onConfirmar, onCancelar }: { turnosIniciais?: Turno[]; onConfirmar: (t: Turno[]) => void; onCancelar: () => void }) {
+export default function TelaAgendaVaga({ turnosIniciais = [], onConfirmar, onCancelar, etapas, etapa, antecedenciaMinutos = 30 }: { turnosIniciais?: Turno[]; onConfirmar: (t: Turno[]) => void; onCancelar: () => void; etapas?: string[]; etapa?: number; antecedenciaMinutos?: number }) {
+  const ETAPAS_AGENDA = etapas || ['O que é a vaga', 'Dias e turnos', 'Endereço e valores', 'Revisão'];
+  const ETAPA_AGENDA = etapa ?? 1;
   const styles = useUaiFrilaStyles();
   const [porDia, setPorDia] = useState<Record<string, Turno[]>>(() => agrupar(turnosIniciais));
   const [mesCursor, setMesCursor] = useState(() => { const p = Object.keys(agrupar(turnosIniciais))[0]; if (p) { const [y, m] = p.split('-').map(Number); return { y, m: m - 1 }; } const h = new Date(); return { y: h.getFullYear(), m: h.getMonth() }; });
@@ -82,19 +69,21 @@ export default function TelaAgendaVaga({ turnosIniciais = [], onConfirmar, onCan
   const alterarTransporte = (dia: string, idx: number, transporte: number) => setPorDia((p) => ({ ...p, [dia]: p[dia].map((x, i) => i === idx ? { ...x, valor_transporte: transporte } : x) }));
   const aplicarTransporteTodos = () => { const v = Number(valorTransporteTodos.replace(',', '.')); if (v < 0 || isNaN(v)) { setErro('Informe um transporte válido para aplicar a todos.'); return; } setErro(''); setPorDia((p) => { const n: Record<string, Turno[]> = {}; for (const d of Object.keys(p)) n[d] = p[d].map((x) => ({ ...x, valor_transporte: v })); return n; }); };
   const aplicarValorTodos = () => { const v = Number(valorTodos.replace(',', '.')); if (!v || v < 0) { setErro('Informe um valor válido para aplicar a todos.'); return; } setErro(''); setPorDia((p) => { const n: Record<string, Turno[]> = {}; for (const d of Object.keys(p)) n[d] = p[d].map((t) => ({ ...t, valor_servico: v })); return n; }); };
-  const carregarExemplo = (chave: keyof typeof EXEMPLOS) => { setPorDia(agrupar(EXEMPLOS[chave])); const p = EXEMPLOS[chave][0].data; const [y, m] = p.split('-').map(Number); setMesCursor({ y, m: m - 1 }); setErro(''); };
   const confirmar = async () => {
     if (!dias.length) { setErro('Selecione pelo menos um dia.'); return; }
     const vazios = dias.filter((d) => !(porDia[d] || []).length);
     if (vazios.length) { setErro(`Falta período em: ${vazios.map(fmtData).join(', ')}`); return; }
     const todos: Turno[] = dias.flatMap((d) => porDia[d]).sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : paraMin(a.hora_inicio) - paraMin(b.hora_inicio)));
-    // Editando vaga existente: salva a agenda direto no backend
-    // (PUT /api/vagas/:vagaId/turnos). Vaga nova: os turnos vao no payload
-    // do publicar (TelaCadastroVaga) — aqui so devolve via onConfirmar.
-    try {
-      const vagaEdicao = JSON.parse(localStorage.getItem('uaifrila_vaga_editar') || 'null');
-      if (vagaEdicao?.id) await apiFetch(`/api/vagas/${vagaEdicao.id}/turnos`, { method: 'PUT', body: JSON.stringify({ turnos: todos }) });
-    } catch (e: any) { console.warn('[agenda] PUT turnos falhou, publicar vai salvar:', e?.message); }
+    // Validacao desta etapa (campos obrigatorios da agenda):
+    const semValor = todos.filter((x) => !(Number(x.valor_servico) > 0));
+    if (semValor.length) { setErro('Todo turno precisa de valor do serviço maior que R$ 0.'); return; }
+    const curto = todos.filter((x) => duracaoMin(x.hora_inicio, x.hora_fim) < 30);
+    if (curto.length) { setErro('Todo turno precisa de pelo menos 30 minutos.'); return; }
+    const inicioWall = `${todos[0].data}T${todos[0].hora_inicio}`;
+    const agora = new Date(); agora.setMinutes(agora.getMinutes() + antecedenciaMinutos);
+    if (new Date(inicioWall) < agora) { setErro(`Entrada deve ser > agora + ${antecedenciaMinutos}min`); return; }
+    // NADA e salvo aqui: sem PUT /api/vagas/:id/turnos. Os turnos vao no
+    // payload unico do publicar, na etapa Revisao (onConfirmar so devolve).
     onConfirmar(todos);
   };
   // Calendario do mes em exibicao (semana comeca na segunda)
@@ -114,9 +103,6 @@ export default function TelaAgendaVaga({ turnosIniciais = [], onConfirmar, onCan
       <p className={styles.typography.body + ' mt-2'}>Toque nos dias no calendário, depois escolha os períodos. O turno que passa da meia-noite conta no dia em que começa.</p>
       {erro && <div className={styles.errorBox + ' mt-4'}>{erro}</div>}
       <div className="flex flex-wrap gap-2 mt-4">
-        <button onClick={() => carregarExemplo('natal')} className={styles.buttonSecondary}>Ex.: Natal 24 e 25/12</button>
-        <button onClick={() => carregarExemplo('chacara')} className={styles.buttonSecondary}>Ex.: Festa na chácara 20–22/11</button>
-        <button onClick={() => carregarExemplo('show')} className={styles.buttonSecondary}>Ex.: Show 20–22/11</button>
       </div>
       <div className={styles.card + ' mt-4'}>
         <div className="flex items-center justify-between">
@@ -181,9 +167,6 @@ export default function TelaAgendaVaga({ turnosIniciais = [], onConfirmar, onCan
         <p className={styles.typography.body + ' font-black'}>Valor total do serviço: R$ {totalValor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
         <p className={styles.typography.caption + ' mt-1'}>A candidatura vale para todos os dias. O valor por turno só é usado no acerto se houver imprevisto e o freela não puder continuar.</p>
       </div>
-      <div className="flex gap-2 mt-4">
-        <button onClick={confirmar} disabled={!dias.length} className={styles.buttonPrimary(!dias.length)}>Confirmar agenda e voltar</button>
-        <button onClick={onCancelar} className={styles.buttonSecondary}>Voltar sem salvar</button>
-      </div>
+      <WizardNavegacao etapas={ETAPAS_AGENDA} etapa={ETAPA_AGENDA} onVoltar={onCancelar} onAvancar={confirmar} onFinalizar={confirmar} avancarLabel="Continuar →" finalizarLabel="Continuar →" carregando={false} podeFinalizar={dias.length > 0} />
     </div>);
 }
