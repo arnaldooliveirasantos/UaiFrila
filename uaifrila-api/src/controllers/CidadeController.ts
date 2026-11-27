@@ -1,67 +1,91 @@
-import { Request, Response } from 'express';
-import { AuthRepository } from '../repositories/AuthRepository';
-import { CidadeRepository } from '../repositories/CidadeRepository';
+import { Response } from 'express';
+import { CidadeService } from '../services/CidadeService';
+import { BaseController, AuthRequest } from './BaseController';
 
-export class CidadeController {
-  private authRepo = new AuthRepository();
-  private cidadeRepo = new CidadeRepository();
+export class CidadeController extends BaseController {
+  private service: CidadeService;
+  constructor() { super(); this.service = new CidadeService(); }
 
-  public listarAtivas = async (req: Request, res: Response): Promise<void> => {
+  listar = async (req: AuthRequest, res: Response) => {
     try {
-      const cidades = await this.cidadeRepo.buscarAtivas();
-      res.status(200).json({ sucesso: true, cidades, total: cidades.length, tabela: 'cidades' });
-    } catch (e:any) {
-      // fallback para AuthRepository
-      try {
-        const cidades = await this.authRepo.buscarCidadesAtivas();
-        res.status(200).json({ sucesso: true, cidades, fallback: true });
-      } catch {
-        res.status(500).json({ erro: e.message, cidades: [{ id: 1, nome: 'Uberlândia', estado: 'MG' }] });
+      const cidades = await this.service.listarAtivas();
+      return res.json({ success: true, data: this.mapListToPublic(cidades, req), cidades: this.mapListToPublic(cidades, req) });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
+
+  listarTodas = async (req: AuthRequest, res: Response) => {
+    try {
+      // Se não for admin, retorna ativas mesmo
+      const cidades = await this.service.listar();
+      return res.json({ success: true, data: this.mapListToPublic(cidades, req), cidades: this.mapListToPublic(cidades, req) });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
+
+  listarPorEstado = async (req: any, res: Response) => {
+    try {
+      const estadoId = Number(req.params.estadoId);
+      const cidades = await this.service.listarPorEstado(estadoId);
+      return res.json({ success: true, cidades: this.mapListToPublic(cidades, req), data: this.mapListToPublic(cidades, req) });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
+
+  listarPorEstadoSigla = async (req: any, res: Response) => {
+    try {
+      const { sigla } = req.params;
+      const cidades = await this.service.listarPorEstadoSigla(sigla);
+      return res.json({ success: true, cidades: this.mapListToPublic(cidades, req), data: this.mapListToPublic(cidades, req) });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
+
+  buscarPorId = async (req: AuthRequest, res: Response) => {
+    try {
+      const cidade = await this.service.buscarPorId(Number(req.params.id));
+      return res.json({ success: true, data: this.mapToPublic(cidade, req) });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
+
+  criar = async (req: AuthRequest, res: Response) => {
+    try {
+      this.checkRole(req, ['ADMIN', 'SUPER_ADMIN']);
+      const cidade = await this.service.criar(req.body);
+      return res.status(201).json({ success: true, data: this.mapToPublic(cidade, req) });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
+
+  atualizar = async (req: AuthRequest, res: Response) => {
+    try {
+      this.checkRole(req, ['ADMIN', 'SUPER_ADMIN']);
+      
+      // FIX: mapeia ativo -> ativa
+      const body = { ...req.body };
+      if (body.ativo !== undefined && body.ativa === undefined) {
+        body.ativa = body.ativo;
+        delete body.ativo;
       }
+      delete body.ativo;
+      delete body.estado_sigla;
+      
+      console.log(`[CidadeController.atualizar] id=${req.params.id} body=`, body);
+      
+      const cidade = await this.service.atualizar(Number(req.params.id), body);
+      return res.json({ success: true, data: this.mapToPublic(cidade, req) });
+    } catch (e: any) { 
+      console.error('[CidadeController.atualizar] erro', e.message);
+      return this.handleError(res, e); 
     }
   };
 
-  public listarGeografia = async (req: Request, res: Response): Promise<void> => {
+  deletar = async (req: AuthRequest, res: Response) => {
     try {
-      const cidades = await this.cidadeRepo.buscarTodasComHierarquia();
-      res.status(200).json({ sucesso: true, cidades });
-    } catch (e:any) {
-      res.status(500).json({ erro: e.message });
-    }
+      this.checkRole(req, ['SUPER_ADMIN']);
+      await this.service.deletar(Number(req.params.id));
+      return res.json({ success: true, message: 'Cidade deletada' });
+    } catch (e: any) { return this.handleError(res, e); }
   };
-
-  public atualizarStatus = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const id = Number(req.params.id);
-      const { ativa, ativo } = req.body;
-      const status = ativa ?? ativo;
-      const cidade = await this.cidadeRepo.atualizarStatus(id, !!status);
-      res.status(200).json({ sucesso: true, cidade });
-    } catch (e:any) {
-      res.status(500).json({ erro: e.message });
-    }
-  };
-
-  public validarEndereco = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { cidade, lat, lng } = req.body;
-      if (!cidade) { res.status(400).json({ erro: 'Cidade obrigatória' }); return; }
-      const cidades = await this.cidadeRepo.buscarAtivas();
-      const existe = cidades.some((c:any) => c.nome.toLowerCase() === cidade.toLowerCase());
-      if (!existe) {
-        res.status(400).json({ valido: false, erro: `Cidade ${cidade} não está ativa. Cidades ativas: ${cidades.map((c:any)=>c.nome).join(', ')}` });
-        return;
-      }
-      if (lat && lng) {
-        const valido = await this.authRepo.validarEnderecoNaCidadeAtiva(cidade, Number(lat), Number(lng));
-        if (!valido) {
-          res.status(400).json({ valido: false, erro: 'Endereço fora do raio da cidade ativa' });
-          return;
-        }
-      }
-      res.status(200).json({ valido: true, mensagem: 'Endereço dentro da cidade ativa (tabela cidades)' });
-    } catch (e:any) {
-      res.status(500).json({ erro: e.message });
-    }
+  // GET /api/cidades/ativas — o CadastroUnificado chama essa URL (antes: 404,
+  // o catch vazio deixava o select de cidades vazio sem nenhum erro visivel).
+  listarAtivas = async (req: AuthRequest, res: Response) => {
+    try { const cidades = await this.service.listarAtivas(); return res.json({ success: true, data: this.mapListToPublic(cidades, req), cidades: this.mapListToPublic(cidades, req) }); }
+    catch (e: any) { return this.handleError(res, e); }
   };
 }

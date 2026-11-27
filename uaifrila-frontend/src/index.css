@@ -1,4 +1,35 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-body{margin:0;font-family:Inter,system-ui,sans-serif;}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+  /* Deixa ThemeProvider controlar o fundo com grid */
+  background: transparent;
+}
+
+body {
+  /* Remove fundo branco que cobria o grid */
+  background-color: transparent !important;
+}
+
+#root {
+  min-height: 100vh;
+  background: transparent;
+}
+
+/* Scrollbar estilizada */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #000; border-radius: 0; }
+.dark ::-webkit-scrollbar-thumb { background: #fff; }
+
+/* Garante que inputs não tenham fundo branco forçado no dark */
+.dark input, .dark textarea, .dark select {
+  color-scheme: dark;
+}

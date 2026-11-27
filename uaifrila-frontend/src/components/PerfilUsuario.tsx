@@ -1,49 +1,53 @@
 import React, { useState, useEffect } from 'react';
+import { apiFetch } from '../utils/Api';
+import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 import CadastroUnificado from './CadastroUnificado';
+import { useTiposUsuario } from './useTiposUsuario';
+import FotoPerfil from './FotoPerfil';
 
-interface Props {
-  usuario?: any;
-  onAtualizado?: (usuario: any) => void;
-}
+// ANTES (mock/fallback): se GET /usuarios/me falhasse, usava prop ou localStorage 'uaifrila_usuario' como se fosse dado real.
+// AGORA (API real): a ÚNICA fonte é GET /api/auth/me. Se falhar, mostra erro da API e NÃO mostra perfil velho.
+// localStorage só guarda token, nunca é fonte de verdade do usuário.
 
-export default function PerfilUsuario({ usuario: usuarioProp, onAtualizado }: Props) {
-  const [usuario, setUsuario] = useState<any>(usuarioProp);
-  const [carregando, setCarregando] = useState(!usuarioProp);
+export default function PerfilUsuario({ usuario: usuarioProp, onAtualizado, onIrParaFuncoes }: { usuario?: any; onAtualizado?: (u: any) => void; onIrParaFuncoes?: () => void }) {
+  const styles = useUaiFrilaStyles();
+  const { getTipoUsuario, getBadgeVariant } = useTiposUsuario();
+  const [usuario, setUsuario] = useState<any>(null);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState('');
 
   useEffect(() => {
-    if (usuarioProp) {
-      setUsuario(usuarioProp);
-      setCarregando(false);
-    } else {
-      const ls = localStorage.getItem('uaifrila_usuario');
-      const token = localStorage.getItem('uaifrila_token');
-      if (ls && token) {
-        setCarregando(true);
-        // Busca dados completos da API
-        fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/usuarios/me`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        }).then(res => res.json()).then(data => {
-          setUsuario(data.usuario || JSON.parse(ls));
-        }).catch(() => {
-          try { setUsuario(JSON.parse(ls)); } catch {}
-        }).finally(() => setCarregando(false));
-      }
-    }
-  }, [usuarioProp]);
-
-  if (carregando) {
-    return <div className="p-8 text-center text-sm">Carregando cadastro...</div>;
-  }
-
-  // REUTILIZA a mesma página de cadastro em modo edição
-  return (
-    <CadastroUnificado 
-      usuario={usuario} 
-      modoEdicao={true} 
-      onAtualizado={(u) => {
+    (async () => {
+      setCarregando(true); setErro('');
+      try {
+        const data = await apiFetch('/api/auth/me');
+        // Mesmo fix do App: backend devolve { success, data: <usuario> }.
+        // ANTES: u = data (={ success, data }) -> u.id undefined -> "API /auth/me não retornou usuário".
+        const u = (data?.usuario?.id ? data.usuario : data?.data?.usuario?.id ? data.data.usuario : data?.data?.id ? data.data : data?.id ? data : null);
+        console.log('[Perfil] /auth/me -> usuario id=', (u as any)?.id, 'email=', (u as any)?.email);
+        if (!(u as any)?.id) throw new Error('API /auth/me não retornou usuário - resposta=' + JSON.stringify(data).slice(0, 300));
         setUsuario(u);
-        onAtualizado?.(u);
-      }} 
-    />
+      } catch (e: any) { setErro(e.message || 'Não foi possível carregar o perfil'); setUsuario(null); } finally { setCarregando(false); }
+    })();
+  }, []);
+
+  if (carregando) return <div className={styles.pageContainerSmall}><div className={styles.card}><p className={`${styles.typography.body} animate-pulse`}>Carregando seu perfil...</p></div></div>;
+  if (erro || !usuario) return <div className={styles.pageContainerSmall}><div className={styles.card}><div className={styles.errorBox}>{erro || 'Perfil não encontrado'}</div><p className={`${styles.typography.bodySmall} mt-3`}>Faça login novamente para carregar seu perfil da API.</p></div></div>;
+
+  const tipoDB = getTipoUsuario(usuario);
+  const tipoChave = tipoDB?.chave?.toUpperCase() || usuario?.tipo_chave?.toUpperCase() || 'FREELA';
+  return (
+    <div className={styles.pageContainer}>
+      <div className="flex flex-col gap-4 mb-6">
+        <div className="flex items-center justify-between"><h1 className={styles.typography.h1}>Meu Perfil</h1><span className={styles.badge(getBadgeVariant(usuario))}>{tipoChave}</span></div>
+      </div>
+      {/* A FOTO SÓ APARECE PORQUE ESTE BLOCO EXISTE: antes não havia nenhum <img> nem FotoPerfil aqui. */}
+      <div className={styles.card}>
+        <FotoPerfil usuario={usuario} onSalvo={(foto: string | null) => { const u = { ...usuario, foto }; setUsuario(u); onAtualizado?.(u); }} />
+        {onIrParaFuncoes && <button type="button" onClick={onIrParaFuncoes} className="mt-4 px-4 py-2 text-xs font-black uppercase bg-black text-white rounded">Minhas funções e experiência →</button>}
+      </div>
+      <div className={`${styles.card} mt-4`}><CadastroUnificado usuario={usuario} modoEdicao={true} onAtualizado={(u: any) => { setUsuario(u); onAtualizado?.(u); }} /></div>
+      {usuario && <div className="mt-6 flex gap-2 flex-wrap"><span className={styles.badge('default')}>{usuario.email || 'sem e-mail'}</span>{usuario.endereco_ativo_cidade && <span className={styles.badge('default')}>📍 {usuario.endereco_ativo_cidade} - {usuario.endereco_ativo_bairro}</span>}<span className="text-[10px] font-mono opacity-50">ID {usuario.id} | Endereço ID {usuario.endereco_ativo_id || 'sem'}</span></div>}
+    </div>
   );
 }

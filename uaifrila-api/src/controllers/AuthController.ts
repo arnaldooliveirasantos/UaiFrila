@@ -1,99 +1,118 @@
 import { Request, Response } from 'express';
-import { AuthService } from '../services/AuthService';
-
-export class AuthController {
-  private authService = new AuthService();
-
-  public registrar = async (req: Request, res: Response): Promise<void> => {
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { UsuarioService } from '../services/UsuarioService';
+import { EnderecoService } from '../services/EnderecoService';
+import { BaseController, AuthRequest } from './BaseController';
+import { SolicitarCodigoController } from './SolicitarCodigoController';
+import { ValidarCodigoController } from './ValidarCodigoController';
+// CORRIGIDO: me() usava BaseRepository.getPool().query direto para buscar enderecos.
+// Agora usa EnderecoService.listarBrutosPorUsuario (repository, sem pool no controller).
+// CORRIGIDO: solicitar/validar/reenviar codigo usavam require() dinamico para chamar os
+// controllers reais. Agora importam direto — mesmo comportamento, sem require.
+const JWT_SECRET = process.env.JWT_SECRET || 'uaifrila-secret-2024';
+export class AuthController extends BaseController {
+  private usuarioService: UsuarioService;
+  private enderecoService: EnderecoService;
+  private solicitarCtrl = new SolicitarCodigoController();
+  private validarCtrl = new ValidarCodigoController();
+  constructor() {
+    super();
+    this.usuarioService = new UsuarioService();
+    this.enderecoService = new EnderecoService();
+  }
+  register = async (req: Request, res: Response) => {
     try {
-      const result = await this.authService.registrar(req.body);
-      if ((result as any).sucesso) res.status(201).json(result);
-      else res.status(200).json(result);
-    } catch (e: any) {
-      console.error('🔥 ERRO REGISTRAR:', e);
-      const status = e.message.includes('já cadastrado') ? 400 : 500;
-      res.status(status).json({ erro: e.message });
-    }
+      const { nomeCompleto, email, senha, tipoUsuarioId, cpf, cnpj } = req.body;
+      if (!nomeCompleto || !email || !senha) return this.error(res, 'Nome, e-mail e senha sao obrigatorios', 400);
+      const existente = await this.usuarioService.buscarPorEmail(email);
+      if (existente) return this.error(res, 'E-mail ja cadastrado', 409);
+      const senhaHash = await bcrypt.hash(senha, 10);
+      const usuario = await this.usuarioService.criar({
+        nomeCompleto, email, senhaHash, tipoUsuarioId: tipoUsuarioId || 1, cpf, cnpj,
+        statusUsuarioId: 1, avaliacaoMedia: 5.0, totalAvaliacoes: 0,
+      });
+      const completo = await this.usuarioService.buscarPorIdComRelacoes((usuario as any).id);
+      const raw: any = (completo as any)?.toRaw ? (completo as any).toRaw() : completo;
+      const tipoChave = raw?.tipo_chave || raw?.tipoChave || 'FREELA';
+      const nivel = raw?.nivel_permissao || raw?.nivelPermissao || 0;
+      const token = jwt.sign(
+        { id: (usuario as any).id, email: (usuario as any).email,
+          tipoUsuarioId: (usuario as any).tipoUsuarioId || (usuario as any).tipo_usuario_id,
+          tipoChave, tipo_chave: tipoChave, nivelPermissao: nivel, nivel_permissao: nivel,
+          isAdmin: nivel >= 80 || ['ADMIN', 'SUPER_ADMIN'].includes(tipoChave.toUpperCase()) },
+        JWT_SECRET, { expiresIn: '7d' }
+      );
+      return res.status(201).json({
+        success: true,
+        data: { usuario: this.mapToPublic(completo || usuario, { usuario: { id: (usuario as any).id } } as any), token },
+      });
+    } catch (e: any) { return this.handleError(res, e); }
   };
-
-  public login = async (req: Request, res: Response): Promise<void> => {
+  login = async (req: Request, res: Response) => {
     try {
-      const { email } = req.body;
-      const result = await this.authService.login(email);
-      res.status(200).json(result);
-    } catch (e: any) {
-      console.error('🔥 ERRO LOGIN:', e);
-      const status = e.message.includes('não encontrado') ? 401 : 500;
-      res.status(status).json({ erro: e.message });
-    }
+      const { email, senha } = req.body;
+      if (!email || !senha) return this.error(res, 'E-mail e senha obrigatorios', 400);
+      const usuario = await this.usuarioService.buscarPorEmail(email);
+      if (!usuario) return this.error(res, 'Credenciais invalidas', 401);
+      const raw = (usuario as any).toRaw ? (usuario as any).toRaw() : usuario;
+      const senhaHash = (raw as any).senhaHash || (raw as any).senha_hash || (usuario as any).senhaHash;
+      const ok = await bcrypt.compare(senha, senhaHash);
+      if (!ok) return this.error(res, 'Credenciais invalidas', 401);
+      const completo = await this.usuarioService.buscarPorIdComRelacoes((usuario as any).id);
+      const compRaw: any = (completo as any)?.toRaw ? (completo as any).toRaw() : completo || raw;
+      const tipoChave = compRaw?.tipo_chave || compRaw?.tipoChave || (raw as any).tipo_chave || 'FREELA';
+      const nivel = compRaw?.nivel_permissao || compRaw?.nivelPermissao || (raw as any).nivel_permissao || 0;
+      const tipoUsuarioId = compRaw?.tipo_usuario_id || compRaw?.tipoUsuarioId || (usuario as any).tipoUsuarioId;
+      const token = jwt.sign(
+        { id: (usuario as any).id, email: (usuario as any).email, tipoUsuarioId,
+          tipoChave, tipo_chave: tipoChave, nivelPermissao: nivel, nivel_permissao: nivel,
+          isAdmin: nivel >= 80 || ['ADMIN', 'SUPER_ADMIN'].includes(tipoChave.toUpperCase()) },
+        JWT_SECRET, { expiresIn: '7d' }
+      );
+      return res.json({
+        success: true,
+        data: {
+          usuario: (completo as any)?.toPublic ? (completo as any).toPublic((usuario as any).id, true) : completo || usuario,
+          token,
+        },
+      });
+    } catch (e: any) { return this.handleError(res, e); }
   };
-
-  public buscarMe = async (req: any, res: Response): Promise<void> => {
+  me = async (req: AuthRequest, res: Response) => {
     try {
-      const userId = req.user?.id;
-      if (!userId) { res.status(401).json({ erro: 'Não autenticado' }); return; }
-      const usuario = await this.authService.buscarMe(userId);
-      res.status(200).json({ usuario });
-    } catch (e: any) {
-      res.status(404).json({ erro: e.message });
-    }
-  };
-
-  public atualizarUsuario = async (req: any, res: Response): Promise<void> => {
-    try {
-      const userIdParam = Number(req.params.id);
-      const userIdToken = req.user?.id;
-      const nivel = req.user?.nivel_permissao || 0;
-      if (userIdParam !== userIdToken && nivel < 80) {
-        res.status(403).json({ erro: 'Sem permissão para editar outro usuário' }); return;
+      const usuario = await this.usuarioService.buscarPorIdComRelacoes(req.usuario!.id);
+      if (!usuario) return this.error(res, 'Usuario nao encontrado', 404);
+      const publico: any = (usuario as any).toPublic ? (usuario as any).toPublic(req.usuario!.id, this.isAdmin(req)) : usuario;
+      // Enderecos via service (antes: pool.query direto aqui no controller).
+      // listarBrutosPorUsuario devolve as linhas cruas (snake_case) com cidade_nome,
+      // nos 3 nomes que o front usa: enderecos_usuarios, enderecos, endereco_ativo.
+      let enderecos: any[] = [];
+      try { enderecos = await this.enderecoService.listarBrutosPorUsuario(req.usuario!.id); }
+      catch (eEnd: any) { console.warn('[AuthController.me] enderecos indisponiveis:', eEnd.message); enderecos = []; }
+      const ativo = enderecos.find((e: any) => e.ativo === true || e.ativo === 1) || enderecos[0] || null;
+      // Cidade aninhada a partir do JOIN (cidade_nome / cidade_estado_sigla / estado_id).
+      // O front le end.cidade.estadoId — caminho unico, sem fallback.
+      const comCidade = (e: any) => e ? { ...e, cidade: { id: e.cidade_id, nome: e.cidade_nome, estado: e.cidade_estado_sigla, estadoId: e.estado_id } } : e;
+      publico.enderecos_usuarios = enderecos.map(comCidade);
+      publico.enderecos = enderecos.map(comCidade);
+      publico.endereco_ativo = comCidade(ativo);
+      if (ativo) {
+        publico.endereco_ativo_id = ativo.id;
+        publico.endereco_ativo_cidade = ativo.cidade_nome || ativo.cidade || null;
+        publico.endereco_ativo_bairro = ativo.bairro || null;
       }
-      // Bloqueia CPF e EMAIL explicitamente
-      if (req.body.cpf || req.body.email) {
-        console.log('🚫 API bloqueou tentativa de atualizar CPF/EMAIL');
-        delete req.body.cpf;
-        delete req.body.email;
-      }
-      const usuario = await this.authService.atualizarUsuario(userIdParam, req.body, req.user);
-      res.status(200).json({ sucesso: true, usuario });
-    } catch (e: any) {
-      console.error('Erro atualizar usuario:', e);
-      res.status(400).json({ erro: e.message });
-    }
+      return res.json({ success: true, data: publico });
+    } catch (e: any) { return this.handleError(res, e); }
   };
-
-  public verificarToken2FA = async (req: Request, res: Response): Promise<void> => {
-    return this.verificarTokenEmail(req, res);
+  // Login por codigo delega para os controllers reais (sem mock, sem require).
+  solicitarCodigo = async (req: Request, res: Response) => {
+    return this.solicitarCtrl.solicitarCodigo(req, res);
   };
-
-  public listarTiposUsuario = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const tipos = await this.authService.listarTiposUsuario();
-      res.status(200).json({ tipos });
-    } catch (e: any) {
-      res.status(500).json({ erro: e.message });
-    }
+  validarCodigo = async (req: Request, res: Response) => {
+    return this.validarCtrl.validarCodigo(req, res);
   };
-
-
-  public reenviarCodigo = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { email, tipo } = req.body;
-      const result = await this.authService.reenviarCodigo(email, tipo || 'cadastro');
-      res.status(200).json(result);
-    } catch (e: any) {
-      console.error('🔥 ERRO REENVIAR CODIGO:', e);
-      res.status(400).json({ erro: e.message });
-    }
-  };
-
-  public verificarTokenEmail = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { email, codigo } = req.body;
-      const result = await this.authService.verificarCodigo(email, codigo);
-      res.status(200).json(result);
-    } catch (e: any) {
-      const status = e.message.includes('Código') || e.message.includes('Nenhum código') ? 400 : 500;
-      res.status(status).json({ erro: e.message });
-    }
+  reenviarCodigo = async (req: Request, res: Response) => {
+    return this.solicitarCtrl.reenviarCodigo(req, res);
   };
 }

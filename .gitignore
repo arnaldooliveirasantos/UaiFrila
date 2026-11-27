@@ -3,3 +3,6 @@
 /uaifrila-email-worker/node_modules
 uaifrila-api/package-lock.json
 /uaifrila-email-worker/dist
+/uaifrila-api/dist
+uaifrila-email-worker/.env
+/uaifrila-geocodificacao-worker/node_modules

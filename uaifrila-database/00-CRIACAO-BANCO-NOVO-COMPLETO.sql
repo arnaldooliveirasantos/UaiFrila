@@ -1,4 +1,16 @@
 -- =====================================================================
+-- CORREÇÃO APLICADA (itens 1 a 3) — resto do script INALTERADO
+-- 1) INSERT INTO cidades: removido parêntese extra nas linhas de
+--    Uberlândia e Ituiutaba (construtor de linha dentro da linha).
+-- 2) Removido o "ON CONFLICT (chave) DO NOTHING;" órfão que vinha
+--    logo após o INSERT INTO variaveis_sistema (erro de sintaxe).
+-- 3) email_status: adicionados CONSUMIDO, CANCELADO e FALHA, que o
+--    código e o worker usam (marcarComoConsumido, invalidarPendentes,
+--    marcação de falha de envio). Sem eles, as subqueries retornavam
+--    NULL e o código nunca era marcado como consumido.
+-- =====================================================================
+ 
+-- =====================================================================
 -- UAI FRILA - CRIAÇÃO COMPLETA DO BANCO - 00_CRIACAO_BANCO_NOVO_COMPLETO.sql
 -- PostgreSQL 14+
 -- Data: 2026-10-27
@@ -13,86 +25,72 @@
 CREATE EXTENSION pgcrypto;
 CREATE EXTENSION "uuid-ossp";
 
--- =====================================================================
--- 1. PAISES, ESTADOS, CIDADES, BAIRROS, EXPANSAO
--- =====================================================================
-CREATE TABLE paises (
+-- ============================================================
+-- SEÇÃO 1 — PAISES / ESTADOS / CIDADES / EXPANSÃO
+-- Colunas EXATAS do seu trecho: sigla='BRA', regiao, ativo, lat/lng,
+-- raio_km, populacao, status_expansao, demanda_score, cidade_nome...
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS paises (
   id SERIAL PRIMARY KEY,
   nome VARCHAR(100) NOT NULL,
-  sigla VARCHAR(3) UNIQUE NOT NULL,
-  codigo_ibge INT,
-  ativo BOOLEAN DEFAULT true,
-  criado_em TIMESTAMP DEFAULT NOW()
+  sigla VARCHAR(5) NOT NULL,
+  codigo_ibge INTEGER,
+  ativo BOOLEAN NOT NULL DEFAULT TRUE,
+  criado_em TIMESTAMP NOT NULL DEFAULT NOW(),
+  atualizado_em TIMESTAMP NOT NULL DEFAULT NOW()
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uq_paises_sigla ON paises (sigla);
 
-CREATE TABLE estados (
+CREATE TABLE IF NOT EXISTS estados (
   id SERIAL PRIMARY KEY,
-  pais_id INT NOT NULL REFERENCES paises(id),
+  pais_id INTEGER NOT NULL REFERENCES paises(id),
   nome VARCHAR(100) NOT NULL,
   sigla VARCHAR(2) NOT NULL,
-  codigo_ibge INT,
-  regiao VARCHAR(20),
-  ativo BOOLEAN DEFAULT true,
-  criado_em TIMESTAMP DEFAULT NOW(),
-  UNIQUE(sigla, pais_id)
+  codigo_ibge INTEGER,
+  regiao VARCHAR(30),
+  ativo BOOLEAN NOT NULL DEFAULT FALSE,
+  criado_em TIMESTAMP NOT NULL DEFAULT NOW(),
+  atualizado_em TIMESTAMP NOT NULL DEFAULT NOW()
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uq_estados_sigla_pais ON estados (sigla, pais_id);
+CREATE INDEX IF NOT EXISTS idx_estados_pais ON estados (pais_id);
 
-CREATE TABLE cidades (
+CREATE TABLE IF NOT EXISTS cidades (
   id SERIAL PRIMARY KEY,
-  nome VARCHAR(100) NOT NULL,
-  estado VARCHAR(2) DEFAULT 'MG' NOT NULL,
-  codigo_ibge VARCHAR(10),
-  ativa BOOLEAN DEFAULT true NOT NULL,
-  lat DOUBLE PRECISION,
-  lng DOUBLE PRECISION,
-  raio_km INT DEFAULT 20 NOT NULL,
-  populacao INT,
-  regiao VARCHAR(50),
-  pais_id INT,
-  estado_id INT,
-  cep_prefixo VARCHAR(10),
-  status_expansao VARCHAR(20) DEFAULT 'ATIVA',
-  demanda_score INT DEFAULT 0,
-  vagas_abertas INT DEFAULT 0,
-  freelas_ativos INT DEFAULT 0,
-  criado_em TIMESTAMP DEFAULT NOW(),
-  atualizado_em TIMESTAMP DEFAULT NOW(),
-  UNIQUE(nome, estado)
-);
-
-CREATE INDEX idx_cidades_nome ON cidades(nome);
-CREATE INDEX idx_cidades_ativa ON cidades(ativa);
-
-CREATE TABLE bairros (
-  id SERIAL PRIMARY KEY,
-  cidade_id INT NOT NULL REFERENCES cidades(id),
   nome VARCHAR(150) NOT NULL,
-  zona VARCHAR(50),
-  demanda INT DEFAULT 0,
-  ativo BOOLEAN DEFAULT true,
-  criado_em TIMESTAMP DEFAULT NOW(),
-  UNIQUE(nome, cidade_id)
+  estado_id INTEGER NOT NULL REFERENCES estados(id),
+  ativa BOOLEAN NOT NULL DEFAULT FALSE,
+  lat NUMERIC(10,7),
+  lng NUMERIC(10,7),
+  raio_km NUMERIC(6,2) DEFAULT 20,
+  regiao VARCHAR(100),
+  codigo_ibge VARCHAR(10),
+  populacao INTEGER,
+  status_expansao VARCHAR(20) DEFAULT 'INATIVA',
+  demanda_score INTEGER DEFAULT 0,
+  criado_em TIMESTAMP NOT NULL DEFAULT NOW(),
+  atualizado_em TIMESTAMP NOT NULL DEFAULT NOW()
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uq_cidades_codigo_ibge ON cidades (codigo_ibge);
+CREATE INDEX IF NOT EXISTS idx_cidades_estado ON cidades (estado_id);
+CREATE INDEX IF NOT EXISTS idx_cidades_nome ON cidades (nome);
 
-CREATE TABLE expansao_cidades (
+-- Expansão: no seu trecho é por nome/sigla (não cidade_id) — mantido.
+CREATE TABLE IF NOT EXISTS expansao_cidades (
   id SERIAL PRIMARY KEY,
-  cidade_nome VARCHAR(100) NOT NULL,
+  cidade_nome VARCHAR(150) NOT NULL,
   estado_sigla VARCHAR(2) NOT NULL,
-  pais_sigla VARCHAR(3) DEFAULT 'BRA',
-  populacao INT,
-  demanda_solicitacoes INT DEFAULT 0,
-  demanda_vagas INT DEFAULT 0,
-  status VARCHAR(20) DEFAULT 'SOLICITADA',
-  prioridade INT DEFAULT 0,
-  solicitado_por INT,
-  analisado_por INT,
+  populacao INTEGER,
+  demanda_solicitacoes INTEGER DEFAULT 0,
+  demanda_vagas INTEGER DEFAULT 0,
+  status VARCHAR(20) NOT NULL DEFAULT 'SOLICITADA',
+  prioridade INTEGER DEFAULT 1,
   motivo TEXT,
-  data_solicitacao TIMESTAMP DEFAULT NOW(),
-  data_analise TIMESTAMP,
-  data_ativacao TIMESTAMP,
-  criado_em TIMESTAMP DEFAULT NOW(),
-  atualizado_em TIMESTAMP DEFAULT NOW()
+  criado_em TIMESTAMP NOT NULL DEFAULT NOW(),
+  atualizado_em TIMESTAMP NOT NULL DEFAULT NOW()
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uq_expansao_cidade_nome ON expansao_cidades (cidade_nome, estado_sigla);
 
 -- =====================================================================
 -- 2. TIPOS_USUARIO - FONTE ÚNICA DE PERMISSÃO
@@ -106,12 +104,20 @@ CREATE TABLE tipos_usuario (
   criado_em TIMESTAMP DEFAULT NOW()
 );
 
-CREATE TABLE funcoes (
+CREATE TABLE IF NOT EXISTS categorias_funcao (
   id SERIAL PRIMARY KEY,
   nome VARCHAR(50) UNIQUE NOT NULL,
-  categoria VARCHAR(50),
+  icone VARCHAR(30),
   ativa BOOLEAN DEFAULT true,
   criado_em TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE funcoes (
+  id SERIAL PRIMARY KEY,
+  nome VARCHAR(50) UNIQUE NOT null,
+  ativa BOOLEAN DEFAULT true,
+  criado_em TIMESTAMP DEFAULT NOW(),
+  categoria_id INT references categorias_funcao(id) not null
 );
 
 CREATE TABLE status_usuario (
@@ -132,17 +138,11 @@ CREATE TABLE usuarios (
   nome_completo VARCHAR(150) NOT NULL,
   cpf VARCHAR(14) UNIQUE,
   email VARCHAR(150) UNIQUE NOT NULL,
-  senha_hash VARCHAR(255) NOT NULL,
+  senha_hash VARCHAR(255)  NULL,
   cnpj VARCHAR(18),
   nome_fantasia VARCHAR(150),
   status_usuario_id INT REFERENCES status_usuario(id) DEFAULT 1,
   tipo_usuario_id INT REFERENCES tipos_usuario(id) NOT NULL DEFAULT 1,
-  bairro VARCHAR(100),
-  endereco_completo TEXT,
-  endereco_lat DOUBLE PRECISION,
-  endereco_lng DOUBLE PRECISION,
-  cidade_id INT REFERENCES cidades(id),
-  cidade_nome VARCHAR(100),
   funcao_principal VARCHAR(50) DEFAULT 'Garçom',
   valor_hora_base NUMERIC(10,2) DEFAULT 20,
   bio TEXT,
@@ -154,7 +154,10 @@ CREATE TABLE usuarios (
   permissoes JSONB DEFAULT '[]'::jsonb,
   role VARCHAR(30) DEFAULT 'FREELA',
   criado_em TIMESTAMP DEFAULT NOW(),
-  atualizado_em TIMESTAMP DEFAULT NOW()
+  atualizado_em TIMESTAMP DEFAULT NOW(),
+  cancelado_em TIMESTAMP ,
+  cancelado_por TEXT ,
+  foto TEXT
 );
 
 CREATE INDEX idx_usuarios_email ON usuarios(LOWER(email));
@@ -163,43 +166,101 @@ CREATE INDEX idx_usuarios_tipo ON usuarios(tipo_usuario_id);
 -- =====================================================================
 -- 4. ENDERECOS_USUARIO
 -- =====================================================================
-CREATE TABLE enderecos_usuario (
+CREATE TABLE IF NOT EXISTS tipos_endereco (
   id SERIAL PRIMARY KEY,
-  usuario_id INT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
-  endereco_completo TEXT NOT NULL,
-  bairro VARCHAR(150),
-  cidade_id INT REFERENCES cidades(id),
-  cidade_nome VARCHAR(100) NOT NULL,
-  estado VARCHAR(2) DEFAULT 'MG',
-  lat DOUBLE PRECISION,
-  lng DOUBLE PRECISION,
-  is_ativo BOOLEAN DEFAULT true NOT NULL,
+  chave VARCHAR(50) UNIQUE NOT NULL,
+  nome VARCHAR(100) NOT NULL,
+  descricao TEXT,
+  icone VARCHAR(50),
+  ativo BOOLEAN DEFAULT true,
+  criado_em TIMESTAMP DEFAULT NOW()
+);
+
+
+
+
+CREATE TABLE IF NOT EXISTS enderecos (
+  id SERIAL PRIMARY KEY,
+  usuario_id INTEGER REFERENCES usuarios(id) ON DELETE CASCADE,
+  cep VARCHAR(20),
+  logradouro VARCHAR(255) NOT NULL,
+  numero VARCHAR(20),
+  complemento VARCHAR(255),
+  bairro VARCHAR(255),
+  cidade_id INTEGER NOT NULL REFERENCES cidades(id),
+  tipo_endereco_id INTEGER REFERENCES tipos_endereco(id) DEFAULT 1,
+  latitude DECIMAL(10,8),
+  longitude DECIMAL(11,8),
+  apelido VARCHAR(100),
+  ativo BOOLEAN DEFAULT false,
+  geocodificacao_tentativas INTEGER NOT NULL DEFAULT 0,
+  geocodificacao_ultima_tentativa TIMESTAMP NULL,
+  geocodificacao_erro VARCHAR(100) NULL,
   criado_em TIMESTAMP DEFAULT NOW(),
   atualizado_em TIMESTAMP DEFAULT NOW()
 );
 
-CREATE UNIQUE INDEX uniq_endereco_ativo_por_usuario ON enderecos_usuario(usuario_id) WHERE is_ativo = true;
+
 
 -- =====================================================================
 -- 5. VAGAS, CANDIDATURAS, TRAMPOS, TRANSACOES, AVALIACOES
 -- =====================================================================
+CREATE TABLE IF NOT EXISTS status_vaga (
+  id SERIAL PRIMARY KEY,
+  chave VARCHAR(50) UNIQUE NOT NULL,
+  nome_exibicao VARCHAR(100) NOT NULL,
+  descricao TEXT,
+  cor_hex VARCHAR(20),
+  ordem INT DEFAULT 0,
+  permite_editar BOOLEAN DEFAULT true,
+  permite_cancelar BOOLEAN DEFAULT true,
+  permite_candidatar BOOLEAN DEFAULT true,
+  ativo BOOLEAN DEFAULT true,
+  criado_em TIMESTAMP DEFAULT NOW()
+);
+
+
+
 CREATE TABLE vagas (
   id SERIAL PRIMARY KEY,
   contratante_id INT NOT NULL REFERENCES usuarios(id),
   titulo VARCHAR(150) NOT NULL,
   descricao TEXT,
-  funcao VARCHAR(50),
+  funcao_id INTEGER REFERENCES funcoes(id),
   valor_hora NUMERIC(10,2) NOT NULL,
+  valor_servico NUMERIC(10,2) ,
+  valor_transporte NUMERIC(10,2) ,
+  total_freela NUMERIC(10,2),
+  status_vaga_id INT  NOT NULL REFERENCES status_vaga(id)DEFAULT 1,
   data_inicio TIMESTAMP NOT NULL,
   data_fim TIMESTAMP NOT NULL,
-  cidade_id INT REFERENCES cidades(id),
-  cidade_nome VARCHAR(100),
-  endereco_id INT REFERENCES enderecos_usuario(id),
-  bairro VARCHAR(100),
-  status VARCHAR(20) DEFAULT 'PENDENTE',
+  data_limite_candidatura TIMESTAMP null,
+  quantidade_vagas INT NOT NULL DEFAULT 1 CHECK (quantidade_vagas >= 1)
   criado_em TIMESTAMP DEFAULT NOW(),
-  atualizado_em TIMESTAMP DEFAULT NOW()
+  atualizado_em TIMESTAMP DEFAULT NOW(),
+  
 );
+
+
+-- =====================================================================
+--  5.1  ENDERECOS_VAGA
+-- =====================================================================
+CREATE TABLE enderecos_vaga (
+  id SERIAL PRIMARY KEY,
+  endereco_id INTEGER NOT NULL REFERENCES enderecos(id) ON DELETE CASCADE,
+  vaga_id INTEGER NOT NULL REFERENCES vagas(id) ON DELETE CASCADE,
+  ativo BOOLEAN DEFAULT true,
+  criado_em TIMESTAMP DEFAULT NOW(),
+  UNIQUE(vaga_id, endereco_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_enderecos_usuario_id ON enderecos(usuario_id);
+CREATE INDEX IF NOT EXISTS idx_enderecos_cidade_id ON enderecos(cidade_id);
+CREATE INDEX IF NOT EXISTS idx_enderecos_tipo ON enderecos(tipo_endereco_id);
+CREATE INDEX IF NOT EXISTS idx_enderecos_ativo ON enderecos(usuario_id, ativo) WHERE ativo = true;
+CREATE INDEX IF NOT EXISTS idx_enderecos_vaga_vaga_id ON enderecos_vaga(vaga_id);
+CREATE INDEX IF NOT EXISTS idx_enderecos_vaga_endereco_id ON enderecos_vaga(endereco_id);
+
 
 CREATE TABLE candidaturas (
   id SERIAL PRIMARY KEY,
@@ -208,9 +269,25 @@ CREATE TABLE candidaturas (
   freela_id INT REFERENCES usuarios(id),
   status VARCHAR(20) DEFAULT 'PENDENTE',
   mensagem TEXT,
+  motivo_cancelamento TEXT,
+  data_cancelamento TIMESTAMP,
+  cancelado_por INT REFERENCES usuarios(id),
+  visto_em TIMESTAMP NULL,
+  motivo_recusa VARCHAR(100) NULL,
+  prazo_resposta_ate TIMESTAMP NULL,
+  posicao_lista_espera INT NULL,
   criado_em TIMESTAMP DEFAULT NOW(),
   atualizado_em TIMESTAMP DEFAULT NOW(),
   UNIQUE(vaga_id, usuario_id)
+);
+CREATE INDEX IF NOT EXISTS idx_candidaturas_vaga_status ON candidaturas (vaga_id, status);
+CREATE INDEX IF NOT EXISTS idx_candidaturas_prazo ON candidaturas (prazo_resposta_ate)  WHERE status = 'SELECIONADO';
+
+CREATE TABLE IF NOT EXISTS candidatos (
+  id SERIAL PRIMARY KEY,
+  usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  vaga_id INTEGER REFERENCES vagas(id) ON DELETE CASCADE,
+  criado_em TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE trampos (
@@ -223,11 +300,44 @@ CREATE TABLE trampos (
   codigo_fim VARCHAR(10),
   data_inicio TIMESTAMP,
   data_fim TIMESTAMP,
+  presenca_confirmada_em TIMESTAMP NULL,
   criado_em TIMESTAMP DEFAULT NOW(),
   atualizado_em TIMESTAMP DEFAULT NOW()
 );
-
-CREATE TABLE transacoes (
+CREATE TABLE IF NOT EXISTS pagamentos (
+  id serial PRIMARY KEY,
+  candidatura_id int NOT NULL UNIQUE,
+  vaga_id int NOT NULL,
+  contratante_id int NOT NULL,
+  freela_id int NOT NULL,
+  provedor varchar(30) NOT NULL,
+  provedor_pagamento_id varchar(120),
+  metodo varchar(20) NOT NULL DEFAULT 'pix',
+  status varchar(30) NOT NULL DEFAULT 'AGUARDANDO_PAGAMENTO',
+  chave_idempotencia varchar(120) NOT NULL UNIQUE,
+  valor_servico_centavos int NOT NULL,
+  valor_transporte_centavos int NOT NULL,
+  comissao_centavos int NOT NULL,
+  taxa_centavos int NOT NULL,
+  total_centavos int NOT NULL,
+  qr_code text,
+  qr_code_url text,
+  checkout_url text,
+  expira_em timestamptz NOT NULL,
+  notificacao_60min_enviada boolean NOT NULL DEFAULT false,
+  pago_em timestamptz,
+  reembolsado_em timestamptz,
+  erro text,
+  tentativas int NOT NULL DEFAULT 0,
+  criado_em timestamptz NOT NULL DEFAULT NOW(),
+  atualizado_em timestamptz NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pagamentos_status ON pagamentos (status);
+CREATE INDEX IF NOT EXISTS idx_pagamentos_expira ON pagamentos (expira_em);
+-- ============================================================
+-- SEÇÃO 7 — TRANSAÇÕES
+-- ============================================================
+CREATE TABLE IF NOT EXISTS transacoes (
   id SERIAL PRIMARY KEY,
   codigo VARCHAR(30) UNIQUE NOT NULL,
   vaga_id INT REFERENCES vagas(id),
@@ -254,9 +364,11 @@ CREATE TABLE transacoes (
   observacoes TEXT,
   motivo_cancelamento TEXT,
   usuario_id INT REFERENCES usuarios(id),
+  pagamento_id int REFERENCES pagamentos(id),
   criado_em TIMESTAMP DEFAULT NOW(),
   atualizado_em TIMESTAMP DEFAULT NOW()
-);
+  );
+
 
 CREATE INDEX idx_transacoes_freela ON transacoes(freela_id);
 CREATE INDEX idx_transacoes_status ON transacoes(status);
@@ -326,24 +438,278 @@ CREATE TABLE variaveis_sistema (
   atualizado_em TIMESTAMP DEFAULT NOW()
 );
 
+-- 001_usuario_pix_e_ganhos.sql - rode 1x no banco (psql / DBeaver / pgAdmin)
+-- Tabela de dados PIX do usuário - para receber os trampos realizados.
+-- 1 usuário = 1 chave ativa (UNIQUE usuario_id). Histórico: ativo=false quando troca.
+CREATE TABLE IF NOT EXISTS usuario_pix (
+  id SERIAL PRIMARY KEY,
+  usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  tipo_chave VARCHAR(20) NOT NULL CHECK (tipo_chave IN ('CPF','CNPJ','EMAIL','TELEFONE','ALEATORIA')),
+  chave_pix VARCHAR(255) NOT NULL,
+  nome_titular VARCHAR(255) NOT NULL,
+  cpf_cnpj_titular VARCHAR(20),
+  banco VARCHAR(100),
+  agencia VARCHAR(20),
+  conta VARCHAR(30),
+  tipo_conta VARCHAR(20) CHECK (tipo_conta IN ('CORRENTE','POUPANCA',NULL)),
+  ativo BOOLEAN NOT NULL DEFAULT TRUE,
+  criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (usuario_id, ativo) -- garante 1 ativo por usuário (parcial na prática: só 1 linha ativo=true)
+);
+CREATE INDEX IF NOT EXISTS idx_usuario_pix_usuario ON usuario_pix(usuario_id);
+CREATE INDEX IF NOT EXISTS idx_usuario_pix_chave ON usuario_pix(chave_pix);
+-- Se o banco reclamar do UNIQUE (usuario_id, ativo) por já ter 2 inativos, use em vez disso:
+-- CREATE UNIQUE INDEX IF NOT EXISTS idx_usuario_pix_um_ativo ON usuario_pix(usuario_id) WHERE ativo = TRUE;
+COMMENT ON TABLE usuario_pix IS 'Dados PIX para recebimento dos trampos. 1 chave ativa por usuário.';
+
+CREATE TABLE IF NOT EXISTS usuario_funcoes (
+  id SERIAL PRIMARY KEY,
+  usuario_id INT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  funcao_id INT NOT NULL REFERENCES funcoes(id) ON DELETE CASCADE,
+  tempo_experiencia_meses INT NOT NULL DEFAULT 0 CHECK (tempo_experiencia_meses >= 0),
+  onde_trabalhou TEXT,
+  ainda_trabalha BOOLEAN DEFAULT true,
+  origem VARCHAR(20) DEFAULT 'DECLARADA',
+  criado_em TIMESTAMP DEFAULT NOW(),
+  atualizado_em TIMESTAMP DEFAULT NOW(),
+  UNIQUE (usuario_id, funcao_id)
+);
+CREATE INDEX IF NOT EXISTS idx_usuario_funcoes_usuario ON usuario_funcoes(usuario_id);
+CREATE INDEX IF NOT EXISTS idx_usuario_funcoes_funcao ON usuario_funcoes(funcao_id);
+
+-- ============================================================
+-- SEÇÃO 9 — ITEM 4: CHAT + NOTIFICAÇÕES
+-- ============================================================
+CREATE TABLE IF NOT EXISTS conversas (
+  id SERIAL PRIMARY KEY,
+  trampo_id INTEGER NOT NULL REFERENCES trampos(id),
+  contratante_id INTEGER NOT NULL REFERENCES usuarios(id),
+  freela_id INTEGER NOT NULL REFERENCES usuarios(id),
+  ultima_mensagem_at TIMESTAMP,
+  criado_em TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_conversa_trampo ON conversas (trampo_id);
+
+CREATE TABLE IF NOT EXISTS mensagens (
+  id SERIAL PRIMARY KEY,
+  conversa_id INTEGER NOT NULL REFERENCES conversas(id) ON DELETE CASCADE,
+  remetente_id INTEGER REFERENCES usuarios(id),
+  texto TEXT NOT NULL,
+  anexo_url VARCHAR(500),
+  tipo VARCHAR(20) NOT NULL DEFAULT 'TEXTO',
+  lida_em TIMESTAMP,
+  criado_em TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_mensagens_conversa ON mensagens (conversa_id, criado_em);
+
+CREATE TABLE IF NOT EXISTS notificacoes (
+  id SERIAL PRIMARY KEY,
+  usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  tipo VARCHAR(50) NOT NULL,
+  titulo VARCHAR(200) NOT NULL,
+  mensagem TEXT NOT NULL,
+  referencia_tipo VARCHAR(30),
+  referencia_id INTEGER,
+  lida BOOLEAN NOT NULL DEFAULT FALSE,
+  criado_em TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_notif_usuario ON notificacoes (usuario_id, lida, criado_em);
+
+-- =====================================================================
+-- PERMISSOES (14B) - tabela propria. Antes vivia so em usuarios.permissoes (JSONB),
+-- o que impedia listar/matriz por tipo sem varrer todos os usuarios.
+-- usuarios.permissoes continua existindo (compat), mas a fonte passa a ser esta tabela.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS permissoes (
+  id SERIAL PRIMARY KEY,
+  chave VARCHAR(100) NOT NULL,
+  nome VARCHAR(150) NOT NULL,
+  categoria VARCHAR(100) NOT NULL DEFAULT 'geral',
+  descricao TEXT,
+  tipo_usuario_id INT NOT NULL REFERENCES tipos_usuario(id) ON DELETE CASCADE,
+  criado_em TIMESTAMP NOT NULL DEFAULT NOW(),
+  atualizado_em TIMESTAMP NOT NULL DEFAULT NOW(),
+  UNIQUE(chave, tipo_usuario_id)
+);
+CREATE INDEX IF NOT EXISTS idx_permissoes_tipo ON permissoes(tipo_usuario_id);
+CREATE INDEX IF NOT EXISTS idx_permissoes_categoria ON permissoes(categoria);
+
+
+-- ============================================================
+-- 1. vaga_turnos: um turno = um dia + um periodo + um valor
+-- ============================================================
+CREATE TABLE IF NOT EXISTS vaga_turnos (
+  id SERIAL PRIMARY KEY,
+  vaga_id INT NOT NULL REFERENCES vagas(id) ON DELETE CASCADE,
+  data DATE NOT NULL,                       -- dia em que o turno COMECA (ex.: 2026-12-24)
+  hora_inicio TIME NOT NULL,                -- ex.: 08:00
+  hora_fim TIME NOT NULL,                   -- ex.: 15:00 (pode ser <= hora_inicio = atravessa a meia-noite)
+  atravessa_meia_noite BOOLEAN NOT NULL DEFAULT false,
+  duracao_minutos INT NOT NULL,             -- ex.: 420 (7h). Calculado na escrita.
+  valor_servico NUMERIC(10,2) NOT NULL DEFAULT 0,  -- VALOR DO SERVICO DESTE TURNO (facilita o pagamento)
+  valor_transporte numeric(10,2) NOT NULL DEFAULT 0,
+  ordem INT NOT NULL DEFAULT 1,             -- ordem de exibicao dentro da vaga
+  status VARCHAR(20) NOT NULL DEFAULT 'AGENDADO',   -- AGENDADO | CANCELADO | CONCLUIDO
+  criado_em TIMESTAMP NOT NULL DEFAULT NOW(),
+  CONSTRAINT vaga_turnos_horas_diferentes CHECK (hora_inicio <> hora_fim),
+  CONSTRAINT vaga_turnos_duracao_positiva CHECK (duracao_minutos > 0 AND duracao_minutos <= 1440),
+  CONSTRAINT vaga_turnos_valor_nao_negativo CHECK (valor_servico >= 0),
+  CONSTRAINT vaga_turnos_unico UNIQUE (vaga_id, data, hora_inicio)
+);
+CREATE INDEX IF NOT EXISTS idx_vaga_turnos_vaga ON vaga_turnos (vaga_id, data, hora_inicio);
+CREATE INDEX IF NOT EXISTS idx_vaga_turnos_data ON vaga_turnos (data);
+
+-- ============================================================
+-- 2. (REMOVIDO) candidatura_turnos — NAO EXISTE MAIS
+-- ============================================================
+-- REGRA DE NEGOCIO (14/11/2026): o candidato SO pode se candidatar se for
+-- para TODOS os dias/turnos estipulados. Candidatura e TUDO-OU-NADA.
+-- Por isso NAO ha escolha de turnos na candidatura e esta tabela nao e criada.
+-- Quem se candidata assume a vaga inteira; o acerto por turno (tabela 3)
+-- so entra em cena se houver IMPREVISTO no meio do caminho.
+
+-- ============================================================
+-- 3. trampo_turnos: execucao de cada turno (check-in/out por turno)
+-- ============================================================
+-- Um trampo (vaga aceita) passa a ter um item por turno.
+-- REGRA DE NEGOCIO: o freela assume TODOS os turnos. O valor por turno NAO e
+-- uma forma de escolher turnos — ele so serve para o ACERTO quando ha
+-- IMPREVISTO (ex.: freela passa mal no 2o dia e nao pode continuar).
+-- Nesse caso: turnos concluidos = pagos, turnos restantes = CANCELADO,
+-- e o pagamento final = soma dos turnos CONCLUIDOS, nao da vaga inteira.
+-- Falta num turno afeta so aquele turno, nao apaga o que ja foi feito.
+CREATE TABLE IF NOT EXISTS trampo_turnos (
+  id SERIAL PRIMARY KEY,
+  trampo_id INT NOT NULL REFERENCES trampos(id) ON DELETE CASCADE,
+  vaga_turno_id INT NOT NULL REFERENCES vaga_turnos(id) ON DELETE CASCADE,
+  status VARCHAR(20) NOT NULL DEFAULT 'AGENDADO',  -- AGENDADO | EM_ANDAMENTO | CONCLUIDO | FALTOU | CANCELADO
+  checkin_em TIMESTAMP NULL,
+  checkout_em TIMESTAMP NULL,
+  valor_servico NUMERIC(10,2) NOT NULL DEFAULT 0,  -- copia do valor do turno no aceite (congelado)
+  valor_transporte numeric(10,2) NOT NULL DEFAULT 0,
+  confirmado_em timestamptz,
+  confirmado_por int,
+  criado_em TIMESTAMP NOT NULL DEFAULT NOW(),
+  atualizado_em TIMESTAMP NOT NULL DEFAULT NOW(),
+  CONSTRAINT trampo_turnos_unico UNIQUE (trampo_id, vaga_turno_id),
+  CONSTRAINT trampo_turnos_valor_nao_negativo CHECK (valor_servico >= 0)
+);
+CREATE INDEX IF NOT EXISTS idx_trampo_turnos_trampo ON trampo_turnos (trampo_id);
+CREATE INDEX IF NOT EXISTS idx_trampo_turnos_turno ON trampo_turnos (vaga_turno_id);
+
+-- Fase 3: templates de vaga (publicar em 30 segundos)
+CREATE TABLE IF NOT EXISTS vaga_templates (
+  id SERIAL PRIMARY KEY,
+  nome VARCHAR(100) NOT NULL UNIQUE,
+  funcao_id INT NOT NULL REFERENCES funcoes(id),
+  titulo VARCHAR(150) NOT NULL,
+  descricao TEXT NOT NULL,
+  turnos_json JSONB NOT NULL DEFAULT '[]',
+  ativo BOOLEAN NOT NULL DEFAULT true,
+  criado_em TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_vaga_templates_funcao ON vaga_templates (funcao_id);
+
+CREATE TABLE IF NOT EXISTS provedores_pagamento (
+  id serial PRIMARY KEY, provedor varchar(30) NOT NULL UNIQUE,
+  ativo boolean NOT NULL DEFAULT false,
+  ambiente varchar(20) NOT NULL DEFAULT 'sandbox',
+  taxa_pix_percentual numeric(5,2) NOT NULL DEFAULT 1, taxa_cartao_percentual numeric(5,2) NOT NULL DEFAULT 4,
+  client_id text, client_secret_criptografado text, webhook_secret_criptografado text,
+  pix_chave_recebimento varchar(120), config_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  criado_em timestamptz NOT NULL DEFAULT NOW(), atualizado_em timestamptz NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_provedores_um_ativo ON provedores_pagamento (ativo) WHERE ativo = true;
+create table if not exists provedor_pagamento_auditoria (
+ id serial primary key,
+ provedor_id int not null references provedores_pagamento(id),
+ admin_id int not null,
+ acao varchar(40) not null,
+ de_ativo boolean,
+ para_ativo boolean,
+ public_key text,
+ criado_em timestamptz not null default NOW()
+);
+create table if not exists repasses (
+	id serial primary key,
+	trampo_turno_id int not null unique,
+	trampo_id int not null,
+	freela_id int not null,
+	provedor varchar(30) not null,
+	chave_idempotencia varchar(120) not null unique,
+	status varchar(30) not null default 'AGENDADO',
+	valor_centavos int not null,
+	agendar_para timestamptz not null,
+	pago_em timestamptz,
+	comprovante varchar(200),
+	erro text,
+	tentativas int not null default 0,
+	criado_em timestamptz not null default NOW(),
+	atualizado_em timestamptz not null default NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_repasses_agendar ON repasses (status, agendar_para);
+CREATE TABLE IF NOT EXISTS pix_validacoes (
+  id serial PRIMARY KEY,
+  usuario_id int NOT NULL,
+  tipo_chave varchar(20) NOT NULL,
+  chave_pix varchar(140) NOT NULL,
+  nome_titular varchar(200) NOT NULL,
+  cpf_cnpj_titular varchar(14),
+  banco varchar(100),
+  agencia varchar(20),
+  conta varchar(30),
+  tipo_conta varchar(20),
+  token varchar(10) NOT NULL,
+  status varchar(30) NOT NULL DEFAULT 'PENDENTE',
+  expira_em timestamptz NOT NULL,
+  criado_em timestamptz NOT NULL DEFAULT NOW(),
+  atualizado_em timestamptz NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pix_validacoes_token ON pix_validacoes (token, status);
 -- =====================================================================
 -- 8. FUNÇÕES E VIEWS
 -- =====================================================================
-CREATE OR REPLACE FUNCTION fn_garantir_um_endereco_ativo()
+
+-- 3. Trigger para garantir só 1 ativo por usuário
+CREATE OR REPLACE FUNCTION fn_endereco_ativo_unico()
 RETURNS TRIGGER AS $$
 BEGIN
-  IF NEW.is_ativo = true THEN
-    UPDATE enderecos_usuario SET is_ativo = false, atualizado_em = NOW()
-    WHERE usuario_id = NEW.usuario_id AND id != NEW.id AND is_ativo = true;
+  IF NEW.ativo = TRUE AND NEW.usuario_id IS NOT NULL THEN
+    UPDATE enderecos SET ativo = FALSE WHERE usuario_id = NEW.usuario_id AND id != NEW.id AND ativo = TRUE;
   END IF;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER trg_garantir_um_ativo
-  BEFORE INSERT OR UPDATE OF is_ativo ON enderecos_usuario
-  FOR EACH ROW WHEN (NEW.is_ativo = true)
-  EXECUTE FUNCTION fn_garantir_um_endereco_ativo();
+DROP TRIGGER IF EXISTS trg_endereco_ativo_unico ON enderecos;
+CREATE TRIGGER trg_endereco_ativo_unico
+  BEFORE INSERT OR UPDATE ON enderecos
+  FOR EACH ROW EXECUTE FUNCTION fn_endereco_ativo_unico();
+
+
+
+
+
+-- 5. View completa com cidade e estado
+CREATE OR REPLACE VIEW vw_enderecos_completos AS
+SELECT 
+  e.*,
+  c.nome as cidade_nome,
+  c.estado_id,
+  es.nome as estado_nome,
+  es.sigla as estado_sigla,
+  te.chave as tipo_chave,
+  te.nome as tipo_nome,
+  (e.logradouro || ', ' || COALESCE(e.numero,'S/N') || ' - ' || e.bairro || ', ' || c.nome || '/' || es.sigla) as endereco_formatado
+FROM enderecos e
+JOIN cidades c ON c.id = e.cidade_id
+JOIN estados es ON es.id = c.estado_id
+LEFT JOIN tipos_endereco te ON te.id = e.tipo_endereco_id;
+
+-- Teste: verificar se view funciona
+-- SELECT * FROM vw_enderecos_completos LIMIT 1;
+
 
 CREATE OR REPLACE FUNCTION fn_gerar_codigo_transacao()
 RETURNS TRIGGER AS $$
@@ -379,37 +745,6 @@ BEGIN
 END;
 $$;
 
-CREATE VIEW vw_usuarios_com_endereco_ativo AS
-SELECT u.*, tu.chave as tipo_chave, tu.nome_exibicao as tipo_nome, tu.nivel_permissao,
-  eu.id as endereco_ativo_id, eu.endereco_completo as endereco_ativo_completo,
-  eu.bairro as endereco_ativo_bairro, eu.lat as endereco_ativo_lat, eu.lng as endereco_ativo_lng,
-  eu.cidade_nome as endereco_ativo_cidade, c.nome as cidade_real, c.ativa as cidade_ativa, c.raio_km as cidade_raio_km
-FROM usuarios u
-LEFT JOIN tipos_usuario tu ON tu.id = u.tipo_usuario_id
-LEFT JOIN enderecos_usuario eu ON eu.usuario_id = u.id AND eu.is_ativo = true
-LEFT JOIN cidades c ON c.id = eu.cidade_id;
-
-CREATE VIEW vw_enderecos_completo AS
-SELECT eu.id, eu.usuario_id, eu.endereco_completo, eu.bairro, eu.cidade_id, eu.cidade_nome,
-  eu.estado as endereco_estado, eu.lat, eu.lng, eu.is_ativo, eu.criado_em, eu.atualizado_em,
-  u.nome_completo, u.email, tu.chave as tipo_chave, tu.nivel_permissao,
-  c.nome as cidade_nome_real, c.estado as cidade_estado, c.ativa as cidade_ativa,
-  c.lat as cidade_lat, c.lng as cidade_lng, c.raio_km as cidade_raio_km
-FROM enderecos_usuario eu
-JOIN usuarios u ON u.id = eu.usuario_id
-LEFT JOIN tipos_usuario tu ON tu.id = u.tipo_usuario_id
-LEFT JOIN cidades c ON c.id = eu.cidade_id;
-
-CREATE VIEW vw_mural_vagas AS
-SELECT v.*, u.nome_completo as contratante_nome, u.email as contratante_email,
-  c.nome as cidade_nome_real, c.ativa as cidade_ativa, eu.endereco_completo as endereco_referencia,
-  (SELECT COUNT(*) FROM candidaturas cand WHERE cand.vaga_id = v.id) as total_candidaturas
-FROM vagas v
-JOIN usuarios u ON u.id = v.contratante_id
-LEFT JOIN cidades c ON c.id = v.cidade_id
-LEFT JOIN enderecos_usuario eu ON eu.id = v.endereco_id
-WHERE v.status = 'PENDENTE';
-
 CREATE VIEW cidades_ativas AS SELECT * FROM cidades WHERE ativa = true;
 
 CREATE VIEW vw_transacoes_periodo AS
@@ -422,50 +757,97 @@ FROM transacoes t
 LEFT JOIN usuarios u1 ON u1.id = t.freela_id
 LEFT JOIN usuarios u2 ON u2.id = t.contratante_id;
 
+
+
+CREATE OR REPLACE VIEW vw_experiencia_comprovada AS
+SELECT
+  t.freela_id AS usuario_id,
+  f.nome AS funcao_nome,
+  v.funcao_id,
+  COUNT(*) AS trampos_concluidos,
+  COALESCE(AVG(a.nota), NULL) AS media_avaliacao_funcao,
+  MAX(t.data_fim) AS ultimo_trampo_em
+FROM trampos t
+JOIN vagas v ON v.id = t.vaga_id
+join funcoes f on f.id = v.funcao_id
+JOIN status_vaga sv ON sv.id = v.status_vaga_id AND sv.chave = 'FINALIZADA'
+LEFT JOIN avaliacoes a ON a.trampo_id = t.id AND a.avaliado_id = t.freela_id
+WHERE t.status = 'FINALIZADO'
+ GROUP BY t.freela_id ,
+  f.nome,
+  v.funcao_id;
+
+-- 2.6 Histórico geral do freela no app (presença / cancelamentos)
+CREATE OR REPLACE VIEW vw_historico_freela AS
+SELECT
+  u.id AS usuario_id,
+  COALESCE(SUM(CASE WHEN t.status = 'FINALIZADO' THEN 1 ELSE 0 END), 0) AS trampos_concluidos,
+  COALESCE(SUM(CASE WHEN c.status = 'CANCELADA' THEN 1 ELSE 0 END), 0) AS candidaturas_canceladas,
+  COALESCE(AVG(u.avaliacao_media), u.avaliacao_media) AS media_geral
+FROM usuarios u
+LEFT JOIN trampos t ON t.freela_id = u.id
+LEFT JOIN candidaturas c ON c.freela_id = u.id OR c.usuario_id = u.id
+GROUP BY u.id, u.avaliacao_media;
+
+
 -- =====================================================================
 -- INSERTS - TODOS NECESSÁRIOS PARA APP FUNCIONAR NORMAL
 -- =====================================================================
-
+begin;
 INSERT INTO paises (nome, sigla, codigo_ibge) VALUES
 ('Brasil', 'BRA', 76);
 
-INSERT INTO estados (pais_id, nome, sigla, codigo_ibge, regiao) VALUES
-(1, 'Minas Gerais', 'MG', 31, 'Sudeste'),
-(1, 'São Paulo', 'SP', 35, 'Sudeste'),
-(1, 'Goiás', 'GO', 52, 'Centro-Oeste'),
-(1, 'Distrito Federal', 'DF', 53, 'Centro-Oeste'),
-(1, 'Rio de Janeiro', 'RJ', 33, 'Sudeste'),
-(1, 'Bahia', 'BA', 29, 'Nordeste');
+INSERT INTO estados (pais_id, nome, sigla, codigo_ibge, regiao, ativo) VALUES
+((SELECT id FROM paises WHERE sigla='BRA'), 'Acre', 'AC', 12, 'Norte', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Alagoas', 'AL', 27, 'Nordeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Amapá', 'AP', 16, 'Norte', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Amazonas', 'AM', 13, 'Norte', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Bahia', 'BA', 29, 'Nordeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Ceará', 'CE', 23, 'Nordeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Distrito Federal', 'DF', 53, 'Centro-Oeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Espírito Santo', 'ES', 32, 'Sudeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Goiás', 'GO', 52, 'Centro-Oeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Maranhão', 'MA', 21, 'Nordeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Mato Grosso', 'MT', 51, 'Centro-Oeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Mato Grosso do Sul', 'MS', 50, 'Centro-Oeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Minas Gerais', 'MG', 31, 'Sudeste', true),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Pará', 'PA', 15, 'Norte', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Paraíba', 'PB', 25, 'Nordeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Paraná', 'PR', 41, 'Sul', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Pernambuco', 'PE', 26, 'Nordeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Piauí', 'PI', 22, 'Nordeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Rio de Janeiro', 'RJ', 33, 'Sudeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Rio Grande do Norte', 'RN', 24, 'Nordeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Rio Grande do Sul', 'RS', 43, 'Sul', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Rondônia', 'RO', 11, 'Norte', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Roraima', 'RR', 14, 'Norte', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Santa Catarina', 'SC', 42, 'Sul', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'São Paulo', 'SP', 35, 'Sudeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Sergipe', 'SE', 28, 'Nordeste', false),
+((SELECT id FROM paises WHERE sigla='BRA'), 'Tocantins', 'TO', 17, 'Norte', false)
+ON CONFLICT (sigla, pais_id) DO UPDATE SET
+  nome = EXCLUDED.nome,
+  codigo_ibge = EXCLUDED.codigo_ibge,
+  regiao = EXCLUDED.regiao,
+  ativo = CASE WHEN EXCLUDED.sigla = 'MG' THEN true ELSE false END;
 
-INSERT INTO cidades (nome, estado, ativa, lat, lng, raio_km, regiao, codigo_ibge, populacao, status_expansao, demanda_score) VALUES
-('Uberlândia', 'MG', true, -18.9186, -48.2772, 25, 'Triângulo Mineiro', '3170206', 713232, 'ATIVA', 100),
-('Uberaba', 'MG', true, -19.7476, -47.9381, 20, 'Triângulo Mineiro', '3170107', 337836, 'ATIVA', 80),
-('Araguari', 'MG', true, -18.6455, -48.1873, 15, 'Triângulo Mineiro', '3103504', 117825, 'ATIVA', 60),
-('Ituiutaba', 'MG', false, -18.9689, -49.4656, 15, 'Triângulo Mineiro', '3134202', 105818, 'INATIVA', 20),
-('Patrocínio', 'MG', false, -18.9443, -46.9936, 15, 'Triângulo Mineiro', '3144607', 91995, 'INATIVA', 15);
+INSERT INTO cidades (nome, estado_id, ativa, lat, lng, raio_km, regiao, codigo_ibge, populacao, status_expansao, demanda_score) VALUES
+( 'Uberlândia',  (SELECT id FROM estados WHERE sigla='MG'), true, -18.9186, -48.2772, 25, 'Triângulo Mineiro', '3170206', 713232, 'ATIVA', 100);
+/*,('Uberaba', (SELECT id FROM estados WHERE sigla='MG'),  false, -19.7476, -47.9381, 20, 'Triângulo Mineiro', '3170107', 337836, 'ATIVA', 80),
+('Araguari', (SELECT id FROM estados WHERE sigla='MG'),  false, -18.6455, -48.1873, 15, 'Triângulo Mineiro', '3103504', 117825, 'ATIVA', 60),
+( 'Ituiutaba',  (SELECT id FROM estados WHERE sigla='MG'), false, -18.9689, -49.4656, 15, 'Triângulo Mineiro', '3134202', 105818, 'INATIVA', 20),
+('Patrocínio', (SELECT id FROM estados WHERE sigla='MG'),  false, -18.9443, -46.9936, 15, 'Triângulo Mineiro', '3144607', 91995, 'INATIVA', 15);*/
 
-INSERT INTO bairros (cidade_id, nome, zona, demanda) VALUES
-(1, 'Centro', 'Central', 45),
-(1, 'Santa Mônica', 'Leste', 38),
-(1, 'Granja Marileusa', 'Sul', 25),
-(1, 'Patrimônio', 'Central', 22),
-(1, 'Laranjeiras', 'Sul', 20),
-(1, 'Karaíba', 'Sul', 15),
-(1, 'Morada da Colina', 'Sul', 12),
-(1, 'Jardim Karaíba', 'Sul', 18),
-(1, 'Tibery', 'Leste', 30),
-(1, 'Martins', 'Central', 35),
-(1, 'Umuarama', 'Leste', 28),
-(1, 'Jardim Brasília', 'Norte', 20);
 
-INSERT INTO expansao_cidades (cidade_nome, estado_sigla, populacao, demanda_solicitacoes, demanda_vagas, status, prioridade, motivo) VALUES
+--'Em dev'
+/*INSERT INTO expansao_cidades (cidade_nome, estado_sigla, populacao, demanda_solicitacoes, demanda_vagas, status, prioridade, motivo) VALUES
 ('Araguari', 'MG', 117825, 23, 15, 'SOLICITADA', 2, 'Cidade vizinha com alta demanda de garçons'),
 ('Uberaba', 'MG', 337836, 45, 32, 'EM_ANALISE', 3, 'Polo regional com muitos eventos'),
 ('Patrocínio', 'MG', 91995, 12, 8, 'SOLICITADA', 1, 'Demanda crescente de freelas'),
 ('Ituiutaba', 'MG', 105818, 18, 10, 'SOLICITADA', 1, 'Eventos agropecuários'),
 ('São Paulo', 'SP', 12396372, 156, 98, 'APROVADA', 3, 'Capital com demanda nacional'),
 ('Goiânia', 'GO', 1554879, 89, 56, 'EM_ANALISE', 2, 'Expansão centro-oeste');
-
+*/
 INSERT INTO tipos_usuario (chave, nome_exibicao, descricao, nivel_permissao) VALUES
 ('FREELA', 'Freela', 'Prestador de serviço autônomo - pode ver mural e se candidatar', 0),
 ('CONTRATANTE', 'Contratante', 'Contrata freelas - pode publicar vagas', 10),
@@ -476,57 +858,220 @@ INSERT INTO tipos_usuario (chave, nome_exibicao, descricao, nivel_permissao) VAL
 ('ADMIN', 'Administrador', 'Admin do sistema - acesso a cidades, expansão, variáveis', 90),
 ('SUPER_ADMIN', 'Super Admin', 'Acesso total - gerencia permissões, tipos, tudo', 100);
 
-INSERT INTO funcoes (nome, categoria) VALUES
-('Garçom', 'Alimentação'),
-('Bartender', 'Alimentação'),
-('Cozinheiro', 'Alimentação'),
-('Auxiliar de Cozinha', 'Alimentação'),
-('Recepcionista', 'Atendimento'),
-('Segurança', 'Segurança'),
-('Limpeza', 'Limpeza'),
-('Outros', 'Outros');
+INSERT INTO categorias_funcao (nome, icone) VALUES
+  ('Alimentação','utensils'), ('Atendimento','smile'), ('Segurança','shield'),
+  ('Limpeza','sparkles'), ('Eventos','calendar'), ('Outros','tag')
+ON CONFLICT (nome) DO NOTHING;
+
+INSERT INTO funcoes (nome, categoria_id) VALUES
+('Garçom', (SELECT id FROM categorias_funcao WHERE nome = 'Alimentação')),
+('Bartender', (SELECT id FROM categorias_funcao WHERE nome = 'Alimentação')),
+('Cozinheiro', (SELECT id FROM categorias_funcao WHERE nome = 'Alimentação')),
+('Auxiliar de Cozinha', (SELECT id FROM categorias_funcao WHERE nome = 'Alimentação')),
+('Recepcionista', (SELECT id FROM categorias_funcao WHERE nome = 'Atendimento')),
+('Segurança', (SELECT id FROM categorias_funcao WHERE nome = 'Segurança')),
+('Limpeza', (SELECT id FROM categorias_funcao WHERE nome = 'Limpeza')),
+('Outros', (SELECT id FROM categorias_funcao WHERE nome = 'Outros'))
+ON CONFLICT (nome) DO UPDATE SET categoria_id = EXCLUDED.categoria_id;
+
+INSERT INTO tipos_endereco (chave, nome, descricao, icone) VALUES
+('RESIDENCIAL', 'Residencial', 'Endereço de residência', 'home'),
+('COMERCIAL', 'Comercial', 'Endereço comercial / trabalho', 'building'),
+('VAGA', 'Local da Vaga', 'Endereço onde a vaga será executada', 'briefcase'),
+('COBRANCA', 'Cobrança', 'Endereço de cobrança', 'credit-card'),
+('EVENTO', 'Evento', 'Local onde a vaga será realizada','briefcase'),
+('OUTRO', 'Outro', 'Outro tipo de endereço', 'map-pin')
+ON CONFLICT (chave) DO NOTHING;
+
+INSERT INTO status_vaga (chave, nome_exibicao, descricao, cor_hex, ordem, permite_editar, permite_cancelar, permite_candidatar) VALUES
+('AGUARDANDO_CANDIDATURA', 'Aguardando Candidatura', 'Vaga aberta, aguardando freelas se candidatarem', '#22C55E', 1, true, true, true),
+('AGUARDANDO_ACEITE', 'Aguardando Aceite', 'Tem candidaturas pendentes, aguardando contratante aceitar um freela', '#F59E0B', 2, false, true, true),
+('ACEITA', 'Aceita', 'Freela aceito, aguardando início (pode cancelar até Xh antes com motivo)', '#3B82F6', 3, false, false, false),
+('EM_ANDAMENTO', 'Em Andamento', 'Trampo iniciado, freela trabalhando', '#8B5CF6', 4, false, false, false),
+('FINALIZADA', 'Finalizada', 'Trampo finalizado', '#10B981', 5, false, false, false),
+('CANCELADA', 'Cancelada', 'Vaga cancelada', '#EF4444', 6, false, false, false),
+('FECHADA', 'Fechada', 'Vaga fechada sem contratação', '#6B7280', 7, false, false, false),
+('AGUARDANDO_CONFIRMACAO', 'Aguardando Confirmação', 'Seleção feita, aguardando o freela confirmar', '#F59E0B', 3, false, true, true)
+ON CONFLICT (chave) DO UPDATE SET nome_exibicao=EXCLUDED.nome_exibicao, descricao=EXCLUDED.descricao, cor_hex=EXCLUDED.cor_hex, ordem=EXCLUDED.ordem, permite_editar=EXCLUDED.permite_editar, permite_cancelar=EXCLUDED.permite_cancelar, permite_candidatar=EXCLUDED.permite_candidatar;
+
+
 
 INSERT INTO status_usuario (chave, nome_exibicao, descricao, cor_hex, ordem) VALUES
 ('AGUARDANDO_VALIDACAO', 'Aguardando Validação', 'Usuário cadastrado mas ainda não validou e-mail', '#FFC700', 1),
 ('ATIVO', 'Ativo', 'Usuário validado e ativo', '#00C851', 2),
 ('INATIVO', 'Inativo', 'Desativado', '#9E9E9E', 3),
 ('BLOQUEADO', 'Bloqueado', 'Bloqueado por violação', '#E53935', 4),
-('SUSPENSO', 'Suspenso', 'Suspenso temporariamente', '#FF6D00', 5);
-
+('SUSPENSO', 'Suspenso', 'Suspenso temporariamente', '#FF6D00', 5),
+('CANCELADO','Cancelado',  'Cadastro cancelado pelo próprio usuário via link de cancelamento (LGPD). E-mail e CPF anonimizados para IdUsuario@cancelado.com e IdUsuario. Sem acesso ao sistema. E-mail e CPF originais liberados para novo cadastro.', '#6B7280', 99
+)
+ON CONFLICT (chave) DO UPDATE SET
+  nome_exibicao = EXCLUDED.nome_exibicao,
+  descricao = EXCLUDED.descricao,
+  cor_hex = EXCLUDED.cor_hex;
 INSERT INTO email_status (chave, nome) VALUES
 ('EM_ESPERA','Em espera'),
 ('ENVIADO','Enviado'),
 ('VALIDADO','Validado'),
-('EXPIRADO','Expirado');
+('EXPIRADO','Expirado'),
+('CONSUMIDO','Consumido'),
+('CANCELADO','Cancelado'),
+('FALHA','Falha')
+ON CONFLICT (chave) DO NOTHING;
 
 INSERT INTO email_templates (chave_uso, titulo_assunto, conteudo_corpo, email_remetente, nome_remetente) VALUES
-('CONFIRMACAO_CADASTRO', 'Confirme seu cadastro - UAI FRILA', 'Olá {{NOME}}, seu código é {{CODIGO}}. E-mail: {{EMAIL}}', 'noreply@uaifrila.com.br', 'UAI FRILA'),
-('2FA_LOGIN', 'Código de login - UAI FRILA', 'Seu código de login é {{CODIGO}}', 'noreply@uaifrila.com.br', 'UAI FRILA');
+('CONFIRMACAO_CADASTRO', 'Confirme seu cadastro - Código {{CODIGO}} - UAI FRILA', 
+'<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="font-family: sans-serif; background: #FFFFFF; margin: 0; padding: 0;">
+  <div style="max-width: 600px; margin: 0 auto; border: 4px solid #000; background: #FFFFFF;">
+    <!-- HEADER com grid mostarda -->
+    <div style="background: #000; color: #fff; padding: 20px; text-align: center; background-image: linear-gradient(to right, rgba(204,153,0,0.22) 1.2px, transparent 1.2px), linear-gradient(to bottom, rgba(204,153,0,0.22) 1.2px, transparent 1.2px); background-size: 36px 36px;">
+      <h1 style="font-weight: 900; font-size: 28px; margin: 0; letter-spacing: -1px;">UAI FRILA</h1>
+      <p style="font-size: 11px; font-weight: 700; text-transform: uppercase; margin: 4px 0 0 0; letter-spacing: 2px;">Trampos diários em Uberlândia</p>
+    </div>
+    
+    <div style="padding: 24px;">
+      <p style="font-size: 14px;">Olá, <b>{{NOME}}</b>!</p>
+      <p style="font-size: 13px;">Seu cadastro no Uai Frila está quase pronto. Confirme seu e-mail:</p>
+      
+      <!-- CÓDIGO GRANDE -->
+      <div style="background: #FFC700; border: 4px solid #000; padding: 20px; text-align: center; margin: 20px 0; box-shadow: 6px 6px 0px 0px rgba(0,0,0,1);">
+        <p style="font-size: 11px; font-weight: 900; text-transform: uppercase; margin: 0;">Seu código de 6 dígitos</p>
+        <p style="font-size: 38px; font-weight: 900; letter-spacing: 8px; margin: 10px 0;">{{CODIGO}}</p>
+        <p style="font-size: 10px; margin: 0;">Válido por {{TEMPO_EXPIRACAO}} minutos • Não compartilhe</p>
+      </div>
 
-INSERT INTO variaveis_sistema (chave, valor, valor_numerico, tipo, descricao, categoria) VALUES
-('EMAIL_EXPIRACAO_MINUTOS', '5', 5, 'number', 'Tempo expiração código e-mail em minutos', 'email'),
-('TAXA_PLATAFORMA_PERCENTUAL', '15', 15, 'number', 'Taxa da plataforma % - legado', 'financeiro'),
-('TAXA_CANCELAMENTO', '40', 40, 'number', 'Taxa cancelamento R$ - legado', 'financeiro'),
-('VALOR_MINIMO_HORA', '15', 15, 'number', 'Valor mínimo hora', 'financeiro'),
-('RAIO_MAXIMO_CIDADE_KM', '30', 30, 'number', 'Raio máximo cidade km - legado', 'cidade'),
-('PAGAMENTO_ANTECEDENCIA_MINUTOS', '60', 60, 'number', 'Minutos de antecedência para pagamento antes do trampo', 'pagamento'),
-('PAGAMENTO_EXPIRA_AUTO_MINUTOS', '30', 30, 'number', 'Minutos para expirar pagamento não confirmado (início + 30min)', 'pagamento'),
-('TAXA_INTERMEDIACAO_PERCENTUAL', '15', 15, 'number', 'Taxa de intermediação da plataforma em %', 'financeiro'),
-('TAXA_CANCELAMENTO_VALOR', '40', 40, 'number', 'Multa por cancelamento < 4h em R$', 'financeiro'),
-('TAXA_CANCELAMENTO_LIMITE_MINUTOS', '240', 240, 'number', 'Limite em minutos para aplicar multa de cancelamento (4h)', 'financeiro'),
-('FREELA_CANCELAMENTO_LIMITE_MINUTOS', '240', 240, 'number', 'Tempo mínimo antes do trampo que freela pode cancelar sem multa', 'freela'),
-('FREELA_BANIMENTO_POR_NO_SHOW', 'true', 1, 'boolean', 'Se deve banir freela por no-show', 'freela'),
-('FREELA_BANIMENTO_MESES', '3', 3, 'number', 'Meses de banimento por no-show', 'freela'),
-('FREELA_OPORTUNIDADES_MAX', '5', 5, 'number', 'Máximo de candidaturas simultâneas por freela', 'freela'),
-('MEI_LIMITE_MENSAL', '1500', 1500, 'number', 'Limite MEI por contratante por mês em R$', 'financeiro'),
-('ESCROW_LIBERACAO_AUTOMATICA_HORAS', '24', 24, 'number', 'Horas para liberação automática do escrow após finalização', 'pagamento'),
-('CIDADE_RAIO_KM_PADRAO', '20', 20, 'number', 'Raio padrão em KM para validar endereço na cidade', 'cidade');
+      <!-- BOTÃO VALIDAR AUTOMÁTICO -->
+      <div style="margin: 24px 0;">
+        <a href="{{LINK_VALIDAR}}" style="display: block; background: #0066FF; color: #fff; text-align: center; padding: 18px; font-weight: 900; text-transform: uppercase; text-decoration: none; border: 3px solid #000; box-shadow: 4px 4px 0px 0px rgba(0,0,0,1); font-size: 13px;">
+          ✅ CLIQUE AQUI PARA VALIDAR AUTOMATICAMENTE
+        </a>
+        <p style="font-size: 10px; color: #666; text-align: center; margin-top: 10px;">Se o botão não funcionar, copie o código e cole na tela de validação<br>Link direto: {{LINK_VALIDAR}}</p>
+      </div>
+
+      <!-- DICA MOBILE - ANTI REFRESH -->
+      <div style="background: #f3f3f3; border: 2px solid #000; padding: 14px; margin: 20px 0;">
+        <p style="font-size: 11px; margin: 0;"><b>📱 Está no celular?</b> Deixe a aba do Uai Frila aberta! Abra este e-mail em outra aba ou app. Seu progresso fica salvo mesmo se atualizar a página. O timer continua contando.</p>
+      </div>
+
+      <hr style="border: none; border-top: 3px dashed #000; margin: 24px 0;">
+
+      <!-- CANCELAR -->
+      <div style="text-align: center; background: #fff; border: 2px solid #E53935; padding: 16px;">
+        <p style="font-size: 11px; font-weight: 900; margin: 0 0 8px 0; text-transform: uppercase;">Não foi você que fez este cadastro?</p>
+        <a href="{{LINK_CANCELAR}}" style="color: #E53935; font-size: 12px; font-weight: 900; text-transform: uppercase;">🚫 Não sou eu - Cancelar e bloquear cadastro</a>
+        <p style="font-size: 9px; color: #999; margin: 8px 0 0 0;">Se você não solicitou, clique acima e seu e-mail será protegido contra uso indevido.</p>
+      </div>
+
+      <p style="font-size: 9px; color: #999; text-align: center; margin-top: 24px;">Uai Frila - Trampos diários • Valor por serviço + transporte • Pix no dia • {{FRONTEND_URL}}</p>
+    </div>
+  </div>
+</body>
+</html>',
+'noreply@uaifrila.com.br', 'UAI FRILA');
+
+-- 2. LOGIN - Com link mágico anti-refresh
+INSERT INTO email_templates (chave_uso, titulo_assunto, conteudo_corpo, email_remetente, nome_remetente) VALUES
+('2FA_LOGIN', 'Seu código de acesso: {{CODIGO}} - UAI FRILA',
+'<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="font-family: sans-serif; background: #000; margin: 0; padding: 0;">
+  <div style="max-width: 600px; margin: 0 auto; border: 4px solid #fff; background: #000; color: #fff;">
+    <div style="background: #000; color: #fff; padding: 20px; text-align: center; border-bottom: 4px solid #fff; background-image: linear-gradient(to right, rgba(0,102,255,0.22) 1.2px, transparent 1.2px), linear-gradient(to bottom, rgba(0,102,255,0.22) 1.2px, transparent 1.2px); background-size: 40px 40px;">
+      <h1 style="font-weight: 900; font-size: 28px; margin: 0;">UAI FRILA</h1>
+      <p style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px;">Código de acesso</p>
+    </div>
+    
+    <div style="padding: 24px;">
+      <p style="font-size: 14px;">Olá, <b>{{NOME}}</b>! Seu código de acesso:</p>
+      
+      <div style="background: #000; color: #fff; border: 4px solid #fff; padding: 20px; text-align: center; margin: 20px 0;">
+        <p style="font-size: 11px; font-weight: 900; text-transform: uppercase; margin: 0; color: #fff;">Código</p>
+        <p style="font-size: 38px; font-weight: 900; letter-spacing: 8px; margin: 10px 0; color: #fff;">{{CODIGO}}</p>
+        <p style="font-size: 10px; margin: 0; color: #ccc;">Válido por {{TEMPO_EXPIRACAO}} minutos</p>
+      </div>
+
+      <div style="margin: 24px 0;">
+        <a href="{{LINK_VALIDAR}}" style="display: block; background: #fff; color: #000; text-align: center; padding: 18px; font-weight: 900; text-transform: uppercase; text-decoration: none; border: 3px solid #fff; font-size: 13px;">
+          🔓 CLIQUE PARA ENTRAR AUTOMATICAMENTE
+        </a>
+        <p style="font-size: 10px; color: #999; text-align: center; margin-top: 10px;">Link direto: {{LINK_VALIDAR}}</p>
+      </div>
+
+      <div style="background: #111; border: 2px solid #333; padding: 14px;">
+        <p style="font-size: 11px; margin: 0; color: #ccc;"><b style="color: #fff;">📱 No celular:</b> Você pode voltar para a aba do Uai Frila e colar o código. Não precisa decorar, seu login fica salvo se atualizar. Deixe a aba aberta!</p>
+      </div>
+
+      <p style="font-size: 9px; color: #666; text-align: center; margin-top: 24px;">Se não foi você, ignore. Código expira em {{TEMPO_EXPIRACAO}} minutos. {{FRONTEND_URL}}</p>
+    </div>
+  </div>
+</body>
+</html>',
+'noreply@uaifrila.com.br', 'UAI FRILA');
+
+-- 3. RECUPERAÇÃO / REENVIO
+INSERT INTO email_templates (chave_uso, titulo_assunto, conteudo_corpo, email_remetente, nome_remetente) VALUES
+('REENVIO_CODIGO', 'Novo código: {{CODIGO}} - UAI FRILA',
+'<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 4px solid #000; padding: 24px;">
+  <h1 style="font-weight: 900;">UAI FRILA</h1>
+  <p>Olá {{NOME}}, novo código solicitado:</p>
+  <div style="background: #FFC700; border: 4px solid #000; padding: 20px; text-align: center; margin: 20px 0;">
+    <p style="font-size: 36px; font-weight: 900; letter-spacing: 8px;">{{CODIGO}}</p>
+  </div>
+  <a href="{{LINK_VALIDAR}}" style="display: block; background: #0066FF; color: #fff; text-align: center; padding: 16px; font-weight: 900; text-decoration: none;">VALIDAR AGORA</a>
+  <p style="font-size: 11px; margin-top: 16px;">Se não foi você, clique aqui para cancelar: <a href="{{LINK_CANCELAR}}">Cancelar cadastro</a></p>
+</div>',
+'noreply@uaifrila.com.br', 'UAI FRILA');
+
+INSERT INTO variaveis_sistema (chave, valor, valor_numerico, tipo, descricao, categoria, editavel) VALUES
+('EMAIL_EXPIRACAO_MINUTOS', '5', 5, 'number', 'Tempo expiração código e-mail em minutos', 'email', true),
+('TAXA_PLATAFORMA_PERCENTUAL', '15', 15, 'number', 'Taxa da plataforma % - CANONICA (unifica TAXA_INTERMEDIACAO_PERCENTUAL)', 'financeiro', true),
+('VALOR_MINIMO_HORA', '15', 15, 'number', 'Valor mínimo hora', 'financeiro', true),
+('RAIO_MAXIMO_CIDADE_KM', '30', 30, 'number', 'Raio máximo cidade km - legado', 'cidade', true),
+('PAGAMENTO_ANTECEDENCIA_MINUTOS', '60', 60, 'number', 'Minutos de antecedência para pagamento antes do trampo', 'pagamento', true),
+('PAGAMENTO_EXPIRA_AUTO_MINUTOS', '30', 30, 'number', 'Minutos para expirar pagamento não confirmado (início + 30min)', 'pagamento', true),
+('TAXA_CANCELAMENTO_VALOR', '40', 40, 'number', 'Multa por cancelamento < 4h em R$', 'financeiro', true),
+('TAXA_CANCELAMENTO_LIMITE_MINUTOS', '240', 240, 'number', 'Limite em minutos para aplicar multa de cancelamento (4h)', 'financeiro', true),
+('FREELA_CANCELAMENTO_LIMITE_MINUTOS', '240', 240, 'number', 'Tempo mínimo antes do trampo que freela pode cancelar sem multa', 'freela', true),
+('FREELA_BANIMENTO_POR_NO_SHOW', 'true', 1, 'boolean', 'Se deve banir freela por no-show', 'freela', true),
+('FREELA_BANIMENTO_MESES', '3', 3, 'number', 'Meses de banimento por no-show', 'freela', true),
+('FREELA_OPORTUNIDADES_MAX', '5', 5, 'number', 'Máximo de candidaturas simultâneas por freela', 'freela', true),
+('MEI_LIMITE_MENSAL', '1500', 1500, 'number', 'Limite MEI por contratante por mês em R$', 'financeiro', true),
+('ESCROW_LIBERACAO_AUTOMATICA_HORAS', '24', 24, 'number', 'Horas para liberação automática do escrow após finalização', 'pagamento', true),
+('CIDADE_RAIO_KM_PADRAO', '20', 20, 'number', 'Raio padrão em KM para validar endereço na cidade', 'cidade', true), 
+('VALOR_MINIMO_VAGA', '75', 75.00, 'number', 'Valor minimo que contratante pode solicitar um servico (R$)', 'vagas', true),
+('TAXA_PIX_PERCENTUAL', '1', 1.00, 'number', 'Taxa PIX 1% sobre subtotal servico', 'financeiro', true),
+('TAXA_CARTAO_PERCENTUAL', '4', 4.00, 'number', 'Taxa Cartao 4% sobre subtotal servico', 'financeiro', true),
+('COMISSAO_APLICATIVO', '10', 10.00, 'number', 'Comissao aplicativo 10% sobre subtotal', 'financeiro', true),
+('VAGA_ANTECEDENCIA_MINUTOS', '30', 30.00, 'number', 'Antecedencia minima para criar vaga em minutos', 'vagas', true),
+--('PRAZO_CANCELAMENTO_CANDIDATURA_HORAS', '24', 24, 'number',  'Prazo mínimo antes do início para freela aceito cancelar candidatura com motivo + notificação ao contratante. Se faltar menos, botão trava.', 'candidatura', true),
+('PRAZO_CANCELAMENTO_CANDIDATURA_MINUTOS', '1440', 1440, 'number',  'Prazo mínimo antes do início para freela aceito cancelar candidatura com motivo + notificação ao contratante. Se faltar menos, botão trava.', 'candidatura', true),
+--('PRAZO_CANCELAMENTO_VAGA_HORAS', '24', 24, 'number', 'Prazo mínimo antes do início para contratante cancelar vaga com freela aceito.', 'vagas', true),
+('PRAZO_CANCELAMENTO_VAGA_MINUTOS', '1440', 1440, 'number', 'Prazo mínimo antes do início para contratante cancelar vaga com freela aceito.', 'vagas', true),
+('MOTIVO_CANCELAMENTO_MIN_CARACTERES', '10', 10, 'number',  'Tamanho mínimo do motivo de cancelamento quando já aceito.', 'candidatura', true),
+('NOTIFICAR_CANCELAMENTO', 'true', 1, 'boolean', 'Se true, envia notificação ao contratante/freela ao cancelar candidatura aceita.', 'candidatura', true),
+('CAMINHO_LOG_API', '/var/logs/uaifrila/api', NULL, 'string', 'Diretorio dos logs em arquivo da uaifrila-api (um arquivo por dia). Dev Windows ex.: C:\logs\uaifrila\api', 'log', true),
+('CAMINHO_LOG_EMAIL_WORKER', '/var/logs/uaifrila/email-worker', NULL, 'string', 'Diretorio dos logs em arquivo do uaifrila-email-worker (um arquivo por dia). Dev Windows ex.: C:\logs\uaifrila\email-worker', 'log', true),
+('CAMINHO_LOG_GEOCODIFICACAO_WORKER', '/var/logs/uaifrila/geocodificacao-worker', NULL, 'string', 'Diretorio dos logs em arquivo do uaifrila-geocodificacao-worker (um arquivo por dia). Dev Windows ex.: C:\logs\uaifrila\geocodificacao-worker', 'log', true),
+('PRAZO_CONFIRMACAO_SELECAO_HORAS', '24', 24, 'number', 'Prazo em horas para o freela confirmar a seleção. Sem confirmar, a vaga chama o próximo da lista de espera.', 'CANDIDATURA', true),
+ ('LIMITE_CANDIDATURAS_PENDENTES', '5', 5, 'number', 'Máximo de candidaturas PENDENTES por freela ao mesmo tempo. Evita freela que se candidata em 30 vagas e some.', 'CANDIDATURA', true)
+ON CONFLICT (chave) 
+DO UPDATE SET 
+  valor = EXCLUDED.valor,
+  valor_numerico = EXCLUDED.valor_numerico,
+  tipo = EXCLUDED.tipo,
+  descricao = EXCLUDED.descricao,
+  categoria = EXCLUDED.categoria,
+  editavel = EXCLUDED.editavel,
+  atualizado_em = NOW();
 
 -- SUPER ADMIN OBRIGATÓRIO
 INSERT INTO usuarios (
   nome_completo, cpf, email, senha_hash, cnpj, nome_fantasia,
   status_usuario_id, tipo_usuario_id, role, permissoes,
-  bairro, endereco_completo, cidade_id, cidade_nome,
+ 
   funcao_principal, valor_hora_base, bio
 ) VALUES (
   'Uai Frila',
@@ -539,48 +1084,103 @@ INSERT INTO usuarios (
   8,
   'SUPER_ADMIN',
   '["dashboard","transacoes","expansao","cidades","variaveis","vagas","candidaturas","usuarios","permissoes","custos","financeiro","admin","moderador","suporte","all"]'::jsonb,
-  'Centro',
-  'Av. Floriano Peixoto, 1000 - Centro, Uberlândia - MG',
-  1,
-  'Uberlândia',
   'Super Admin',
   100,
   'Super administrador da plataforma Uai Frila. Acesso total - tipo SUPER_ADMIN nivel 100.'
 );
 
-INSERT INTO enderecos_usuario (usuario_id, endereco_completo, bairro, cidade_id, cidade_nome, lat, lng, is_ativo) VALUES
-(1, 'Av. Floriano Peixoto, 1000 - Centro, Uberlândia - MG', 'Centro', 1, 'Uberlândia', -18.9186, -48.2772, true);
+INSERT INTO enderecos (usuario_id,cep, logradouro,numero, bairro, cidade_id,  latitude, longitude, ativo) VALUES
+(1,'38400-698', 'Av. Floriano Peixoto', 1000, 'Centro', 1, -18.9186, -48.2772, true);
+
+INSERT INTO permissoes (chave, nome, categoria, descricao, tipo_usuario_id) VALUES
+('VER_MURAL','Ver mural','vagas','Ver vagas abertas no mural',(SELECT id FROM tipos_usuario WHERE chave='FREELA')),
+('CANDIDATAR','Candidatar-se','vagas','Candidatar-se a vagas',(SELECT id FROM tipos_usuario WHERE chave='FREELA')),
+('PUBLICAR_VAGA','Publicar vaga','vagas','Publicar vagas',(SELECT id FROM tipos_usuario WHERE chave='CONTRATANTE')),
+('GERENCIAR_CANDIDATOS','Gerenciar candidatos','vagas','Aceitar/recusar candidatos',(SELECT id FROM tipos_usuario WHERE chave='CONTRATANTE')),
+('VER_TRANSACOES','Ver transacoes','financeiro','Ver transacoes e escrow',(SELECT id FROM tipos_usuario WHERE chave='FINANCEIRO')),
+('GERENCIAR_CIDADES','Gerenciar cidades','admin','Gerenciar cidades e expansao',(SELECT id FROM tipos_usuario WHERE chave='ADMIN')),
+('GERENCIAR_VARIAVEIS','Gerenciar variaveis','admin','Gerenciar variaveis do sistema',(SELECT id FROM tipos_usuario WHERE chave='ADMIN')),
+('GERENCIAR_PERMISSOES','Gerenciar permissoes','admin','Gerenciar permissoes e matriz RBAC',(SELECT id FROM tipos_usuario WHERE chave='SUPER_ADMIN'))
+ON CONFLICT (chave, tipo_usuario_id) DO UPDATE SET nome=EXCLUDED.nome, categoria=EXCLUDED.categoria, descricao=EXCLUDED.descricao;
+
+INSERT INTO vaga_templates (nome, funcao_id, titulo, descricao, turnos_json)
+VALUES
+  ('Garçom para casamento',
+   (SELECT id FROM funcoes WHERE nome = 'Garçom'),
+   'Garçom para casamento',
+   'Servir bebidas e pratos durante a festa. Chegar 1h antes para alinhar com o cerimonial. Traje: camisa branca, calça preta e sapato fechado.',
+   '[{"data":"","hora_inicio":"18:00","hora_fim":"00:00","valor_servico":180}]'::jsonb),
+  ('Cozinheiro para evento',
+   (SELECT id FROM funcoes WHERE nome = 'Cozinheiro'),
+   'Cozinheiro para evento',
+   'Preparar e finalizar os pratos do evento. Cozinha equipada no local. Levar facas próprias.',
+   '[{"data":"","hora_inicio":"14:00","hora_fim":"22:00","valor_servico":300}]'::jsonb),
+  ('Bartender para festa',
+   (SELECT id FROM funcoes WHERE nome = 'Bartender'),
+   'Bartender para festa',
+   'Preparar drinks do cardápio da festa. Insumos e utensílios fornecidos pelo contratante.',
+   '[{"data":"","hora_inicio":"19:00","hora_fim":"01:00","valor_servico":250}]'::jsonb)
+ON CONFLICT (nome) DO NOTHING;
+
+INSERT INTO provedores_pagamento (provedor, ativo, ambiente, taxa_pix_percentual, taxa_cartao_percentual, config_json)
+VALUES ('MERCADO_PAGO', true, 'sandbox', 1, 5, '{"base_url":"https://api.mercadopago.com"}'::jsonb),
+       ('EFI', false, 'sandbox', 1, 5, '{"base_url":"https://api.efipay.com.br"}'::jsonb)
+ON CONFLICT (provedor) DO NOTHING;
+
+INSERT INTO variaveis_sistema (chave, valor, valor_numerico, tipo, descricao, categoria, editavel)
+VALUES
+  ('COMISSAO_PLATAFORMA_PERCENTUAL', '10', 10, 'numero', 'CANONICA 10% — comissão da plataforma sobre (serviço + transporte). Substitui TAXA_PLATAFORMA_PERCENTUAL e COMISSAO_APLICATIVO.', 'pagamento', true),
+  ('NOTIFICACAO_PAGAMENTO_ANTECEDENCIA_MINUTOS', '60', 60, 'numero', 'Aviso ao contratante X minutos antes de expirar o prazo de pagamento.', 'pagamento', true),
+  ('REPASSE_AGUARDAR_MINUTOS', '15', 15, 'numero', 'Repasse ao freela X minutos após confirmação do turno pelo contratante.', 'pagamento', true),
+  ('AUTOCONFIRMACAO_TURNO_HORAS', '24', 24, 'numero', 'Turno em AGUARDANDO_CONFIRMACAO confirma sozinho após X horas sem contestação.', 'pagamento', true),
+  ('PIX_VALIDACAO_EMAIL_MINUTOS', '30', 30, 'numero', 'Validade do token de e-mail para confirmar Pix de terceiro.', 'pagamento', true)
+ON CONFLICT (chave) DO NOTHING;
+UPDATE variaveis_sistema SET descricao = descricao || ' [DEPRECADA — usar COMISSAO_PLATAFORMA_PERCENTUAL]'
+WHERE chave IN ('TAXA_PLATAFORMA_PERCENTUAL', 'COMISSAO_APLICATIVO') AND descricao NOT LIKE '%DEPRECADA%';
+UPDATE variaveis_sistema SET descricao = descricao || ' [DEPRECADA — taxas vêm de provedores_pagamento]'
+WHERE chave IN ('TAXA_PIX_PERCENTUAL', 'TAXA_CARTAO_PERCENTUAL') AND descricao NOT LIKE '%DEPRECADA%';
+INSERT INTO email_templates (chave_uso, titulo_assunto, conteudo_corpo, email_remetente, nome_remetente)
+VALUES ('VALIDACAO_PIX_TERCEIRO',
+  'Confirme o Pix de {{NOME}} — UaiFrila',
+  '<p>Olá, {{NOME}}!</p><p>Você cadastrou uma chave Pix em nome de outra pessoa. Para usar essa chave, confirme com o código abaixo:</p><p><strong>{{CODIGO}}</strong></p><p>Código válido por {{TEMPO_EXPIRACAO}} minutos.</p><p><a href="{{LINK_VALIDAR}}">Confirmar no UaiFrila</a></p>',
+  'noreply@uaifrila.com.br', 'UAI FRILA')
+ON CONFLICT (chave_uso) DO NOTHING;
 
 -- GRANTS - USUARIOS DE BANCO PARA APLICAÇÃO
-CREATE ROLE uaifrila_app WITH LOGIN PASSWORD 'UaiFrila@App2024!';
-CREATE ROLE uaifrila_readonly WITH LOGIN PASSWORD 'UaiFrila@Read2024!';
-CREATE ROLE uaifrila_worker WITH LOGIN PASSWORD 'UaiFrila@Worker2024!';
+CREATE ROLE uaifrila_app_dev WITH LOGIN PASSWORD 'UaiFrila@App2024!';
+CREATE ROLE uaifrila_readonly_dev WITH LOGIN PASSWORD 'UaiFrila@ead2024!';
+CREATE ROLE uaifrila_worker_dev WITH LOGIN PASSWORD 'UaiFrila@Worker2024!';
 
-GRANT CONNECT ON DATABASE uaifrila TO uaifrila_app;
-GRANT USAGE ON SCHEMA public TO uaifrila_app;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO uaifrila_app;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO uaifrila_app;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO uaifrila_app;
+GRANT CONNECT ON DATABASE uaifrila TO uaifrila_app_dev;
+GRANT USAGE ON SCHEMA public TO uaifrila_app_dev;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO uaifrila_app_dev;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO uaifrila_app_dev;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO uaifrila_app_dev;
 
-GRANT CONNECT ON DATABASE uaifrila TO uaifrila_readonly;
-GRANT USAGE ON SCHEMA public TO uaifrila_readonly;
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO uaifrila_readonly;
-GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO uaifrila_readonly;
+GRANT CONNECT ON DATABASE uaifrila TO uaifrila_readonly_dev;
+GRANT USAGE ON SCHEMA public TO uaifrila_readonly_dev;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO uaifrila_readonly_dev;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO uaifrila_readonly_dev;
 
-GRANT CONNECT ON DATABASE uaifrila TO uaifrila_worker;
-GRANT USAGE ON SCHEMA public TO uaifrila_worker;
-GRANT SELECT, INSERT, UPDATE ON transacoes TO uaifrila_worker;
-GRANT SELECT, INSERT, UPDATE ON email_historico_disparos TO uaifrila_worker;
-GRANT SELECT, INSERT, UPDATE ON trampos TO uaifrila_worker;
-GRANT SELECT, INSERT, UPDATE ON candidaturas TO uaifrila_worker;
-GRANT SELECT ON vagas TO uaifrila_worker;
-GRANT SELECT ON usuarios TO uaifrila_worker;
-GRANT SELECT ON variaveis_sistema TO uaifrila_worker;
-GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO uaifrila_worker;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO uaifrila_worker;
+GRANT CONNECT ON DATABASE uaifrila TO uaifrila_worker_dev;
+GRANT USAGE ON SCHEMA public TO uaifrila_worker_dev;
+GRANT SELECT, INSERT, UPDATE ON transacoes TO uaifrila_worker_dev;
+GRANT SELECT, INSERT, UPDATE ON email_historico_disparos TO uaifrila_worker_dev;
+GRANT SELECT, INSERT, UPDATE ON trampos TO uaifrila_worker_dev;
+GRANT SELECT, INSERT, UPDATE ON candidaturas TO uaifrila_worker_dev;
+GRANT SELECT ON vagas TO uaifrila_worker_dev;
+GRANT SELECT ON usuarios TO uaifrila_worker_dev;
+GRANT SELECT ON variaveis_sistema TO uaifrila_worker_dev;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO uaifrila_worker_dev;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO uaifrila_worker_dev;
 
 GRANT ALL ON SCHEMA public TO PUBLIC;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO PUBLIC;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO PUBLIC;
 
--- FIM - SEM ALTER TABLE
+---rollback; 
+---commit;
+
+
+
+

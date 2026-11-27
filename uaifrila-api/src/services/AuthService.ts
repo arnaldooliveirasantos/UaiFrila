@@ -1,198 +1,135 @@
-import { AuthRepository } from '../repositories/AuthRepository';
+import { UsuarioRepository } from '../repositories/UsuarioRepository';
+import { EmailHistoricoRepository } from '../repositories/EmailHistoricoRepository';
+import { EmailStatusRepository } from '../repositories/EmailStatusRepository';
+import { EmailTemplateRepository } from '../repositories/EmailTemplateRepository';
+import { BaseService } from './BaseService';
+import { registrarErro } from '../utils/registrarErro';
+import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { config } from '../config/env';
 
-export class AuthService {
-  private authRepo = new AuthRepository();
+function getJwtSecret(): string {
+  const s = process.env.JWT_SECRET;
+  if (!s) throw new Error('JWT_SECRET obrigatório no .env');
+  return s;
+}
 
-  async registrar(dados: any) {
-    if (dados.cidade || dados.cidade_nome) {
-      const cidadeNome = dados.cidade_nome || dados.cidade;
-      const cidades = await this.authRepo.buscarCidadesAtivas();
-      const existe = cidades.some((c:any) => c.nome.toLowerCase() === cidadeNome.toLowerCase());
-      if (!existe) {
-        throw new Error(`Cidade ${cidadeNome} não está ativa. Cidades ativas: ${cidades.map((c:any)=>c.nome).join(', ')}`);
-      }
-      if (dados.lat && dados.lng) {
-        const valido = await this.authRepo.validarEnderecoNaCidadeAtiva(cidadeNome, Number(dados.lat), Number(dados.lng));
-        if (!valido) throw new Error(`Endereço fora do raio da cidade ${cidadeNome}`);
-      }
-    }
-    const { nome, cpf, email, senha = 'validacao_sistema_senha_interna' } = dados;
-    const emailLimpo = email?.trim().toLowerCase();
-    if (!emailLimpo || !emailLimpo.includes('@')) throw new Error('E-mail inválido');
-    if (!nome) throw new Error('Nome obrigatório');
-    await this.authRepo.listarEmailsDebug();
-    const existe = await this.authRepo.existeUsuarioPorEmail(emailLimpo);
-    if (existe) throw new Error('E-mail já cadastrado: ' + emailLimpo);
-    const senhaHash = this.authRepo.hashSenha(senha);
-    const statusAguardandoId = await this.authRepo.buscarIdStatusPorChave('AGUARDANDO_VALIDACAO');
-    
-    // Definir tipo_usuario_id baseado no tipo enviado
-    let tipoChave = 'FREELA';
-    if (dados.tipo_chave) tipoChave = dados.tipo_chave;
-    else if (dados.tipo) tipoChave = dados.tipo;
-    else if (dados.is_contratante && dados.is_freela) tipoChave = 'DUAL';
-    else if (dados.is_contratante || dados.isContratante) tipoChave = 'CONTRATANTE';
-    else tipoChave = 'FREELA';
-    
-    let tipoId = dados.tipo_usuario_id;
-    if (!tipoId) {
-      const tipoRow = await this.authRepo.buscarTipoPorChave(tipoChave);
-      tipoId = tipoRow?.id || 1;
-    }
+function gerarCodigo(): string {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
 
-    const usuarioRows = await this.authRepo.criarUsuarioCompleto({...dados, email: emailLimpo, status_usuario_id: statusAguardandoId, tipo_usuario_id: tipoId, tipo_chave: tipoChave, status_chave: 'AGUARDANDO_VALIDACAO'}, senhaHash);
-    const usuarioCriado = usuarioRows[0];
-    const temTemplate = await this.authRepo.existeTemplate('CONFIRMACAO_CADASTRO');
-    if (!temTemplate) {
-      await this.authRepo.ativarUsuarioPorEmail(emailLimpo);
-      return { sucesso: true, usuario: usuarioCriado, modo: 'direto_sem_email' };
-    }
-    const minutos = await this.authRepo.buscarTempoExpiracao();
-    const templateRows = await this.authRepo.buscarTemplatePorUso('CONFIRMACAO_CADASTRO');
-    const template = templateRows[0];
-    const codigo = this.authRepo.gerarCodigo();
-    let corpo = template.conteudo_corpo.replace('{{NOME}}', nome).replace('{{CODIGO}}', codigo).replace('{{EMAIL}}', emailLimpo);
-    await this.authRepo.inserirDisparoCadastro(template.id, emailLimpo, template.titulo_assunto, corpo, codigo, minutos, {...dados, email: emailLimpo});
-    return { status: 'AGUARDANDO_VALIDACAO_EMAIL', email: emailLimpo, usuario_id: usuarioCriado.id, status_usuario_id: statusAguardandoId };
+
+export class AuthService extends BaseService {
+  private usuarioRepo: UsuarioRepository;
+  private emailHistRepo: EmailHistoricoRepository;
+  private emailStatusRepo: EmailStatusRepository;
+  private emailTemplateRepo: EmailTemplateRepository;
+
+  constructor() {
+    super();
+    this.usuarioRepo = new UsuarioRepository();
+    this.emailHistRepo = new EmailHistoricoRepository();
+    this.emailStatusRepo = new EmailStatusRepository();
+    this.emailTemplateRepo = new EmailTemplateRepository();
   }
 
-  async login(email: string) {
-    const emailLimpo = email?.trim().toLowerCase();
-    if (!emailLimpo) throw new Error('E-mail obrigatório');
-    await this.authRepo.listarEmailsDebug();
-    const usuarioRows = await this.authRepo.buscarUsuarioPorEmail(emailLimpo);
-    if (usuarioRows.length === 0) throw new Error('Usuário não encontrado: ' + emailLimpo);
-    const usuario = usuarioRows[0];
-    const statusChave = usuario.status_chave || 'ATIVO';
-    if (statusChave === 'AGUARDANDO_VALIDACAO') {
-      try {
-        const minutos = await this.authRepo.buscarTempoExpiracao();
-        const templateRows = await this.authRepo.buscarTemplatePorUso('CONFIRMACAO_CADASTRO');
-        const template = templateRows[0];
-        const codigo = this.authRepo.gerarCodigo();
-        let corpo = template.conteudo_corpo.replace('{{NOME}}', usuario.nome_completo).replace('{{CODIGO}}', codigo).replace('{{EMAIL}}', emailLimpo);
-        await this.authRepo.inserirDisparoCadastro(template.id, emailLimpo, template.titulo_assunto, corpo, codigo, minutos, {email: emailLimpo, nome: usuario.nome_completo});
-        return { status: 'AGUARDANDO_VALIDACAO_EMAIL', email: emailLimpo, mensagem: 'Usuario com status AGUARDANDO_VALIDACAO - novo código enviado' };
-      } catch {}
+  async register(dados: any) {
+    this.validateRequired(dados, ['nomeCompleto', 'email', 'senha']);
+    const existente = await this.usuarioRepo.buscarPorEmail(dados.email);
+    if (existente) throw new Error('E-mail já cadastrado');
+    const senhaHash = await bcrypt.hash(dados.senha, 10);
+    const usuario = await this.usuarioRepo.criarGenerico({
+      nomeCompleto: dados.nomeCompleto,
+      email: dados.email,
+      senhaHash,
+      tipoUsuarioId: dados.tipoUsuarioId || 1,
+      cpf: dados.cpf,
+      cnpj: dados.cnpj,
+      statusUsuarioId: 1,
+      avaliacaoMedia: 5.0,
+      totalAvaliacoes: 0,
+    });
+    const token = jwt.sign({ id: usuario.id, email: usuario.email, tipoUsuarioId: usuario.tipoUsuarioId }, getJwtSecret(), { expiresIn: '7d' });
+    return { usuario, token };
+  }
+
+  async login(dados: any) {
+    this.validateRequired(dados, ['email', 'senha']);
+    const usuario = await this.usuarioRepo.buscarPorEmail(dados.email);
+    if (!usuario) throw new Error('Credenciais inválidas');
+    const raw = usuario.toRaw();
+    const senhaHash = raw.senhaHash || raw.senha_hash;
+    if (!senhaHash) throw new Error('Usuário sem senha - use código por e-mail');
+    const ok = await bcrypt.compare(dados.senha, senhaHash);
+    if (!ok) throw new Error('Credenciais inválidas');
+    const token = jwt.sign({ id: usuario.id, email: usuario.email, tipoUsuarioId: usuario.tipoUsuarioId }, getJwtSecret(), { expiresIn: '7d' });
+    return { usuario, token };
+  }
+
+  async solicitarCodigo(dados: { email: string, tipo: string }) {
+    if (!dados.email) throw new Error('E-mail obrigatório');
+    const emailNorm = String(dados.email).trim().toLowerCase();
+
+    if (dados.tipo === 'login') {
+      const u = await this.usuarioRepo.buscarPorEmail(emailNorm);
+      if (!u) throw new Error('E-mail não cadastrado - faça cadastro');
     }
-    if (statusChave === 'BLOQUEADO' || statusChave === 'SUSPENSO') {
-      throw new Error(`Usuário ${statusChave} - entre em contato com suporte`);
-    }
+
+    const codigo = gerarCodigo();
+    // UNICA fonte do codigo: o banco (email_historico_disparos). SEM Map em memoria,
+    // SEM fallback, SEM devolver o codigo na resposta, SEM logar o codigo.
+    let templateId = null;
+    try { const tmpl = await this.emailTemplateRepo.buscarPorChave(dados.tipo === 'cadastro' ? 'codigo_cadastro' : 'codigo_login'); templateId = (tmpl as any)?.id || null; }
+    catch (e: any) { registrarErro('AuthService.solicitarCodigo.template', e, { tipo: dados.tipo }); throw e; }
+    let statusId = null;
+    try { const st = await this.emailStatusRepo.buscarPorChave('EM_ESPERA'); statusId = (st as any)?.id || null; }
+    catch (e: any) { registrarErro('AuthService.solicitarCodigo.status', e); throw e; }
     try {
-      const temTemplate = await this.authRepo.existeTemplate('2FA_LOGIN');
-      if (!temTemplate) throw new Error('sem template');
-      const minutos = await this.authRepo.buscarTempoExpiracao();
-      const templateRows = await this.authRepo.buscarTemplatePorUso('2FA_LOGIN');
-      const template = templateRows[0];
-      const codigo = this.authRepo.gerarCodigo();
-      let corpo = template.conteudo_corpo.replace('{{CODIGO}}', codigo).replace('{{EMAIL}}', emailLimpo);
-      await this.authRepo.inserirDisparoLogin(template.id, usuario.id, emailLimpo, template.titulo_assunto, corpo, codigo, minutos);
-      return { status: 'AGUARDANDO_VALIDACAO_EMAIL', email: emailLimpo };
-    } catch (e:any) {
-      const token = jwt.sign({ id: usuario.id, email: usuario.email, tipo_chave: usuario.tipo_chave, tipo_usuario_id: usuario.tipo_usuario_id, nivel_permissao: usuario.nivel_permissao, status_usuario_id: usuario.status_usuario_id }, config.JWT_SECRET, { expiresIn: '7d' });
-      return { sucesso: true, token, usuario: { ...usuario, nome: usuario.nome_completo }, modo: 'login_direto_sem_2fa' };
-    }
+      await this.emailHistRepo.criarCodigo({ emailDestinatario: emailNorm, templateId, statusId, codigoVerificacao: codigo, tituloFinal: dados.tipo === 'cadastro' ? 'Código de cadastro UaiFrila' : 'Código de acesso UaiFrila', conteudoFinal: `<h1>${codigo}</h1>` });
+    } catch (e: any) { registrarErro('AuthService.solicitarCodigo.salvarCodigo', e, { email: emailNorm }); throw e; }
+    return { message: 'Código enviado' };
   }
 
-  async buscarMe(id: number) {
-    const rows = await this.authRepo.buscarUsuarioPorId(id);
-    if (rows.length === 0) throw new Error('Usuário não encontrado');
-    return rows[0];
-  }
+  async validarCodigo(dados: { email: string, codigo: string, tipo: string }) {
+    if (!dados.email || !dados.codigo) throw new Error('E-mail e código obrigatórios');
+    const emailNorm = String(dados.email).trim().toLowerCase();
+    const codigoStr = String(dados.codigo).trim();
 
-  async atualizarUsuario(id: number, dados: any, usuarioLogado: any) {
-    const tentaAlterarEndereco = !!(dados.endereco || dados.endereco_completo || dados.cidade || dados.cidade_nome || dados.lat || dados.lng || dados.endereco_lat);
-    if (tentaAlterarEndereco) {
-      const trampo = await this.authRepo.verificarTrampoEmAndamento(id);
-      if (trampo.em_andamento) {
-        throw new Error('Não é possível alterar endereço enquanto houver trampo em andamento. Finalize seus trampos ativos.');
-      }
+    // UNICA fonte: o banco. Sem Map em memoria.
+    const row = await this.emailHistRepo.buscarCodigoValido(emailNorm, codigoStr).catch((e: any) => { registrarErro('AuthService.validarCodigo.buscarCodigo', e, { email: emailNorm }); throw e; });
+    let valido = false;
+    if (row) {
+      valido = true;
+      usuarioIdFromEmail = (row as any).usuario_id || null;
+      try { await this.emailHistRepo.marcarComoConsumido((row as any).id); }
+      catch (e: any) { registrarErro('AuthService.validarCodigo.marcarComoConsumido', e, { email: emailNorm }); throw e; }
     }
-    if (dados.cidade || dados.cidade_nome || dados.cidade_id) {
-      const cidadeNome = dados.cidade_nome || dados.cidade;
-      if (cidadeNome) {
-        const cidades = await this.authRepo.buscarCidadesAtivas();
-        const existe = cidades.some((c:any) => c.nome.toLowerCase() === cidadeNome.toLowerCase() || c.id === dados.cidade_id);
-        if (!existe) {
-          throw new Error(`Cidade ${cidadeNome} não está ativa`);
-        }
-      }
-    }
-    if (dados.cpf !== undefined || dados.email !== undefined || dados.cpfOriginal !== undefined) {
-      console.log('🚫 Tentativa de atualizar CPF ou EMAIL bloqueada pela API');
-      delete dados.cpf;
-      delete dados.email;
-      delete dados.cpfOriginal;
-    }
+    if (!valido) throw new Error('Código inválido ou expirado');
 
-    const usuarioAtualRows = await this.authRepo.buscarUsuarioPorId(id);
-    if (usuarioAtualRows.length === 0) throw new Error('Usuário não encontrado');
-    const usuarioAtual = usuarioAtualRows[0];
-
-    // Regra: Se já é DUAL, não pode voltar para simples (usando tipos_usuario)
-    const eraDual = usuarioAtual.tipo_chave === 'DUAL';
-    if (eraDual) {
-      // Se era dual, força manter dual
-      const dualTipo = await this.authRepo.buscarTipoPorChave('DUAL');
-      dados.tipo_usuario_id = dualTipo?.id || usuarioAtual.tipo_usuario_id;
+    let usuario = null;
+    if (usuarioIdFromEmail) {
+      usuario = await this.usuarioRepo.buscarPorIdComRelacoes(usuarioIdFromEmail);
     } else {
-      // Garante pelo menos um tipo válido
-      if (!dados.tipo_usuario_id && !dados.tipo_chave) {
-        // Mantém o atual se não informou novo
-      }
+      const u = await this.usuarioRepo.buscarPorEmail(emailNorm);
+      if (u) usuario = await this.usuarioRepo.buscarPorIdComRelacoes((u as any).id);
     }
 
-    const rows = await this.authRepo.atualizarUsuario(id, dados);
-    if (rows.length === 0) throw new Error('Erro ao atualizar');
-    return rows[0];
-  }
-
-  async verificarCodigo(email: string, codigo: string) {
-    const emailLimpo = email?.trim().toLowerCase();
-    const disparoRows = await this.authRepo.buscarUltimoDisparoPorEmail(emailLimpo);
-    if (disparoRows.length === 0) throw new Error('Nenhum código encontrado: ' + emailLimpo);
-    const disparo = disparoRows[0] as any;
-    if (new Date() > new Date(disparo.expira_em)) {
-      await this.authRepo.marcarDisparoExpirado(disparo.id);
-      throw new Error('Código expirado');
+    if (!usuario && dados.tipo === 'login') throw new Error('Usuário não encontrado - faça cadastro');
+    if (!usuario && dados.tipo === 'cadastro') {
+      return { apenasValidado: true, email: emailNorm };
     }
-    if (disparo.codigo_verificacao !== codigo) throw new Error('Código incorreto');
-    await this.authRepo.marcarDisparoValidado(disparo.id);
-    const usuarioAtivadoRows = await this.authRepo.ativarUsuarioPorEmail(emailLimpo);
-    const usuario = usuarioAtivadoRows[0] || (await this.authRepo.buscarUsuarioPorEmail(emailLimpo))[0];
-    const token = jwt.sign({ id: usuario.id, email: usuario.email, tipo_chave: usuario.tipo_chave, tipo_usuario_id: usuario.tipo_usuario_id, nivel_permissao: usuario.nivel_permissao, status_usuario_id: usuario.status_usuario_id }, config.JWT_SECRET, { expiresIn: '7d' });
-    return { sucesso: true, token, usuario: { ...usuario, nome: usuario.nome_completo }, mensagem: 'Usuario ativado' };
+    if (!usuario) throw new Error('Usuário não encontrado');
+
+    const token = jwt.sign({ id: (usuario as any).id, email: (usuario as any).email, tipoUsuarioId: (usuario as any).tipoUsuarioId }, getJwtSecret(), { expiresIn: '7d' });
+    return { usuario, token };
   }
 
-
-  async reenviarCodigo(email: string, tipo: string = 'cadastro') {
-    const emailLimpo = email?.trim().toLowerCase();
-    if (!emailLimpo) throw new Error('E-mail obrigatório');
-    const usuarioRows = await this.authRepo.buscarUsuarioPorEmail(emailLimpo);
-    if (usuarioRows.length === 0) throw new Error('Usuário não encontrado: ' + emailLimpo);
-    const usuario = usuarioRows[0];
-    const minutos = await this.authRepo.buscarTempoExpiracao();
-    const chaveTemplate = tipo === 'login' ? '2FA_LOGIN' : 'CONFIRMACAO_CADASTRO';
-    const templateRows = await this.authRepo.buscarTemplatePorUso(chaveTemplate);
-    if (templateRows.length === 0) throw new Error('Template de e-mail não encontrado');
-    const template = templateRows[0];
-    const codigo = this.authRepo.gerarCodigo();
-    let corpo = template.conteudo_corpo
-      .replace('{{NOME}}', usuario.nome_completo || 'Usuário')
-      .replace('{{CODIGO}}', codigo)
-      .replace('{{EMAIL}}', emailLimpo);
-    if (tipo === 'login') {
-      await this.authRepo.inserirDisparoLogin(template.id, usuario.id, emailLimpo, template.titulo_assunto, corpo, codigo, minutos);
-    } else {
-      await this.authRepo.inserirDisparoCadastro(template.id, emailLimpo, template.titulo_assunto, corpo, codigo, minutos, { email: emailLimpo, nome: usuario.nome_completo });
-    }
-    return { sucesso: true, mensagem: 'Código reenviado', email: emailLimpo };
+  async reenviarCodigo(dados: { email: string, tipo: string }) {
+    return this.solicitarCodigo(dados);
   }
 
-
-  async listarTiposUsuario() {
-    return await this.authRepo.buscarTiposUsuario();
+  async me(usuarioId: number) {
+    const usuario = await this.usuarioRepo.buscarPorIdComRelacoes(usuarioId);
+    if (!usuario) throw new Error('Usuário não encontrado');
+    return usuario;
   }
 }

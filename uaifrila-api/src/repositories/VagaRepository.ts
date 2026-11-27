@@ -1,56 +1,36 @@
-import { BaseRepository } from './BaseRepository';
-
-export class VagaRepository extends BaseRepository {
-  async criarVaga(dados: any) {
-    const { contratante_id, titulo, descricao, valor, data_inicio, funcao, cidade_nome } = dados;
-    try {
-      return await this.query(
-        `INSERT INTO vagas (contratante_id, titulo, descricao, valor, data_inicio, funcao, cidade_nome, status) 
-         VALUES ($1,$2,$3,$4,$5,$6,$7,'ABERTA') RETURNING *`,
-        [contratante_id, titulo, descricao, valor || 100, data_inicio || new Date(), funcao || 'Garçom', cidade_nome || 'Uberlândia']
-      );
-    } catch (e: any) {
-      console.error('Erro criar vaga:', e.message);
-      throw e;
-    }
+import { BaseRepository } from "./BaseRepository";
+import { VagaModel } from "../models/VagaModel";
+// Metodos novos: listarMural, atualizarStatusVaga. Antes, VagaService fazia isso
+// com BaseRepository.getPool().query direto.
+export class VagaRepository extends BaseRepository<VagaModel> {
+  constructor() { super("vagas", VagaModel); }
+  async listarAbertas(): Promise<VagaModel[]> {
+    const r = await this.query(`SELECT v.*, sv.chave as status_chave, sv.nome_exibicao as status_nome FROM vagas v JOIN status_vaga sv ON sv.id = v.status_vaga_id WHERE sv.chave IN ('AGUARDANDO_CANDIDATURA','AGUARDANDO_ACEITE') ORDER BY v.criado_em DESC`);
+    return this.mapRows(r.rows || r);
   }
-
-  async listarVagas(filtros: any = {}) {
-    try {
-      return await this.query(`SELECT * FROM vagas WHERE status = 'ABERTA' ORDER BY criado_em DESC LIMIT 50`);
-    } catch (e: any) {
-      console.warn('Vagas table error, returning empty:', e.message);
-      return [];
-    }
+  async listarPorContratante(contratanteId: number): Promise<VagaModel[]> {
+    const r = await this.query(`SELECT v.*, sv.chave as status_chave FROM vagas v JOIN status_vaga sv ON sv.id = v.status_vaga_id WHERE v.contratante_id = $1 ORDER BY v.criado_em DESC`, [contratanteId]);
+    return this.mapRows(r.rows || r);
   }
-
-  async buscarPorId(id: number) {
-    try {
-      return await this.queryOne(`SELECT * FROM vagas WHERE id = $1`, [id]);
-    } catch {
-      return null;
-    }
+  async buscarCompletaPorId(id: number): Promise<any> {
+    const r = await this.query(`SELECT v.*, sv.chave as status_chave, sv.nome_exibicao as status_nome FROM vagas v JOIN status_vaga sv ON sv.id = v.status_vaga_id WHERE v.id = $1`, [id]);
+    const rows = r.rows || r;
+    return rows[0] || null;
   }
-
-  async buscarMuralSemBloqueiosDeAvaliacao(usuarioId: number) {
-    try {
-      // Se usuarioId 0 ou super admin, retorna tudo
-      if (!usuarioId || usuarioId === 0) {
-        return await this.listarVagas();
-      }
-      return await this.query(
-        `SELECT v.*, u.nome_fantasia as contratante_nome, u.avaliacao_media as contratante_avaliacao
-         FROM vagas v
-         LEFT JOIN usuarios u ON v.contratante_id = u.id
-         WHERE v.status = 'ABERTA' 
-         AND (v.contratante_id != $1 OR $1 = 0)
-         ORDER BY v.criado_em DESC
-         LIMIT 50`,
-        [usuarioId]
-      );
-    } catch (e: any) {
-      console.warn('buscarMural error:', e.message);
-      return await this.listarVagas();
-    }
+  // Mural: vagas com inicio anterior a hoje NAO aparecem.
+  // REGRA DO DONO (mesma do VagaService.listarMuralParaUsuario): a vaga do
+  // criador nunca some — fura o filtro de status e o de data, menos CANCELADA.
+  async listarMural(contratanteId?: number | null): Promise<any[]> {
+    const r = await this.query(`SELECT v.*, sv.chave as status_chave, sv.nome_exibicao as status_nome, sv.cor_hex as status_cor, sv.permite_editar, sv.permite_cancelar, sv.permite_candidatar FROM vagas v JOIN status_vaga sv ON sv.id = v.status_vaga_id WHERE ((sv.chave IN ('AGUARDANDO_CANDIDATURA','AGUARDANDO_ACEITE') AND (v.data_inicio IS NULL OR DATE(v.data_inicio) >= CURRENT_DATE)) OR (v.contratante_id = $1 AND sv.chave <> 'CANCELADA')) ORDER BY v.criado_em DESC`, [contratanteId || null]);
+    return r.rows || [];
+  }
+  async buscarVagaComStatus(vagaId: number): Promise<any | null> {
+    const r = await this.query(`SELECT v.*, sv.chave as status_chave, sv.permite_candidatar FROM vagas v JOIN status_vaga sv ON sv.id = v.status_vaga_id WHERE v.id = $1`, [vagaId]);
+    return (r.rows || [])[0] || null;
+  }
+  // Troca o status_vaga_id da vaga pela chave (ex.: 'AGUARDANDO_ACEITE', 'CANCELADA').
+  async atualizarStatusVaga(vagaId: number, chaveStatus: string): Promise<boolean> {
+    const r = await this.query(`UPDATE vagas SET status_vaga_id = (SELECT id FROM status_vaga WHERE chave = $2) WHERE id = $1`, [vagaId, chaveStatus]);
+    return (r.rowCount || 0) > 0;
   }
 }

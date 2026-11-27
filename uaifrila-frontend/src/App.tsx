@@ -1,134 +1,162 @@
 import React, { useState, useEffect } from 'react';
+import { ThemeProvider } from './context/ThemeContext';
 import Navbar from './components/Navbar';
-import CadastroUnificado from './components/CadastroUnificado';
+import LandingPage from './components/LandingPage';
 import ValidacaoCodigo from './components/ValidacaoCodigo';
+import CancelarCadastro from './components/CancelarCadastro';
 import PainelMural from './components/PainelMural';
 import PainelMeusTrampos from './components/PainelMeusTrampos';
+import TelaCadastroVaga from './components/TelaCadastroVaga';
+import CadastroUnificado from './components/CadastroUnificado';
 import PerfilUsuario from './components/PerfilUsuario';
-import LandingPage from './components/LandingPage';
-import CodigoFreela from './components/CodigoFreela';
+import MinhasFuncoes from './components/MinhasFuncoes';
+import TelaNotificacoes from './components/TelaNotificacoes';
+import PainelGerenciarCandidatos from './components/PainelGerenciarCandidatos';
+import MeusGanhos from './components/MeusGanhos';
+import DadosPix from './components/DadosPix';
 import PainelTransacoes from './components/PainelTransacoes';
-import PainelExpansao from './components/PainelExpansao';
-import { ThemeProvider, useTheme, getInputClass, getLabelClass, getCardClass } from './context/ThemeContext';
+import PainelConfiguracaoCidades from './components/PainelConfiguracaoCidades';
+import PainelVariaveisAmbiente from './components/PainelVariaveisAmbiente';
+import PainelAdminFinanceiro from './components/PainelAdminFinanceiro';
+import PainelPermissoesCategorias from './components/PainelPermissoesCategorias';
+import PainelExpansaoCidades from './components/PainelExpansaoCidades';
+import CodigoFreela from './components/CodigoFreela';
+import PainelProvedoresPagamento from './components/PainelProvedoresPagamento'; // Patch 23: tela de provedores
+import { useUaiFrilaStyles } from './styles/uaifrila.styles';
+import { apiFetch, apiGetPublic, setToken, clearAuth, getToken } from './utils/Api';
+
+// ANTES (mock/fallback):
+// - App lia localStorage 'uaifrila_usuario' e fingia que estava logado, sem validar o token na API.
+// - TelaLogin fazia fetch direto para /auth/login com payload errado, sem usar apiFetch.
+// - ?cancelar=true era ignorado (caía em ValidacaoCodigo).
+// AGORA (API real):
+// - Única fonte de login: GET /api/auth/me com o token. Se 401, limpa e vai para login.
+// - Login: POST /api/auth/solicitar-codigo (tipo=login) -> ValidacaoCodigo -> POST /api/auth/validar-codigo.
+// - /cancelar?codigo=... OU ?cancelar=true -> tela CancelarCadastro (NUNCA ValidacaoCodigo).
+// - ?codigo=... (sem cancelar) -> tela ValidacaoCodigo.
 
 function AppContent() {
   const [telaAtiva, setTelaAtiva] = useState('home');
+  // Remonta TelaCadastroVaga a cada navegacao para 'publicar': sem isso, clicar
+  // em Publicar no menu com a tela ja aberta nao rodava o init de novo e o form
+  // velho (edicao) continuava na tela mesmo com a chave ja apagada pelo Navbar.
+  const [publicarKey, setPublicarKey] = useState(0);
   const [usuario, setUsuario] = useState<any>(null);
-  const [token, setToken] = useState<string | null>(null);
+  const [codigoFromUrl, setCodigoFromUrl] = useState<string | null>(null);
+  const [emailFromUrl, setEmailFromUrl] = useState<string | null>(null);
+  const [cancelarFromUrl, setCancelarFromUrl] = useState(false);
+  const [carregandoSessao, setCarregandoSessao] = useState(true);
 
   useEffect(() => {
-    const t = localStorage.getItem('uaifrila_token');
-    const u = localStorage.getItem('uaifrila_usuario');
-    if (t && u) {
+    const params = new URLSearchParams(window.location.search);
+    const codigo = params.get('codigo');
+    const email = params.get('email') ? decodeURIComponent(params.get('email')!) : null;
+    const tipo = params.get('tipo');
+    // CANCELAR tem prioridade sobre VALIDAR e não depende só de ?cancelar=true.
+    // O link do e-mail é /cancelar?codigo=...&email=... (SEM cancelar=true).
+    // ANTES: só ?cancelar=true era reconhecido. /cancelar?codigo=... caía no else abaixo,
+    // ia para ValidacaoCodigo tipo=login e auto-validava -> log "[validarCodigo REAL] LOGIN OK usuario=5"
+    // em vez de cancelar. O usuário clicava em "cancelar" e acabava LOGADO.
+    // AGORA: /cancelar, /cancelar-cadastro, /cancel OU ?cancelar=true => tela CancelarCadastro.
+    const pathname = window.location.pathname.toLowerCase();
+    const isCancelarPath = pathname.includes('cancelar') || pathname === '/cancel' || pathname.endsWith('/cancel');
+    const cancelar = params.get('cancelar') === 'true' || isCancelarPath;
+    if (cancelar && codigo && email) { setCancelarFromUrl(true); setCodigoFromUrl(codigo); setEmailFromUrl(email); }
+    else if (codigo && email) { setCodigoFromUrl(codigo); setEmailFromUrl(email); setTelaAtiva(tipo === 'cadastro' ? 'validar-cadastro' : 'validar-login'); }
+    // Valida sessão de verdade na API, não no localStorage
+    (async () => {
+      if (!getToken()) { setCarregandoSessao(false); return; }
       try {
-        const usuarioParsed = JSON.parse(u);
-        setUsuario(usuarioParsed);
-        setToken(t);
-        if (usuarioParsed.email) setTelaAtiva('mural');
-      } catch {
-        localStorage.removeItem('uaifrila_token');
-        localStorage.removeItem('uaifrila_usuario');
-      }
-    }
+        const data = await apiFetch('/api/auth/me');
+        // Backend me() devolve { success, data: <usuario> } - data É o usuário, não data.usuario.
+        // ANTES: const u = data.usuario || data.data?.usuario || data
+        // -> data.usuario = undefined, data.data?.usuario = undefined (usuário não tem .usuario)
+        // -> caía no fallback data = { success, data: {...} } -> u.id = undefined
+        // -> clearAuth() apagava o token que tinha acabado de ser salvo no login!
+        // AGORA: extractor aceita as 4 formas (usuario / data.usuario / data / direto).
+        const u = (data?.usuario?.id ? data.usuario : data?.data?.usuario?.id ? data.data.usuario : data?.data?.id ? data.data : data?.id ? data : null);
+        console.log('[App] /auth/me -> usuario id=', (u as any)?.id, 'email=', (u as any)?.email);
+        if ((u as any)?.id) setUsuario(u); else { console.warn('[App] /auth/me sem id, resposta=', data); clearAuth(); }
+      } catch { clearAuth(); setUsuario(null); } finally { setCarregandoSessao(false); }
+    })();
   }, []);
 
-  const handleLogin = (dados: { token: string; usuario: any }) => {
-    localStorage.setItem('uaifrila_token', dados.token);
-    localStorage.setItem('uaifrila_usuario', JSON.stringify(dados.usuario));
-    setUsuario(dados.usuario);
-    setToken(dados.token);
+  const navegar = (t: string) => { if (t === 'publicar') setPublicarKey((k) => k + 1); setTelaAtiva(t); window.scrollTo(0, 0); };
+  const handleLogin = (data: any) => {
+    // Validar devolve { token, usuario, data: { token, usuario } } - aceita os dois níveis
+    const token = data?.token || data?.data?.token;
+    const usuario = data?.usuario?.id ? data.usuario : data?.data?.usuario?.id ? data.data.usuario : data?.data?.id ? data.data : null;
+    if (token) setToken(token);
+    if (usuario) setUsuario(usuario);
     setTelaAtiva('mural');
   };
-
-  const handleLogout = () => {
-    localStorage.removeItem('uaifrila_token');
-    localStorage.removeItem('uaifrila_usuario');
+  // Cadastro validado NAO entra logado: vai para a tela de login.
+  // ANTES o validar-cadastro usava o mesmo handleLogin do validar-login: salvava
+  // o token que o backend devolve e ia direto para o mural.
+  // Agora ignora o token, limpa qualquer sessao residual e o cadastro pendente.
+  // O e-mail ja esta em emailFromUrl e a TelaLogin pre-preenche com ele.
+  const handleCadastroValidado = (_data: any) => {
+    clearAuth();
     setUsuario(null);
-    setToken(null);
-    setTelaAtiva('home');
+    localStorage.removeItem('uaifrila_cadastro_pendente');
+    navegar('login');
   };
-
-  const navegar = (tela: string, params?: any) => {
-    if (params?.tipo) {
-      localStorage.setItem('uaifrila_tipo_cadastro', params.tipo);
-    }
-    setTelaAtiva(tela);
-  };
-
+  const handleLogout = () => { clearAuth(); setUsuario(null); setTelaAtiva('home'); };
+  if (cancelarFromUrl) return <CancelarCadastro email={emailFromUrl || ''} codigo={codigoFromUrl || ''} onConcluido={() => { window.history.replaceState({}, '', '/'); setCancelarFromUrl(false); setTelaAtiva('home'); }} onVoltar={() => { window.history.replaceState({}, '', '/'); setCancelarFromUrl(false); setTelaAtiva('home'); }} />;
+  if (carregandoSessao) return <div className="min-h-screen pt-[72px] flex items-center justify-center text-xs font-black">Carregando sessão da API...</div>;
   return (
     <div className="min-h-screen pt-[72px]">
       <Navbar telaAtiva={telaAtiva} setTelaAtiva={navegar} usuario={usuario} onLogout={handleLogout} />
       {telaAtiva === 'home' && <LandingPage setTelaAtiva={navegar} />}
-      {telaAtiva === 'codigo' && <CodigoFreela setTelaAtiva={navegar} />}
-      {telaAtiva === 'cadastro' && <CadastroUnificado onCadastro={() => setTelaAtiva('login')} />}
-      {telaAtiva === 'login' && <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />}
-      {telaAtiva === 'mural' && (usuario ? <PainelMural usuario={usuario} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
-      {telaAtiva === 'perfil' && (usuario ? <PerfilUsuario usuario={usuario} onAtualizado={(u)=>setUsuario(u)} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
-      {telaAtiva === 'trampos' && (usuario ? <PainelMeusTrampos usuario={usuario} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
+      {telaAtiva === 'codigoFreela' && <CodigoFreela setTelaAtiva={navegar} />}
+      {telaAtiva === 'cadastro' && <CadastroUnificado onCadastro={(email?: string) => { if (email) { setEmailFromUrl(email); setTelaAtiva('validar-cadastro'); } else setTelaAtiva('login'); }} />}
+      {telaAtiva === 'login' && <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} emailInicial={emailFromUrl} />}
+      {telaAtiva === 'validar-cadastro' && <ValidacaoCodigo email={emailFromUrl || undefined} tipo="cadastro" codigoInicial={codigoFromUrl || undefined} autoValidarDoLink={!!codigoFromUrl} dadosCadastro={(() => { try { const raw = localStorage.getItem('uaifrila_cadastro_pendente'); return raw ? JSON.parse(raw) : undefined; } catch { return undefined; } })()} onValidado={handleCadastroValidado} onVoltar={() => navegar('cadastro')} />}
+      {telaAtiva === 'validar-login' && <ValidacaoCodigo email={emailFromUrl || undefined} tipo="login" codigoInicial={codigoFromUrl || undefined} autoValidarDoLink={!!codigoFromUrl} onValidado={handleLogin} onVoltar={() => navegar('login')} />}
+      {telaAtiva === 'mural' && (usuario ? <PainelMural usuario={usuario} setTelaAtiva={navegar} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
+      {telaAtiva === 'perfil' && (usuario ? <PerfilUsuario usuario={usuario} onAtualizado={setUsuario} onIrParaFuncoes={() => navegar('minhas-funcoes')} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
+      {telaAtiva === 'minhas-funcoes' && (usuario ? <MinhasFuncoes /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
+      {telaAtiva === 'ganhos' && (usuario ? <MeusGanhos /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
+      {telaAtiva === 'pix' && (usuario ? <DadosPix /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
+      {telaAtiva === 'notificacoes' && (usuario ? <TelaNotificacoes /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
+      {telaAtiva === 'publicar' && (usuario ? <TelaCadastroVaga key={publicarKey} usuario={usuario} setTelaAtiva={navegar} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
+      {telaAtiva === 'trampos' && (usuario ? <PainelMeusTrampos usuario={usuario} setTelaAtiva={navegar} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
+      {telaAtiva === 'candidatos' && (usuario ? <PainelGerenciarCandidatos /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
       {telaAtiva === 'transacoes' && (usuario ? <PainelTransacoes usuario={usuario} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
-      {telaAtiva === 'expansao' && (usuario ? <PainelExpansao usuario={usuario} /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
-      {['publicar','candidatos','cidades','variaveis'].includes(telaAtiva) && (
-        <div className="p-8">
-          <h2 className="text-2xl font-black uppercase">{telaAtiva}</h2>
-          <p className="text-sm mt-2">Tela {telaAtiva} - Em construção</p>
-        </div>
-      )}
+      {telaAtiva === 'cidades' && (usuario ? <PainelConfiguracaoCidades /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
+      {telaAtiva === 'variaveis' && (usuario ? <PainelVariaveisAmbiente /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
+      {telaAtiva === 'financeiro' && (usuario ? <PainelAdminFinanceiro /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
+      {telaAtiva === 'permissoes' && (usuario ? <PainelPermissoesCategorias /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
+      {telaAtiva === 'expansao-cidades' && (usuario ? <PainelExpansaoCidades /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
+      {/* Patch 23: tela de Provedores de Pagamento (admin). ANTES: não havia import nem rota — clicar no menu (quando existia) não abria nada, e o menu nem existia no Navbar real. */}
+      {telaAtiva === 'provedores-pagamento' && (usuario ? <PainelProvedoresPagamento /> : <TelaLogin onLogin={handleLogin} setTelaAtiva={setTelaAtiva} />)}
     </div>
   );
 }
-
-function TelaLogin({ onLogin, setTelaAtiva }: { onLogin: (d:any)=>void, setTelaAtiva: (t:string)=>void }) {
-  const [email, setEmail] = useState('');
-  const [etapa, setEtapa] = useState<'email'|'codigo'>('email');
+function TelaLogin({ onLogin, setTelaAtiva, emailInicial }: any) {
+  const styles = useUaiFrilaStyles();
+  const [email, setEmail] = useState(emailInicial || '');
+  const [etapa, setEtapa] = useState<'email' | 'codigo'>('email');
   const [erro, setErro] = useState('');
   const [carregando, setCarregando] = useState(false);
-  const { isDark } = useTheme();
-  const API = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
-
+  useEffect(() => { if (emailInicial) setEmail(emailInicial); }, [emailInicial]);
   const enviarEmail = async () => {
+    if (!email.includes('@')) { setErro('Informe um e-mail válido'); return; }
     setCarregando(true); setErro('');
     try {
-      const res = await fetch(`${API}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.erro);
-      if (data.sucesso) onLogin(data);
-      else setEtapa('codigo');
-    } catch (e:any) { setErro(e.message); }
-    finally { setCarregando(false); }
+      // API real: solicitar-codigo tipo=login (não /auth/login com payload errado)
+      await apiGetPublic('/auth/solicitar-codigo', { method: 'POST', body: JSON.stringify({ email: email.trim().toLowerCase(), tipo: 'login' }) });
+      setEtapa('codigo');
+    } catch (e: any) { setErro(e.message); } finally { setCarregando(false); }
   };
-
-  if (etapa === 'codigo') {
-    return <ValidacaoCodigo email={email} tipo="login" onValidado={onLogin} onVoltar={() => setEtapa('email')} />;
-  }
-
-  const inputClass = getInputClass(isDark);
-  const labelClass = getLabelClass(isDark);
-  const cardClass = getCardClass(isDark);
-
+  if (etapa === 'codigo') return <ValidacaoCodigo email={email} tipo="login" onValidado={onLogin} onVoltar={() => setEtapa('email')} />;
   return (
-    <div className={`max-w-md mx-auto ${cardClass} mt-8`}>
-      <h2 className="text-2xl font-black uppercase tracking-tighter">Login</h2>
-      <div className="mt-6 flex flex-col gap-1">
-        <label className={labelClass}>E-mail</label>
-        <input value={email} onChange={e=>setEmail(e.target.value.toLowerCase())} placeholder="seu@email.com" className={`${inputClass} lowercase`} />
-      </div>
-      {erro && <div className="mt-3 p-3 bg-[#E53935] text-white border-2 border-black text-xs font-bold">❌ {erro}</div>}
-      <button onClick={enviarEmail} disabled={carregando} className={`mt-6 w-full py-4 font-black uppercase text-sm border-2 border-black ${isDark ? 'bg-[#0066FF] text-white hover:bg-[#0055DD]' : 'bg-black text-white hover:bg-zinc-800'} ${carregando ? 'opacity-50' : ''}`}>
-        {carregando ? 'Enviando...' : 'Entrar'}
-      </button>
-      <button onClick={() => setTelaAtiva('cadastro')} className={`mt-3 w-full py-2 text-xs font-bold underline ${isDark ? 'text-zinc-300' : 'text-black'}`}>Não tem conta? Cadastre-se</button>
-    </div>
+    <div className={styles.pageContainerSmall}><div className={styles.card}><h2 className={styles.typography.h1}>Login</h2>
+      <div className="mt-6 space-y-4"><div><label className={styles.label}>Email *</label><input value={email} onChange={e => setEmail(e.target.value)} className={styles.input} /></div>
+      {erro && <div className={styles.errorBox}>{erro}</div>}
+      <button onClick={enviarEmail} disabled={carregando} className={styles.buttonPrimary(carregando)}>{carregando ? 'Enviando...' : 'Enviar código'}</button>
+      <button onClick={() => setTelaAtiva('cadastro')} className={styles.buttonGhost}>Não tenho cadastro</button></div>
+    </div></div>
   );
 }
-
-export default function App() {
-  return (
-    <ThemeProvider>
-      <AppContent />
-    </ThemeProvider>
-  );
-}
+export default function App() { return <ThemeProvider><AppContent /></ThemeProvider>; }

@@ -1,33 +1,76 @@
 import React, { useEffect, useState } from 'react';
-import { useTheme } from '../context/ThemeContext';
+import { CidadeService, Cidade } from '../services/CidadeService';
+import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 
 export default function PainelConfiguracaoCidades() {
-  const { styles } = useTheme();
-  const [cidades, setCidades] = useState<any[]>([
-    { id: 1, nome: 'Uberlândia', estado: 'MG', ativo: true },
-    { id: 2, nome: 'Uberaba', estado: 'MG', ativo: false },
-    { id: 3, nome: 'Araguari', estado: 'MG', ativo: false },
-  ]);
-  const API = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+  const styles = useUaiFrilaStyles();
+  const [cidades, setCidades] = useState<Cidade[]>([]);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState('');
 
-  const toggleCidade = async (id: number, ativo: boolean) => {
-    const token = localStorage.getItem('@UaiFrila:token');
-    await fetch(`${API}/admin/cidade/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ ativo: !ativo }) });
-    setCidades(prev => prev.map(c => c.id === id ? { ...c, ativo: !ativo } : c));
+  const carregar = async () => {
+    setCarregando(true);
+    try {
+      // Tenta instância e estático, compatível com ambos
+      let lista: Cidade[] = [];
+      try {
+        const service = new CidadeService();
+        lista = await service.listarTodas();
+      } catch {
+        lista = await CidadeService.listarTodas();
+      }
+      setCidades(lista);
+    } catch (e:any) { 
+      console.warn('[Cidades] erro', e.message);
+      setErro(e.message); 
+    } finally { setCarregando(false); }
   };
 
+  useEffect(()=>{ carregar(); }, []);
+
+  const toggleAtiva = async (cidade: Cidade) => {
+    try {
+      const novaAtiva = !(cidade.ativa ?? (cidade as any).ativo);
+      try {
+        const service = new CidadeService();
+        await service.atualizarStatus(cidade.id, novaAtiva);
+      } catch {
+        await CidadeService.atualizarStatus(cidade.id, novaAtiva);
+      }
+      await carregar();
+    } catch (e:any) { setErro(e.message); }
+  };
+
+  if (carregando) return <div className={styles.pageContainer}><div className={styles.card}>Carregando cidades...</div></div>;
+
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      <div className={`p-8 ${styles.bgQuadros}`}>
-        <h2 className="text-2xl font-black uppercase">Configuração de Cidades - Só Admin</h2>
-        <p className="text-xs mt-1">Relação bairros → cidades → estado → país. Ativar apenas Uberlândia inicialmente. Pode ativar cidade que quiser.</p>
+    <div className={styles.pageContainer}>
+      <div className={styles.card}>
+        <div className="flex justify-between items-center mb-4">
+          <h2 className={styles.typography.h1}>Cidades - Tabela cidades ({cidades.length})</h2>
+          <button onClick={carregar} className={styles.buttonSecondary}>Recarregar</button>
+        </div>
+        {erro && <div className={styles.errorBox}>{erro}</div>}
+        <p className={`${styles.typography.caption} mt-2`}>Endereço ativo usa cidade_id - todas as cidades devem estar listadas</p>
         <div className="mt-6 space-y-3">
-          {cidades.map(c => (
-            <div key={c.id} className="flex justify-between items-center p-4 border-2 border-black/10">
-              <span className="font-bold text-sm">{c.nome} - {c.estado} {c.ativo ? '🟢 Ativa' : '🔴 Inativa'}</span>
-              <button onClick={()=>toggleCidade(c.id, c.ativo)} className={`px-4 py-2 text-xs font-black uppercase ${c.ativo ? styles.btnDanger : styles.btnPrimary}`}>{c.ativo ? 'Desativar' : 'Ativar'}</button>
+          {cidades.map(c => {
+            const ativa = (c as any).ativa ?? (c as any).ativo ?? true;
+            const sigla = (c as any).estado_sigla || (c as any).estado || (c as any).sigla || 'MG';
+            return (
+              <div key={c.id} className={`${styles.cardSmall} flex justify-between items-center`}>
+                <span className="font-black text-sm">{c.nome} - {sigla} {ativa ? '🟢 Ativa' : '🔴 Inativa'}</span>
+                <button onClick={()=>toggleAtiva(c)} className={`${ativa ? styles.buttonDanger : styles.buttonPrimary()} text-xs`}>
+                  {ativa ? 'Desativar' : 'Ativar'}
+                </button>
+              </div>
+            );
+          })}
+          {cidades.length === 0 && (
+            <div className={styles.cardSmall + ' text-center'}>
+              <p className={styles.typography.body}>Nenhuma cidade encontrada</p>
+              <p className={styles.typography.caption}>Verifique se backend está rodando: GET /api/cidades/todas</p>
             </div>
-          ))}
+          )}
         </div>
       </div>
     </div>

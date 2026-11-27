@@ -1,92 +1,110 @@
-import { Request, Response } from 'express';
-import { AuthRepository } from '../repositories/AuthRepository';
+import { Response } from 'express';
+import { EnderecoService } from '../services/EnderecoService';
+import { BaseController, AuthRequest } from './BaseController';
 
-export class EnderecoController {
-  private repo = new AuthRepository();
+export class EnderecoController extends BaseController {
+  private service: EnderecoService;
+  constructor() { super(); this.service = new EnderecoService(); }
 
-  public listar = async (req: any, res: Response): Promise<void> => {
+  meusEnderecos = async (req: AuthRequest, res: Response) => {
     try {
-      const usuarioId = req.user?.id;
-      if (!usuarioId) { res.status(401).json({ erro: 'Não autenticado' }); return; }
-      const enderecos = await this.repo.buscarEnderecosUsuario(usuarioId);
-      const ativo = await this.repo.buscarEnderecoAtivo(usuarioId);
-      res.status(200).json({ sucesso: true, enderecos, ativo });
-    } catch (e:any) {
-      res.status(500).json({ erro: e.message });
+      // ERRO DA ENTREGA 29: o front chama /api/enderecos/meus, que cai AQUI —
+      // nao no listarPorUsuario. Sem o cidade aninhado, end.cidade.estadoId
+      // era undefined e o Estado nao preenchia.
+      // Com cidade aninhada: o front le end.cidade.estadoId (caminho unico, sem fallback).
+      const enderecos = await (this.service as any).listarPorUsuarioComCidade(req.usuario!.id);
+      return res.json({ success: true, data: enderecos, enderecos });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
+
+  buscarAtivo = async (req: AuthRequest, res: Response) => {
+    try {
+      // Mesma forma do /meus: com cidade aninhada (end.cidade.estadoId).
+      const lista = await (this.service as any).listarPorUsuarioComCidade(req.usuario!.id);
+      const ativo = (Array.isArray(lista) ? lista : []).find((x: any) => x.ativo) || lista[0] || null;
+      return res.json({ success: true, data: ativo, endereco: ativo });
+    } catch (e: any) {
+      console.warn('[EnderecoController.buscarAtivo] erro', e.message);
+      return res.json({ success: true, data: null, endereco: null });
     }
   };
 
-  public criar = async (req: any, res: Response): Promise<void> => {
+  listarPorUsuario = async (req: AuthRequest, res: Response) => {
     try {
-      const usuarioId = req.user?.id;
-      if (!usuarioId) { res.status(401).json({ erro: 'Não autenticado' }); return; }
-      const { endereco_completo, endereco, bairro, cidade_id, cidade_nome, cidade, lat, lng, endereco_lat, endereco_lng } = req.body;
-      if (!endereco_completo && !endereco) { res.status(400).json({ erro: 'Endereço completo obrigatório' }); return; }
-      const novo = await this.repo.criarEnderecoUsuario(usuarioId, {
-        endereco_completo: endereco_completo || endereco,
-        bairro,
-        cidade_id,
-        cidade_nome: cidade_nome || cidade,
-        cidade: cidade_nome || cidade,
-        lat: lat || endereco_lat,
-        lng: lng || endereco_lng,
-        endereco_lat: endereco_lat || lat,
-        endereco_lng: endereco_lng || lng,
+      const usuarioId = Number(req.params.usuarioId);
+      if (usuarioId !== req.usuario!.id && !this.isAdmin(req)) {
+        return this.error(res, 'Acesso negado', 403);
+      }
+      // Com cidade aninhada: o front le end.cidade.estadoId (caminho unico, sem fallback).
+      const enderecos = await (this.service as any).listarPorUsuarioComCidade(usuarioId);
+      return res.json({ success: true, data: enderecos });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
+
+  buscarPorId = async (req: AuthRequest, res: Response) => {
+    try {
+      const svc: any = this.service as any;
+      let endereco: any = null;
+      if (typeof svc.buscarCompletoPorId === 'function') endereco = await svc.buscarCompletoPorId(Number(req.params.id));
+      else endereco = await this.service.buscarPorId(Number(req.params.id));
+      if (!endereco) return this.error(res, 'Endereço não encontrado', 404);
+      if ((endereco as any).usuarioId !== req.usuario!.id && (endereco as any).usuario_id !== req.usuario!.id && !this.isAdmin(req)) {
+        return this.error(res, 'Acesso negado', 403);
+      }
+      return res.json({ success: true, data: this.mapToPublic(endereco, req) });
+    } catch (e: any) { return this.handleError(res, e); }
+  };
+
+  criar = async (req: AuthRequest, res: Response) => {
+    try {
+      const endereco = await this.service.criar({
+        ...req.body,
+        usuarioId: req.usuario!.id,
+        usuario_id: req.usuario!.id
       });
-      res.status(201).json({ sucesso: true, endereco: novo, mensagem: 'Endereço criado e ativado. Apenas um pode ficar ativo.' });
-    } catch (e:any) {
-      const status = e.message.includes('trampo em andamento') ? 423 : 400;
-      res.status(status).json({ erro: e.message });
-    }
+      return res.status(201).json({ success: true, data: this.mapToPublic(endereco, req) });
+    } catch (e: any) { return this.handleError(res, e); }
   };
 
-  public ativar = async (req: any, res: Response): Promise<void> => {
+  atualizar = async (req: AuthRequest, res: Response) => {
     try {
-      const usuarioId = req.user?.id;
-      const enderecoId = Number(req.params.id);
-      if (!usuarioId) { res.status(401).json({ erro: 'Não autenticado' }); return; }
-      const ativo = await this.repo.ativarEnderecoUsuario(enderecoId, usuarioId);
-      res.status(200).json({ sucesso: true, endereco: ativo, mensagem: 'Endereço ativado. Os demais foram desativados.' });
-    } catch (e:any) {
-      const status = e.message.includes('trampo em andamento') ? 423 : 400;
-      res.status(status).json({ erro: e.message });
-    }
+      const id = Number(req.params.id);
+      const existente = await this.service.buscarPorId(id);
+      if (!existente) return this.error(res, 'Endereço não encontrado', 404);
+      if ((existente as any).usuarioId !== req.usuario!.id && (existente as any).usuario_id !== req.usuario!.id && !this.isAdmin(req)) {
+        return this.error(res, 'Só dono pode atualizar', 403);
+      }
+      const endereco = await this.service.atualizar(id, req.body);
+      return res.json({ success: true, data: this.mapToPublic(endereco, req) });
+    } catch (e: any) { return this.handleError(res, e); }
   };
 
-  public atualizar = async (req: any, res: Response): Promise<void> => {
+  definirAtivo = async (req: AuthRequest, res: Response) => {
     try {
-      const usuarioId = req.user?.id;
-      const enderecoId = Number(req.params.id);
-      if (!usuarioId) { res.status(401).json({ erro: 'Não autenticado' }); return; }
-      const atualizado = await this.repo.atualizarEnderecoUsuario(enderecoId, usuarioId, req.body);
-      res.status(200).json({ sucesso: true, endereco: atualizado });
-    } catch (e:any) {
-      const status = e.message.includes('trampo em andamento') ? 423 : 400;
-      res.status(status).json({ erro: e.message });
-    }
+      const id = Number(req.params.id);
+      const endereco = await this.service.definirAtivo(req.usuario!.id, id);
+      return res.json({ success: true, data: this.mapToPublic(endereco, req) });
+    } catch (e: any) { return this.handleError(res, e); }
   };
 
-  public deletar = async (req: any, res: Response): Promise<void> => {
+  deletar = async (req: AuthRequest, res: Response) => {
     try {
-      const usuarioId = req.user?.id;
-      const enderecoId = Number(req.params.id);
-      if (!usuarioId) { res.status(401).json({ erro: 'Não autenticado' }); return; }
-      await this.repo.deletarEnderecoUsuario(enderecoId, usuarioId);
-      res.status(200).json({ sucesso: true, mensagem: 'Endereço deletado' });
-    } catch (e:any) {
-      const status = e.message.includes('trampo em andamento') ? 423 : 400;
-      res.status(status).json({ erro: e.message });
-    }
+      const id = Number(req.params.id);
+      const existente = await this.service.buscarPorId(id);
+      if (!existente) return this.error(res, 'Endereço não encontrado', 404);
+      if ((existente as any).usuarioId !== req.usuario!.id && (existente as any).usuario_id !== req.usuario!.id && !this.isAdmin(req)) {
+        return this.error(res, 'Só dono pode deletar', 403);
+      }
+      await this.service.deletar(id);
+      return res.json({ success: true, message: 'Endereço deletado' });
+    } catch (e: any) { return this.handleError(res, e); }
   };
 
-  public verificarTrampo = async (req: any, res: Response): Promise<void> => {
+  listarTodos = async (req: AuthRequest, res: Response) => {
     try {
-      const usuarioId = req.user?.id;
-      if (!usuarioId) { res.status(401).json({ erro: 'Não autenticado' }); return; }
-      const result = await this.repo.verificarTrampoEmAndamento(usuarioId);
-      res.status(200).json(result);
-    } catch (e:any) {
-      res.status(500).json({ erro: e.message });
-    }
+      this.checkRole(req, ['ADMIN', 'SUPER_ADMIN']);
+      const enderecos = await this.service.listar();
+      return res.json({ success: true, data: this.mapListToPublic(enderecos, req) });
+    } catch (e: any) { return this.handleError(res, e); }
   };
 }

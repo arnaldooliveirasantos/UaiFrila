@@ -1,303 +1,119 @@
 import React, { useState, useEffect } from 'react';
-import { useTheme, getInputClass, getLabelClass, getCardClass } from '../context/ThemeContext';
+import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 import ValidacaoCodigo from './ValidacaoCodigo';
-import GoogleEnderecoInput from './GoogleEnderecoInput';
+import BlocoEndereco from './BlocoEndereco';
+import { UsuarioService } from '../services/UsuarioService';
+import { apiGetPublic } from '../utils/Api';
+import { WizardIndicador, WizardNavegacao } from './WizardEtapas';
+import EtapaCadastroTipo from './cadastro/EtapaCadastroTipo';
+import EtapaCadastroDados from './cadastro/EtapaCadastroDados';
+import EtapaCadastroEndereco from './cadastro/EtapaCadastroEndereco';
+import EtapaCadastroTermosRevisao from './cadastro/EtapaCadastroTermosRevisao';
 
-interface Props {
-  onCadastro?: () => void;
-  usuario?: any;
-  modoEdicao?: boolean;
-  onAtualizado?: (usuario: any) => void;
-}
-
-function apenasNumeros(str: string) { return (str || '').replace(/\D/g, ''); }
-function mascararCPF(cpf: string) {
-  const nums = apenasNumeros(cpf);
-  if (nums.length < 11) return '***.***.***-**';
-  return `${nums.slice(0,3)}.***.***-${nums.slice(9,11)}`;
-}
-function formatarCPF(valor: string) {
-  const nums = apenasNumeros(valor).slice(0, 11);
-  if (nums.length <= 3) return nums;
-  if (nums.length <= 6) return `${nums.slice(0,3)}.${nums.slice(3)}`;
-  if (nums.length <= 9) return `${nums.slice(0,3)}.${nums.slice(3,6)}.${nums.slice(6)}`;
-  return `${nums.slice(0,3)}.${nums.slice(3,6)}.${nums.slice(6,9)}-${nums.slice(9)}`;
-}
-function formatarCNPJ(valor: string) {
-  const nums = apenasNumeros(valor).slice(0, 14);
-  if (nums.length <= 2) return nums;
-  if (nums.length <= 5) return `${nums.slice(0,2)}.${nums.slice(2)}`;
-  if (nums.length <= 8) return `${nums.slice(0,2)}.${nums.slice(2,5)}.${nums.slice(5)}`;
-  if (nums.length <= 12) return `${nums.slice(0,2)}.${nums.slice(2,5)}.${nums.slice(5,8)}/${nums.slice(8)}`;
-  return `${nums.slice(0,2)}.${nums.slice(2,5)}.${nums.slice(5,8)}/${nums.slice(8,12)}-${nums.slice(12)}`;
-}
-
-const TERMOS = [
-  { id: 1, titulo: 'Autônomo Art 442-B CLT', desc: 'Declaro ser autônomo nos termos do art. 442-B da CLT' },
-  { id: 2, titulo: 'LGPD', desc: 'Autorizo uso de dados conforme LGPD' },
-  { id: 3, titulo: 'MEI R$1500', desc: 'Ciente do limite MEI R$1500 por contratante' },
-  { id: 4, titulo: 'Cancelamento R$40', desc: 'Ciente da taxa de cancelamento R$40' },
-  { id: 5, titulo: 'Intermediação', desc: 'Ciente da taxa de intermediação da plataforma' },
-];
-
-export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, modoEdicao = false, onAtualizado }: Props) {
-  const { isDark } = useTheme();
+// ORQUESTRADOR do cadastro: guarda TODO o estado, valida cada etapa e so
+// envia na ultima (POST /api/auth/solicitar-codigo). As etapas sao arquivos
+// separados em ./cadastro/ e so recebem props - nenhuma etapa salva sozinha.
+// O INSERT do usuario + endereco continua acontecendo so no validar-codigo.
+export default function CadastroUnificado({ onCadastro, usuario: usuarioProp, modoEdicao = false }: any) {
+  const styles = useUaiFrilaStyles();
   const [queroTrampar, setQueroTrampar] = useState(true);
   const [queroContratar, setQueroContratar] = useState(false);
-  const [form, setForm] = useState({
-    nome: '', cpf: '', cpfOriginal: '', email: '',
-    cnpj: '', nomeFantasia: '',
-    funcao: 'Garçom', valorHora: 20, bio: '',
-    bairro: 'Centro', endereco: '', endereco_completo: '', cidade: 'Uberlândia', cidade_id: 1, cidade_nome: 'Uberlândia',
-    lat: undefined as number | undefined, lng: undefined as number | undefined,
-    endereco_lat: undefined as number | undefined, endereco_lng: undefined as number | undefined,
-    comoChega: 'Moto', ajudaUber: 10,
-    termos: [false, false, false, false, false],
-    temMei: false
-  });
+  const [form, setForm] = useState<any>({ nome: '', cpf: '', email: '', cnpj: '', nomeFantasia: '', funcao: 'Garçom', valorHora: 20, bio: '', bairro: 'Centro', endereco: '', cidade_id: 1, cep: '', numero: '', complemento: '', lat: undefined, lng: undefined, termos: [false, false, false, false, false], temMei: false });
+  const [cidades, setCidades] = useState<any[]>([]);
   const [etapa, setEtapa] = useState<'form' | 'codigo'>('form');
+  const [passo, setPasso] = useState(0);
+  const PASSOS_CADASTRO = ['Como você vai usar', 'Seus dados', 'Endereço', 'Termos e revisão'];
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState('');
-  const [mensagem, setMensagem] = useState('');
-  const API = import.meta.env.VITE_API_URL;
-  if (!API) throw new Error('VITE_API_URL não definida no .env - configure no arquivo .env');
-
-  // Calcula tipo_chave baseado nos dois botões
-  const getTipoChave = () => {
-    if (queroTrampar && queroContratar) return 'DUAL';
-    if (queroContratar) return 'CONTRATANTE';
-    return 'FREELA';
-  };
-
-  const isFreela = queroTrampar;
-  const isContratante = queroContratar;
-
+  const getTipoChave = () => UsuarioService.getTipoChave(queroTrampar, queroContratar);
+  const tipoAtual = (usuarioProp?.tipo_chave || '').toUpperCase();
+  const isTipoRestrito = modoEdicao && tipoAtual && !UsuarioService.isTipoEditavel(tipoAtual);
+  const isReadOnly = !!isTipoRestrito;
+  const travaTrampar = modoEdicao && tipoAtual !== 'CONTRATANTE';
+  const travaContratar = modoEdicao && tipoAtual !== 'FREELA';
   useEffect(() => {
     const tipo = localStorage.getItem('uaifrila_tipo_cadastro');
-    if (tipo === 'CONTRATANTE') {
-      setQueroTrampar(false);
-      setQueroContratar(true);
-    }
+    if (tipo) { const checks = UsuarioService.parseTipoParaChecks(tipo); setQueroTrampar(checks.trampar); setQueroContratar(checks.contratar); }
+    apiGetPublic('/api/cidades').then((d: any) => setCidades(d.cidades || d.data || [])).catch(() => {});
   }, []);
-
   useEffect(() => {
     if (modoEdicao && usuarioProp) {
-      const t = usuarioProp.tipo_chave || 'FREELA';
-      if (t === 'DUAL') { setQueroTrampar(true); setQueroContratar(true); }
-      else if (t === 'CONTRATANTE') { setQueroTrampar(false); setQueroContratar(true); }
-      else { setQueroTrampar(true); setQueroContratar(false); }
+      const checks = UsuarioService.parseTipoParaChecks(usuarioProp.tipo_chave || 'FREELA');
+      if (!['FREELA', 'CONTRATANTE', 'DUAL'].includes((usuarioProp.tipo_chave || '').toUpperCase())) { checks.trampar = true; checks.contratar = true; }
+      setQueroTrampar(checks.trampar); setQueroContratar(checks.contratar);
+      const end = (usuarioProp as any).endereco_ativo
+        || (Array.isArray((usuarioProp as any).enderecos_usuarios) ? (usuarioProp as any).enderecos_usuarios.find((e: any) => e.ativo) || (usuarioProp as any).enderecos_usuarios[0] : null)
+        || (Array.isArray((usuarioProp as any).enderecos) ? (usuarioProp as any).enderecos.find((e: any) => e.ativo) || (usuarioProp as any).enderecos[0] : null)
+        || null;
       setForm({
-        nome: usuarioProp.nome_completo || '',
-        cpf: apenasNumeros(usuarioProp.cpf || ''),
-        cpfOriginal: usuarioProp.cpf || '',
-        email: usuarioProp.email || '',
-        cnpj: apenasNumeros(usuarioProp.cnpj || ''),
-        nomeFantasia: usuarioProp.nome_fantasia || '',
-        funcao: usuarioProp.funcao_principal || 'Garçom',
-        valorHora: usuarioProp.valor_hora_base || 20,
-        bio: usuarioProp.bio || '',
-        bairro: usuarioProp.bairro || 'Centro',
-        endereco: usuarioProp.endereco_completo || '',
-        endereco_completo: usuarioProp.endereco_completo || '',
-        cidade: usuarioProp.cidade_nome || 'Uberlândia',
-        cidade_id: usuarioProp.cidade_id || 1,
-        cidade_nome: usuarioProp.cidade_nome || 'Uberlândia',
-        lat: usuarioProp.endereco_lat,
-        lng: usuarioProp.endereco_lng,
-        endereco_lat: usuarioProp.endereco_lat,
-        endereco_lng: usuarioProp.endereco_lng,
-        comoChega: usuarioProp.como_chega || 'Moto',
-        ajudaUber: usuarioProp.ajuda_uber || 10,
-        termos: [true, true, true, true, true],
-        temMei: usuarioProp.tem_mei || false
+        nome: usuarioProp.nome_completo || '', cpf: (usuarioProp.cpf || '').replace(/\D/g, ''), email: usuarioProp.email || '',
+        cnpj: (usuarioProp.cnpj || '').replace(/\D/g, ''), nomeFantasia: usuarioProp.nome_fantasia || '',
+        funcao: usuarioProp.funcao_principal || 'Garçom', valorHora: usuarioProp.valor_hora_base || 20, bio: usuarioProp.bio || '',
+        bairro: end?.bairro, endereco: end?.logradouro, cidade_id: end?.cidade_id, estado_id: (end as any)?.cidade?.estadoId,
+        cep: end?.cep, numero: end?.numero, complemento: end?.complemento, lat: end?.latitude, lng: end?.longitude,
+        termos: [true, true, true, true, true], temMei: usuarioProp.tem_mei || false,
       });
     }
   }, [modoEdicao, usuarioProp]);
-
+  const montarDadosCadastro = () => ({
+    nome: form.nome, nome_completo: form.nome,
+    cpf: String(form.cpf || '').replace(/\D/g, ''), cnpj: form.cnpj || null,
+    email: String(form.email || '').trim().toLowerCase(),
+    nomeFantasia: form.nomeFantasia || null, nome_fantasia: form.nomeFantasia || null,
+    funcao: form.funcao, funcao_principal: form.funcao, valorHora: form.valorHora, valor_hora_base: form.valorHora,
+    bio: form.bio || null, tipo_chave: getTipoChave(), tipoChave: getTipoChave(), temMei: !!form.temMei, tem_mei: !!form.temMei,
+    endereco: { logradouro: form.endereco, endereco: form.endereco, bairro: form.bairro, cep: form.cep, numero: form.numero, complemento: form.complemento, cidade_id: form.cidade_id, cidadeId: form.cidade_id, lat: form.lat, lng: form.lng },
+    bairro: form.bairro, cep: form.cep, numero: form.numero, complemento: form.complemento, cidade_id: form.cidade_id, lat: form.lat, lng: form.lng,
+  });
+  const validarPasso = (n: number): string | null => {
+    if (n === 0) { if (!queroTrampar && !queroContratar) return 'Escolha Trampar ou Contratar'; return null; }
+    if (n === 1) {
+      if (!form.nome || !form.cpf || !form.email) return 'Preencha nome, CPF, email';
+      if (String(form.cpf || '').replace(/\D/g, '').length !== 11) return 'CPF deve ter 11 dígitos';
+      if (form.cnpj && String(form.cnpj).replace(/\D/g, '').length !== 14) return 'CNPJ deve ter 14 dígitos';
+      return null;
+    }
+    if (n === 2) { if (!form.endereco?.trim() || !form.cep?.trim()) return 'Preencha endereço e CEP'; return null; }
+    return null;
+  };
+  const avancarPasso = () => { const e = validarPasso(passo); if (e) { setErro(e); return; } setErro(''); setPasso((s) => Math.min(s + 1, 3)); };
+  const voltarPasso = () => { setErro(''); setPasso((s) => Math.max(s - 1, 0)); };
   const handleSubmit = async () => {
-    setErro(''); setMensagem('');
-    if (!form.nome || !form.cpf || !form.email) { setErro('Preencha nome, CPF e e-mail'); return; }
-    if (!queroTrampar && !queroContratar) { setErro('Escolha pelo menos uma opção: Quero Trampar ou Quero Contratar'); return; }
-    if (!form.termos.every(Boolean)) { setErro('Aceite todos os termos'); return; }
+    if (isReadOnly) { setErro(`Tipo ${tipoAtual} só visualização`); return; }
+    { const e0 = validarPasso(0) || validarPasso(1) || validarPasso(2); if (e0) { setErro(e0); return; } }
+    if (!form.endereco?.trim() || !form.cep?.trim()) { setErro('Preencha endereço e CEP'); return; }
+    const dadosCadastro = montarDadosCadastro();
     setCarregando(true);
     try {
-      const res = await fetch(`${API}/auth/cadastro`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          nome: form.nome, cpf: form.cpf, email: form.email,
-          cnpj: form.cnpj, nomeFantasia: form.nomeFantasia,
-          funcao: form.funcao, valorHora: form.valorHora, bio: form.bio,
-          bairro: form.bairro, endereco: form.endereco_completo || form.endereco,
-          endereco_completo: form.endereco_completo || form.endereco,
-          cidade: form.cidade_nome, cidade_nome: form.cidade_nome, cidade_id: form.cidade_id,
-          lat: form.endereco_lat || form.lat, lng: form.endereco_lng || form.lng,
-          endereco_lat: form.endereco_lat || form.lat, endereco_lng: form.endereco_lng || form.lng,
-          tipo_chave: getTipoChave(),
-          temMei: form.temMei
-        })
-      });
-
-      const contentType = res.headers.get('content-type') || '';
-      if (!contentType.includes('application/json')) {
-        const text = await res.text();
-        throw new Error(`Backend retornou ${res.status} não-JSON. Verifique API em ${API}.`);
-      }
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.erro || 'Erro no cadastro');
+      await apiGetPublic('/api/auth/solicitar-codigo', { method: 'POST', body: JSON.stringify({ email: dadosCadastro.email, tipo: 'cadastro', dadosCadastro }) });
+      try { localStorage.setItem('uaifrila_cadastro_pendente', JSON.stringify(dadosCadastro)); } catch {}
       setEtapa('codigo');
-    } catch (e: any) { setErro(e.message); }
-    finally { setCarregando(false); }
+    } catch (e: any) { setErro(e.message); } finally { setCarregando(false); }
   };
-
-  if (etapa === 'codigo') {
-    return <ValidacaoCodigo email={form.email} tipo="cadastro" onValidado={() => { onCadastro?.(); }} onVoltar={() => setEtapa('form')} />;
-  }
-
-  const inputClass = getInputClass(isDark);
-  const labelClass = getLabelClass(isDark);
-  const cardClass = getCardClass(isDark);
-
+  if (etapa === 'codigo') return <ValidacaoCodigo email={form.email} tipo="cadastro" dadosCadastro={montarDadosCadastro()} onValidado={() => onCadastro?.(form.email)} onVoltar={() => setEtapa('form')} />;
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      <div className={cardClass}>
-        <h2 className="text-3xl font-black uppercase tracking-tighter">Cadastro</h2>
-
-        {/* BOTÕES QUERO TRAMPAR / QUERO CONTRATAR - PODE ESCOLHER OS 2 */}
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-          <button
-            type="button"
-            onClick={() => setQueroTrampar(!queroTrampar)}
-            className={`p-6 border-2 text-left transition-all flex items-center gap-4
-              ${queroTrampar 
-                ? 'bg-[#FFC700] border-black text-black shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]' 
-                : isDark ? 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-white' : 'bg-white border-black/20 text-black/50 hover:border-black'}`}
-          >
-            <span className="text-4xl">💪</span>
-            <div>
-              <div className="font-black uppercase text-sm">Quero Trampar</div>
-              <div className="text-[11px]">Trabalhar como freela</div>
-            </div>
-            <div className={`ml-auto w-6 h-6 border-2 flex items-center justify-center ${queroTrampar ? 'bg-black border-black text-[#FFC700]' : 'border-current'}`}>
-              {queroTrampar && '✓'}
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setQueroContratar(!queroContratar)}
-            className={`p-6 border-2 text-left transition-all flex items-center gap-4
-              ${queroContratar 
-                ? 'bg-[#E53935] border-black text-white shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]' 
-                : isDark ? 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-white' : 'bg-white border-black/20 text-black/50 hover:border-black'}`}
-          >
-            <span className="text-4xl">🏢</span>
-            <div>
-              <div className="font-black uppercase text-sm">Quero Contratar</div>
-              <div className="text-[11px]">Contratar freelas</div>
-            </div>
-            <div className={`ml-auto w-6 h-6 border-2 flex items-center justify-center ${queroContratar ? 'bg-black border-black text-white' : 'border-current'}`}>
-              {queroContratar && '✓'}
-            </div>
-          </button>
-        </div>
-
-        {queroTrampar && queroContratar && (
-          <div className={`mt-3 p-3 border-2 text-xs font-bold ${isDark ? 'bg-[#0066FF]/20 border-[#0066FF] text-white' : 'bg-black text-white border-black'}`}>
-            ✨ Você será cadastrado como DUAL - pode trampar e contratar!
-          </div>
-        )}
-
-        {/* FORMULÁRIO COM ESTILO UNIFICADO */}
-        <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="flex flex-col gap-1">
-            <label className={labelClass}>Nome completo</label>
-            <input value={form.nome} onChange={e=>setForm({...form, nome: e.target.value})} placeholder="Seu nome" className={inputClass} />
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <label className={labelClass}>CPF {modoEdicao && <span className="text-[8px]">🔒</span>}</label>
-            {modoEdicao ? (
-              <input value={mascararCPF(form.cpfOriginal)} disabled className={`${inputClass} bg-zinc-200 cursor-not-allowed`} />
-            ) : (
-              <input value={formatarCPF(form.cpf)} onChange={e=>setForm({...form, cpf: apenasNumeros(e.target.value).slice(0,11)})} placeholder="000.000.000-00" className={inputClass} />
-            )}
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <label className={labelClass}>E-mail {modoEdicao && <span className="text-[8px]">🔒</span>}</label>
-            <input type="email" value={form.email} disabled={modoEdicao} onChange={e=>setForm({...form, email: e.target.value.toLowerCase()})} placeholder="seu@email.com" className={`${inputClass} ${modoEdicao ? 'bg-zinc-200 cursor-not-allowed' : ''} lowercase`} />
-          </div>
-
-          <div className="md:col-span-2">
-            <GoogleEnderecoInput
-              endereco={form.endereco_completo || form.endereco}
-              cidade={form.cidade_nome || form.cidade}
-              cidadeId={form.cidade_id}
-              lat={form.endereco_lat || form.lat}
-              lng={form.endereco_lng || form.lng}
-              onChange={(data) => setForm({
-                ...form,
-                endereco: data.endereco,
-                endereco_completo: data.endereco,
-                cidade: data.cidade,
-                cidade_nome: data.cidade,
-                cidade_id: data.cidade_id || form.cidade_id,
-                lat: data.lat,
-                lng: data.lng,
-                endereco_lat: data.lat,
-                endereco_lng: data.lng,
-                bairro: data.bairro || form.bairro
-              })}
-            />
-          </div>
-
-          {isFreela && (
-            <>
-              <div className="flex flex-col gap-1">
-                <label className={labelClass}>Função</label>
-                <select value={form.funcao} onChange={e=>setForm({...form, funcao: e.target.value})} className={inputClass}>
-                  {['Garçom','Bartender','Cozinheiro','Auxiliar de Cozinha','Recepcionista','Segurança','Limpeza','Outros'].map(f=><option key={f} value={f}>{f}</option>)}
-                </select>
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className={labelClass}>Valor Hora (R$)</label>
-                <input type="number" value={form.valorHora} onChange={e=>setForm({...form, valorHora: Number(e.target.value)})} className={inputClass} />
-              </div>
-            </>
-          )}
-
-          {isContratante && (
-            <>
-              <div className="flex flex-col gap-1">
-                <label className={labelClass}>CNPJ (opcional)</label>
-                <input value={formatarCNPJ(form.cnpj)} onChange={e=>setForm({...form, cnpj: apenasNumeros(e.target.value).slice(0,14)})} placeholder="00.000.000/0000-00" className={inputClass} />
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className={labelClass}>Nome Fantasia</label>
-                <input value={form.nomeFantasia} onChange={e=>setForm({...form, nomeFantasia: e.target.value})} placeholder="Nome Fantasia" className={inputClass} />
-              </div>
-            </>
-          )}
-        </div>
-
-        <h3 className="mt-8 font-black uppercase text-sm">Termos</h3>
-        <div className="mt-3 space-y-2">
-          {TERMOS.map((t,i)=>(
-            <label key={t.id} className={`flex gap-3 p-3 border-2 text-xs cursor-pointer ${isDark ? 'border-zinc-700 hover:border-white bg-zinc-900' : 'border-black/10 hover:border-black bg-white'}`}>
-              <input type="checkbox" checked={form.termos[i]} onChange={e=>{ const nt=[...form.termos]; nt[i]=e.target.checked; setForm({...form, termos: nt}); }} />
-              <div><span className="font-black">{t.titulo}</span> <span className="opacity-70">- {t.desc}</span></div>
-            </label>
-          ))}
-        </div>
-
-        {erro && <div className="mt-4 p-3 bg-[#E53935] text-white border-2 border-black text-xs font-bold">❌ {erro}</div>}
-
-        <button onClick={handleSubmit} disabled={carregando} className={`mt-8 w-full py-4 font-black uppercase text-sm border-2 border-black transition-all ${isDark ? 'bg-[#0066FF] text-white hover:bg-[#0055DD]' : 'bg-black text-white hover:bg-zinc-800'} ${carregando ? 'opacity-50' : ''}`}>
-          {carregando ? 'Salvando...' : modoEdicao ? 'Salvar Alterações' : `Cadastrar como ${getTipoChave()}`}
-        </button>
+    <div className={styles.pageContainer}>
+      <div className={styles.card}>
+        <h2 className={styles.typography.h1}>{modoEdicao ? 'Meu Perfil' : 'Cadastro'}</h2>
+        <WizardIndicador etapas={PASSOS_CADASTRO} etapa={passo} />
+        {isReadOnly && <div className="mt-4 p-4 bg-yellow-300 border-4 border-black font-black text-xs">🔒 Tipo {tipoAtual} só visualização - editáveis: FREELA, CONTRATANTE, DUAL</div>}
+        {passo === 0 && <EtapaCadastroTipo queroTrampar={queroTrampar} setQueroTrampar={setQueroTrampar} queroContratar={queroContratar} setQueroContratar={setQueroContratar} isReadOnly={isReadOnly} travaTrampar={travaTrampar} travaContratar={travaContratar} getTipoChave={getTipoChave} />}
+        {passo === 1 && <EtapaCadastroDados form={form} setForm={setForm} isReadOnly={isReadOnly} modoEdicao={modoEdicao} />}
+        {passo === 2 && <EtapaCadastroEndereco form={form} setForm={setForm} cidades={cidades} isReadOnly={isReadOnly} modoEdicao={modoEdicao} />}
+        {passo === 3 && <EtapaCadastroTermosRevisao form={form} setForm={setForm} isReadOnly={isReadOnly} getTipoChave={getTipoChave} />}
+        {erro && <div className={styles.errorBox + ' mt-4'}>{erro}</div>}
+        <WizardNavegacao etapas={PASSOS_CADASTRO} etapa={passo} onVoltar={voltarPasso} onAvancar={avancarPasso} onFinalizar={handleSubmit} finalizarLabel={carregando ? 'Enviando...' : modoEdicao ? 'Salvar perfil' : `Cadastrar como ${getTipoChave()}`} carregando={carregando} podeFinalizar={!isReadOnly} />
       </div>
+      {modoEdicao && (
+        <div className={styles.card + ' mt-4'}>
+          <h2 className={styles.typography.h1}>Meus endereços</h2>
+          <p className={styles.typography.caption + ' mt-1'}>Cadastre um novo, troque o ativo ou edite o endereço ativo. A alteração vale na hora e o endereço do perfil acima acompanha.</p>
+          <div className="mt-4"><BlocoEndereco onEnderecoChange={(end: any) => {
+            if (!end) return;
+            setForm((f: any) => ({ ...f, endereco: end.logradouro, bairro: end.bairro, cep: end.cep, numero: end.numero, complemento: end.complemento, cidade_id: end.cidade_id, estado_id: end?.cidade?.estadoId, lat: end.latitude, lng: end.longitude }));
+          }} /></div>
+        </div>
+      )}
     </div>
   );
 }
