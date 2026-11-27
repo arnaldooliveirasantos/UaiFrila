@@ -6,3 +6,5 @@ uaifrila-api/package-lock.json
 /uaifrila-api/dist
 uaifrila-email-worker/.env
 /uaifrila-geocodificacao-worker/node_modules
+/Uaifrila-smartPhones/node_modules
+Uaifrila-smartPhones/.env

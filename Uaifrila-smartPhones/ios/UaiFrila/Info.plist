@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>
+<key>CFBundleURLTypes</key><array><dict><key>CFBundleURLSchemes</key><array><string>uaifrila</string></array></dict></array>
+<key>NSFaceIDUsageDescription</key><string>Use sua digital ou Face ID para entrar no UaiFrila sem digitar o código.</string>
+<key>NSCameraUsageDescription</key><string>Permitir foto de perfil.</string>
+<key>NSPhotoLibraryUsageDescription</key><string>Escolher foto de perfil.</string>
+</dict></plist>
