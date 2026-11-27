@@ -93,6 +93,7 @@ export class AuthService extends BaseService {
     if (!dados.email || !dados.codigo) throw new Error('E-mail e código obrigatórios');
     const emailNorm = String(dados.email).trim().toLowerCase();
     const codigoStr = String(dados.codigo).trim();
+    let usuarioIdFromEmail: number | null = null;
 
     // UNICA fonte: o banco. Sem Map em memoria.
     const row = await this.emailHistRepo.buscarCodigoValido(emailNorm, codigoStr).catch((e: any) => { registrarErro('AuthService.validarCodigo.buscarCodigo', e, { email: emailNorm }); throw e; });

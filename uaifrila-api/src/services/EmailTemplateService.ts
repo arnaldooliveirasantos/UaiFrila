@@ -2,7 +2,7 @@ import { BaseService } from './BaseService';
 import { EmailTemplateRepository } from '../repositories/EmailTemplateRepository';
 import { EmailTemplateModel } from '../models/EmailTemplateModel';
 export class EmailTemplateService extends BaseService {
-  private repo: EmailTemplateRepository;
+  protected repo: EmailTemplateRepository;
   constructor() { super(new EmailTemplateRepository()); this.repo = this.getRepo(); }
   async listar(): Promise<EmailTemplateModel[]> { return await this.repo.buscarTodos(); }
   async buscarPorId(id: number): Promise<EmailTemplateModel> { const t = await this.repo.buscarPorId(id); if (!t) throw new Error('Template não encontrado'); return t; }

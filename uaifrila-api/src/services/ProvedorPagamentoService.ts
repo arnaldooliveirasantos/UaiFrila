@@ -4,7 +4,6 @@ import { criptografar, descriptografar } from '../utils/Criptografia';
 // Provedor ativo: fonte única das taxas. Sem provedor ativo, nenhuma cobrança acontece.
 // Segredos: salvos criptografados; descriptografados SÓ aqui, em memória, para chamar a API.
 export class ProvedorPagamentoService extends BaseService<any> {
-  private repo = new ProvedorPagamentoRepository();
   constructor() { super(new ProvedorPagamentoRepository()); }
   async buscarAtivo(): Promise<any> {
     const p = await this.repo.buscarAtivo();
@@ -22,7 +21,7 @@ export class ProvedorPagamentoService extends BaseService<any> {
     const lista = await this.repo.buscarTodos();
     return lista.map((p: any) => (typeof p.toPublicAdmin === 'function' ? p.toPublicAdmin() : p));
   }
-  async atualizar(adminId: number, provedor: string, dados: any): Promise<any> {
+  async atualizarProvedor(adminId: number, provedor: string, dados: any): Promise<any> {
     const atual: any = await this.repo.buscarPorProvedor(provedor);
     if (!atual) throw new Error(`Provedor ${provedor} não cadastrado`);
     const patch: any = {};

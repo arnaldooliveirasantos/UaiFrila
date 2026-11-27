@@ -67,7 +67,7 @@ export class VagaService extends BaseService<VagaModel> {
   // Telas SEMPRE usam a taxa do CARTÃO do provedor ativo (sem campo meio_pagamento:
   // o método só é escolhido na hora do pagamento). Freela recebe S + T.
   // Q (quantidade de vagas) é aplicado NO FRONT: total geral = Q x total por vaga.
-  async calcular(dados: any): Promise<any> {
+  async calcular(dados: any, _isAdmin = false): Promise<any> {
     try {
       this.validateRequired(dados, ['valor_servico']);
       const getNum = async (chave: string) => { return await this.variavelSvc.buscarNumeroObrigatorio(chave); };

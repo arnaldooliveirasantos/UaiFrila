@@ -8,3 +8,4 @@ uaifrila-email-worker/.env
 /uaifrila-geocodificacao-worker/node_modules
 /Uaifrila-smartPhones/node_modules
 Uaifrila-smartPhones/.env
+/Uaifrila-smartPhones/build
