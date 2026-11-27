@@ -37,7 +37,7 @@ export default function TelaAgendaVaga({ turnosIniciais = [], onConfirmar, onCan
   // O "Adicionar a todos" continua usando novoInicio/novoFim/novoValor — nada muda nele.
   const [customDia, setCustomDia] = useState<Record<string, { inicio: string; fim: string; valor: string; transporte?: string }>>({});
   const draftDia = (d: string) => customDia[d] || { inicio: '18:00', fim: '00:00', valor: '', transporte: '' };
-  const setDraftDia = (d: string, patch: Partial<{ inicio: string; fim: string; valor: string }>) => setCustomDia((c) => ({ ...c, [d]: { ...draftDia(d), ...patch } }));
+  const setDraftDia = (d: string, patch: Partial<{ inicio: string; fim: string; valor: string; transporte?: string }>) => setCustomDia((c) => ({ ...c, [d]: { ...draftDia(d), ...patch } }));
   const adicionarCustomNoDia = (d: string) => {
     const r = draftDia(d);
     // Valor em branco = usa o valor do campo "Adicionar a todos" (novoValor).

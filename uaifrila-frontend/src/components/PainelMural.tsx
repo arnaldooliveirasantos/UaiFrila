@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { apiGetPublic, apiFetch, getToken } from '../utils/Api';
-import { calcularDistanciaKm, formatarDistancia } from '../utils/distancia';
+import { calcularDistanciaKm, formatarDistancia } from '../utils/Distancia';
 import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 
 // Mural - CORRIGIDO + Patch 20 (filtro + ordenação):

@@ -1,6 +1,6 @@
 import React from 'react';
 import { useUaiFrilaStyles } from '../../styles/uaifrila.styles';
-import type { VagaForm } from './types';
+import type { VagaForm } from './Types';
 // Etapa 1/4 - O que e a vaga. So edita o form em memoria, nao salva.
 export default function EtapaVagaDados({ form, setForm, funcoes, carregandoFuncoes, templates, aplicarTemplate }: {
   form: VagaForm; setForm: (f: any) => void; funcoes: any[]; carregandoFuncoes: boolean;

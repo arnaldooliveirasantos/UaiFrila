@@ -16,10 +16,12 @@ interface Props {
   onVoltar: () => void;
   codigoInicial?: string;
   dadosCadastro?: any;
+  autoValidarDoLink?: boolean;
 }
 
-export default function ValidacaoCodigo({ email: emailProp, tipo: tipoProp, onValidado, onVoltar, codigoInicial, dadosCadastro }: Props) {
+export default function ValidacaoCodigo({ email: emailProp, tipo: tipoProp, onValidado, onVoltar, codigoInicial, dadosCadastro, autoValidarDoLink }: Props) {
   const styles = useUaiFrilaStyles();
+  void autoValidarDoLink;
   
   const getStored = () => {
     try {
