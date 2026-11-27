@@ -1147,10 +1147,11 @@ VALUES ('VALIDACAO_PIX_TERCEIRO',
 ON CONFLICT (chave_uso) DO NOTHING;
 
 -- GRANTS - USUARIOS DE BANCO PARA APLICAÇÃO
-/*CREATE ROLE uaifrila_app_dev WITH LOGIN PASSWORD 'UaiFrila@App2024!';
-CREATE ROLE uaifrila_readonly_dev WITH LOGIN PASSWORD 'UaiFrila@ead2024!';
-CREATE ROLE uaifrila_worker_dev WITH LOGIN PASSWORD 'UaiFrila@Worker2024!';
-*//*
+/*
+CREATE ROLE uaifrila_app_dev WITH LOGIN PASSWORD 'QkwKxjLlqwarbLmpWtWcEquRIyWHGzyfP';
+CREATE ROLE uaifrila_readonly_dev WITH LOGIN PASSWORD 'QkwKxjLlqwarbLmpWtWcEquRIyWHGzyfP';
+CREATE ROLE uaifrila_worker_dev WITH LOGIN PASSWORD 'QkwKxjLlqwarbLmpWtWcEquRIyWHGzyfP';
+
 GRANT CONNECT ON DATABASE uaifrila TO uaifrila_app_dev;
 GRANT USAGE ON SCHEMA public TO uaifrila_app_dev;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO uaifrila_app_dev;

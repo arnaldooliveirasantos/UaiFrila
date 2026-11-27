@@ -3,7 +3,12 @@ import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
 dotenv.config();
 import { WorkerLogger, mascararEmail } from './Logger';
-const pool = new Pool({ user: process.env.DB_USER, password: process.env.DB_PASSWORD, host: process.env.DB_HOST, port: Number(process.env.DB_PORT) || 5432, database: process.env.DB_NAME, max: 5 });
+// Railway: usa DATABASE_URL quando existir (1 variavel so). Sem ela, cai para DB_USER/DB_HOST/...
+// Antes: so lia DB_* — sem DB_HOST na Railway, o pg caia para localhost (127.0.0.1:5432) e dava ECONNREFUSED.
+// Railway Postgres exige SSL: ssl rejectUnauthorized:false quando a URL e externa.
+const pool = process.env.DATABASE_URL
+  ? new Pool({ connectionString: process.env.DATABASE_URL, max: 5, ssl: { rejectUnauthorized: false } })
+  : new Pool({ user: process.env.DB_USER, password: process.env.DB_PASSWORD, host: process.env.DB_HOST, port: Number(process.env.DB_PORT) || 5432, database: process.env.DB_NAME, max: 5 });
 const log = new WorkerLogger(pool);
 const transportador = nodemailer.createTransport({ host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT) || 587, secure: false, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } });
 import { processarPagamentos } from './PagamentoJob';
