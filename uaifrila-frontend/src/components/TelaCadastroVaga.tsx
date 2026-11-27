@@ -6,7 +6,7 @@ import EtapaVagaDados from './vaga/EtapaVagaDados';
 import EtapaVagaAgenda from './vaga/EtapaVagaAgenda';
 import EtapaVagaEnderecoValores from './vaga/EtapaVagaEnderecoValores';
 import EtapaVagaRevisao from './vaga/EtapaVagaRevisao';
-import type { VagaForm, CalculoBackend } from './vaga/types';
+import type { VagaForm, CalculoBackend } from './vaga/Types';
 import type { Turno } from './TelaAgendaVaga';
 
 // ORQUESTRADOR da vaga: guarda TODO o estado, valida cada etapa e so

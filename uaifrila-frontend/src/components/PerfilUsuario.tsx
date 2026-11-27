@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { apiFetch } from '../utils/Api';
 import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
 import CadastroUnificado from './CadastroUnificado';
-import { useTiposUsuario } from './useTiposUsuario';
+import { useTiposUsuario } from './UseTiposUsuario';
 import FotoPerfil from './FotoPerfil';
 
 // ANTES (mock/fallback): se GET /usuarios/me falhasse, usava prop ou localStorage 'uaifrila_usuario' como se fosse dado real.

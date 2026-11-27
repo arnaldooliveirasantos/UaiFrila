@@ -1,6 +1,6 @@
 import React from 'react';
 import { useUaiFrilaStyles } from '../../styles/uaifrila.styles';
-import type { VagaForm, CalculoBackend } from './types';
+import type { VagaForm, CalculoBackend } from './Types';
 // Etapa 4/4 - Revisao. So leitura: nada e salvo aqui, o botao Publicar /
 // Atualizar do orchestrador e que envia tudo de uma vez.
 export default function EtapaVagaRevisao({ form, turnos, turnosOrdenados, valorTotalTurnos, calculoBackend }: {

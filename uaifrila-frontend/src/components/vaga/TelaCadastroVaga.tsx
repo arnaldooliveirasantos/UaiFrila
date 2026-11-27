@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { useUaiFrilaStyles } from '../styles/uaifrila.styles';
-import { WizardIndicador, WizardNavegacao } from './WizardEtapas';
-import { apiFetch, apiGetPublic } from '../utils/Api';
-import EtapaVagaDados from './vaga/EtapaVagaDados';
-import EtapaVagaAgenda from './vaga/EtapaVagaAgenda';
-import EtapaVagaEnderecoValores from './vaga/EtapaVagaEnderecoValores';
-import EtapaVagaRevisao from './vaga/EtapaVagaRevisao';
-import type { VagaForm, CalculoBackend } from './vaga/types';
-import type { Turno } from './TelaAgendaVaga';
+import { useUaiFrilaStyles } from '../../styles/uaifrila.styles';
+import { WizardIndicador, WizardNavegacao } from '../WizardEtapas';
+import { apiFetch, apiGetPublic } from '../../utils/Api';
+import EtapaVagaDados from './EtapaVagaDados';
+import EtapaVagaAgenda from './EtapaVagaAgenda';
+import EtapaVagaEnderecoValores from './EtapaVagaEnderecoValores';
+import EtapaVagaRevisao from './EtapaVagaRevisao';
+import type { VagaForm, CalculoBackend } from './Types';
+import type { Turno } from '../TelaAgendaVaga';
 
 // ORQUESTRADOR da vaga: guarda TODO o estado, valida cada etapa e so
 // salva na ultima (POST / PUT /api/vagas). As etapas sao arquivos

@@ -13,8 +13,7 @@ export default function PainelExpansaoCidades() {
   const [erro, setErro] = useState('');
   useEffect(() => {
     let cancelado = false;
-    const service = new ExpansaoService();
-    service.listar()
+    ExpansaoService.listar()
       .then((lista) => { if (!cancelado) setCidades(Array.isArray(lista) ? lista : []); })
       .catch(() => { if (!cancelado) setErro('Nao foi possivel carregar as cidades em expansao.'); })
       .finally(() => { if (!cancelado) setCarregando(false); });

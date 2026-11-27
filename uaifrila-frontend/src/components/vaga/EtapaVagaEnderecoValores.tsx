@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useUaiFrilaStyles } from '../../styles/uaifrila.styles';
 import BlocoEndereco from '../BlocoEndereco';
 import CadastroEndereco from '../CadastroEndereco';
-import type { VagaForm, CalculoBackend } from './types';
+import type { VagaForm, CalculoBackend } from './Types';
 // Etapa 3/4 - Endereco e valores. So edita o form em memoria, nao salva.
 export default function EtapaVagaEnderecoValores({ form, setForm, carregandoEnderecoAtivo, turnos, turnosOrdenados, valorTotalTurnos, calculoBackend }: {
   form: VagaForm; setForm: (f: any) => void; carregandoEnderecoAtivo: boolean;
