@@ -21,7 +21,7 @@
 -- psql -U postgres -c "CREATE DATABASE uaifrila;"
 -- psql -U postgres -d uaifrila -f 00_CRIACAO_BANCO_NOVO_COMPLETO.sql
 -- =====================================================================
-
+begin;
 CREATE EXTENSION pgcrypto;
 CREATE EXTENSION "uuid-ossp";
 
@@ -201,7 +201,6 @@ CREATE TABLE IF NOT EXISTS enderecos (
 );
 
 
-
 -- =====================================================================
 -- 5. VAGAS, CANDIDATURAS, TRAMPOS, TRANSACOES, AVALIACOES
 -- =====================================================================
@@ -235,9 +234,9 @@ CREATE TABLE vagas (
   data_inicio TIMESTAMP NOT NULL,
   data_fim TIMESTAMP NOT NULL,
   data_limite_candidatura TIMESTAMP null,
-  quantidade_vagas INT NOT NULL DEFAULT 1 CHECK (quantidade_vagas >= 1)
+  quantidade_vagas INT NOT NULL DEFAULT 1 CHECK (quantidade_vagas >= 1),
   criado_em TIMESTAMP DEFAULT NOW(),
-  atualizado_em TIMESTAMP DEFAULT NOW(),
+  atualizado_em TIMESTAMP DEFAULT NOW()
   
 );
 
@@ -789,6 +788,7 @@ LEFT JOIN trampos t ON t.freela_id = u.id
 LEFT JOIN candidaturas c ON c.freela_id = u.id OR c.usuario_id = u.id
 GROUP BY u.id, u.avaliacao_media;
 
+--Commit;
 
 -- =====================================================================
 -- INSERTS - TODOS NECESSÁRIOS PARA APP FUNCIONAR NORMAL
@@ -1147,10 +1147,10 @@ VALUES ('VALIDACAO_PIX_TERCEIRO',
 ON CONFLICT (chave_uso) DO NOTHING;
 
 -- GRANTS - USUARIOS DE BANCO PARA APLICAÇÃO
-CREATE ROLE uaifrila_app_dev WITH LOGIN PASSWORD 'UaiFrila@App2024!';
+/*CREATE ROLE uaifrila_app_dev WITH LOGIN PASSWORD 'UaiFrila@App2024!';
 CREATE ROLE uaifrila_readonly_dev WITH LOGIN PASSWORD 'UaiFrila@ead2024!';
 CREATE ROLE uaifrila_worker_dev WITH LOGIN PASSWORD 'UaiFrila@Worker2024!';
-
+*//*
 GRANT CONNECT ON DATABASE uaifrila TO uaifrila_app_dev;
 GRANT USAGE ON SCHEMA public TO uaifrila_app_dev;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO uaifrila_app_dev;
@@ -1177,10 +1177,10 @@ GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO uaifrila_worker_dev;
 GRANT ALL ON SCHEMA public TO PUBLIC;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO PUBLIC;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO PUBLIC;
-
+*/
 ---rollback; 
 ---commit;
-
+select * from cidades
 
 
 
