@@ -17,14 +17,15 @@ RUN npm run build
 # --- Serve ---
 FROM nginx:alpine
 
-# Template do Nginx — o $PORT e substituido na hora de subir
-COPY nginx.conf.template /etc/nginx/conf.d/default.conf.template
-
+# Config do Nginx com placeholder __PORT__ (trocado pelo start.sh)
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 
-# Railway injeta $PORT automaticamente. Local: usa 80.
+# Script de inicializacao: troca __PORT__ pela porta da Railway e sobe o Nginx
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
+
 ENV PORT=80
 EXPOSE 80
 
-# Gera a config final com a porta certa e sobe o Nginx
-CMD sh -c "envsubst '$PORT' < /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
+CMD ["sh", "/start.sh"]
