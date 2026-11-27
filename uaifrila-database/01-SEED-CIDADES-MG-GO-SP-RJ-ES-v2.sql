@@ -23,27 +23,6 @@
 -- IDEMPOTENTE: pode rodar de novo sem duplicar.
 -- =====================================================================
 begin;
--- ---------------- 5 CIDADES CURADAS (todos os campos reais) ----------------
-INSERT INTO cidades (nome, estado_id, ativa, lat, lng, raio_km, regiao, codigo_ibge, populacao, status_expansao, demanda_score)
-VALUES ('Uberlândia', (SELECT id FROM estados WHERE sigla = 'MG'), true, -18.9186, -48.2772, 25, 'Triângulo Mineiro', '3170206', 713232, 'ATIVA', 100)
-ON CONFLICT (codigo_ibge) DO UPDATE SET nome = EXCLUDED.nome, estado_id = EXCLUDED.estado_id, ativa = EXCLUDED.ativa, lat = EXCLUDED.lat, lng = EXCLUDED.lng, raio_km = EXCLUDED.raio_km, regiao = EXCLUDED.regiao, populacao = EXCLUDED.populacao, status_expansao = EXCLUDED.status_expansao, demanda_score = EXCLUDED.demanda_score;
-
-INSERT INTO cidades (nome, estado_id, ativa, lat, lng, raio_km, regiao, codigo_ibge, populacao, status_expansao, demanda_score)
-VALUES ('Uberaba', (SELECT id FROM estados WHERE sigla = 'MG'), false, -19.7476, -47.9381, 20, 'Triângulo Mineiro', '3170107', 337836, 'ATIVA', 80)
-ON CONFLICT (codigo_ibge) DO UPDATE SET nome = EXCLUDED.nome, estado_id = EXCLUDED.estado_id, ativa = EXCLUDED.ativa, lat = EXCLUDED.lat, lng = EXCLUDED.lng, raio_km = EXCLUDED.raio_km, regiao = EXCLUDED.regiao, populacao = EXCLUDED.populacao, status_expansao = EXCLUDED.status_expansao, demanda_score = EXCLUDED.demanda_score;
-
-INSERT INTO cidades (nome, estado_id, ativa, lat, lng, raio_km, regiao, codigo_ibge, populacao, status_expansao, demanda_score)
-VALUES ('Araguari', (SELECT id FROM estados WHERE sigla = 'MG'), false, -18.6455, -48.1873, 15, 'Triângulo Mineiro', '3103504', 117825, 'ATIVA', 60)
-ON CONFLICT (codigo_ibge) DO UPDATE SET nome = EXCLUDED.nome, estado_id = EXCLUDED.estado_id, ativa = EXCLUDED.ativa, lat = EXCLUDED.lat, lng = EXCLUDED.lng, raio_km = EXCLUDED.raio_km, regiao = EXCLUDED.regiao, populacao = EXCLUDED.populacao, status_expansao = EXCLUDED.status_expansao, demanda_score = EXCLUDED.demanda_score;
-
-INSERT INTO cidades (nome, estado_id, ativa, lat, lng, raio_km, regiao, codigo_ibge, populacao, status_expansao, demanda_score)
-VALUES ('Ituiutaba', (SELECT id FROM estados WHERE sigla = 'MG'), false, -18.9689, -49.4656, 15, 'Triângulo Mineiro', '3134202', 105818, 'INATIVA', 20)
-ON CONFLICT (codigo_ibge) DO UPDATE SET nome = EXCLUDED.nome, estado_id = EXCLUDED.estado_id, ativa = EXCLUDED.ativa, lat = EXCLUDED.lat, lng = EXCLUDED.lng, raio_km = EXCLUDED.raio_km, regiao = EXCLUDED.regiao, populacao = EXCLUDED.populacao, status_expansao = EXCLUDED.status_expansao, demanda_score = EXCLUDED.demanda_score;
-
-INSERT INTO cidades (nome, estado_id, ativa, lat, lng, raio_km, regiao, codigo_ibge, populacao, status_expansao, demanda_score)
-VALUES ('Patrocínio', (SELECT id FROM estados WHERE sigla = 'MG'), false, -18.9443, -46.9936, 15, 'Triângulo Mineiro', '3144607', 91995, 'INATIVA', 15)
-ON CONFLICT (codigo_ibge) DO UPDATE SET nome = EXCLUDED.nome, estado_id = EXCLUDED.estado_id, ativa = EXCLUDED.ativa, lat = EXCLUDED.lat, lng = EXCLUDED.lng, raio_km = EXCLUDED.raio_km, regiao = EXCLUDED.regiao, populacao = EXCLUDED.populacao, status_expansao = EXCLUDED.status_expansao, demanda_score = EXCLUDED.demanda_score;
-
 -- ---------------- MG (853 cidades) ----------------
 -- lat/lng/regiao/codigo_ibge/populacao = NULL aqui: preenchidos por importar-dados-cidades.mjs
 INSERT INTO cidades (nome, estado_id, ativa, lat, lng, raio_km, regiao, codigo_ibge, populacao, status_expansao, demanda_score)
@@ -1998,22 +1977,23 @@ FROM (VALUES
 WHERE NOT EXISTS (SELECT 1 FROM cidades c WHERE LOWER(c.nome) = LOWER(v.nome) AND c.estado_id = (SELECT id FROM estados WHERE sigla = 'ES'));
 
 -- GARANTE: só Uberlândia ativa
-UPDATE cidades SET ativa = false WHERE LOWER(nome) <> 'uberlândia';
-UPDATE cidades SET ativa = true WHERE LOWER(nome) = 'uberlândia' AND estado_id = (SELECT id FROM estados WHERE sigla = 'MG');
+UPDATE cidades SET ativa = false WHERE LOWER(nome) not in ('uberlândia','araguari');
+UPDATE cidades SET ativa = true WHERE LOWER(nome) in ('uberlândia','araguari') ;
 
 -- CONFERIR: SELECT e.sigla, COUNT(*) FROM cidades c JOIN estados e ON e.id = c.estado_id WHERE e.sigla IN ('MG','GO','SP','RJ','ES') GROUP BY e.sigla ORDER BY e.sigla;
 -- CONFERIR: SELECT c.nome, e.sigla FROM cidades c JOIN estados e ON e.id = c.estado_id WHERE c.ativa = true;
 -- CONFERIR preenchimento: SELECT COUNT(*) FROM cidades WHERE codigo_ibge IS NULL;  -- deve zerar após o script de importação
-SELECT c.id, c.nome, c.codigo_ibge, c.lat, c.lng, c.regiao, c.populacao, e.sigla AS uf  FROM cidades c JOIN estados e ON e.id = c.estado_id 
-
-WHERE e.sigla in ('MG', 'GO', 'SP', 'RJ', 'ES')
-
-select c.id, c.nome, c.codigo_ibge, c.lat, c.lng, c.regiao, c.populacao, e.sigla AS uf
+ --SELECT c.id, c.nome, c.codigo_ibge, c.lat, c.lng, c.regiao, c.populacao, e.sigla AS uf  FROM cidades c 
+--JOIN estados e ON e.id = c.estado_id 
+--WHERE e.sigla in ('MG', 'GO', 'SP', 'RJ', 'ES')
+--select c.id, c.nome, c.codigo_ibge, c.lat, c.lng, c.regiao, c.populacao, e.sigla AS uf
   
-FROM cidades c JOIN estados e ON e.id = c.estado_id
-WHERE e.sigla = ANY(ARRAY['MG','GO','SP','RJ','ES']);
+--FROM cidades c JOIN estados e ON e.id = c.estado_id
+--WHERE e.sigla = ANY(ARRAY['MG','GO','SP','RJ','ES']);
 
-SELECT id, nome, codigo_ibge, estado_id
-FROM cidades WHERE codigo_ibge = '3144607';
+--SELECT id, nome, codigo_ibge, estado_id
+--FROM cidades WHERE codigo_ibge = '3144607';
+SELECT COUNT(*) FROM cidades WHERE codigo_ibge is  NULL;  -- deve zerar após o script de importação
+
 ---rollback; 
 ---commit;
