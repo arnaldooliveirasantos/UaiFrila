@@ -14,7 +14,7 @@ export class ProvedorPagamentoController extends BaseController {
   atualizar = async (req: AuthRequest, res: Response) => {
     try {
       if (!this.isAdmin(req)) return this.error(res, 'Acesso negado', 403);
-      const r = await this.service.atualizar(Number(req.usuario!.id), String(req.params.provedor), req.body || {});
+      const r = await this.service.atualizarProvedor(Number(req.usuario!.id), String(req.params.provedor), req.body || {});
       return res.json({ success: true, data: r, message: 'Provedor atualizado' });
     } catch (e: any) { return this.handleError(res, e); }
   };

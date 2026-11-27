@@ -67,10 +67,10 @@ export class BaseController {
     return res.status(status).json({ success: true, data });
   }
 
-  protected error(res: Response, message: string, status = 400) {
+  protected error(res: Response, message: string, status = 400, err?: any) {
     const extra: any = {};
-    if (err.precisa_confirmacao) extra.precisa_confirmacao = true;
-    if (err.motivo) extra.motivo = err.motivo;
+    if (err?.precisa_confirmacao) extra.precisa_confirmacao = true;
+    if (err?.motivo) extra.motivo = err.motivo;
     return res.status(status).json({ success: false, message, ...extra });
   }
 

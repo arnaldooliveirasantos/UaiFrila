@@ -8,7 +8,7 @@ import { geocodificarEndereco } from './GeocodificacaoService';
 // Os demais metodos sao os mesmos da entrega 2.
 export class EnderecoService extends BaseService {
   constructor() { super(new EnderecoRepository()); }
-  private repo = new EnderecoRepository();
+  protected repo = new EnderecoRepository();
   async listar(): Promise<EnderecoModel[]> { return await this.repo.buscarTodos(); }
   async listarBrutosPorUsuario(usuarioId: number): Promise<any[]> {
     const id = Number(usuarioId); if (!id || isNaN(id)) return [];

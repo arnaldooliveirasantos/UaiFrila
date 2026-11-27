@@ -2,7 +2,7 @@ import { BaseService } from './BaseService';
 import { EmailStatusRepository } from '../repositories/EmailStatusRepository';
 import { EmailStatusModel } from '../models/EmailStatusModel';
 export class EmailStatusService extends BaseService {
-  private repo: EmailStatusRepository;
+  protected repo: EmailStatusRepository;
   constructor() { super(new EmailStatusRepository()); this.repo = this.getRepo(); }
   async listar(): Promise<EmailStatusModel[]> { return await this.repo.buscarTodos(); }
   async buscarPorId(id: number): Promise<EmailStatusModel> { const s = await this.repo.buscarPorId(id); if (!s) throw new Error('Status não encontrado'); return s; }

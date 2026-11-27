@@ -33,7 +33,7 @@ function digitoCNPJ(cnpj: string): boolean {
     && calc(cnpj.slice(0, 13), [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]) === Number(cnpj[13]);
 }
 export class PixValidacaoService extends BaseService<any> {
-  private repo = new PixValidacaoRepository();
+  protected repo = new PixValidacaoRepository();
   private provedorSvc = new ProvedorPagamentoService();
   private variavelSvc = new VariavelSistemaService();
   private historicoSvc = new EmailHistoricoService();

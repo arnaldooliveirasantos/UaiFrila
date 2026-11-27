@@ -11,7 +11,7 @@ export function nivelExperiencia(meses: number, tramposComprovados: number): str
 }
 export class UsuarioFuncaoService extends BaseService {
   constructor() { super(new UsuarioFuncaoRepository()); }
-  private repo = new UsuarioFuncaoRepository();
+  protected repo = new UsuarioFuncaoRepository();
   async listarMinhas(usuarioId: number): Promise<any[]> {
     const rows = await this.repo.listarPorUsuario(usuarioId);
     return rows.map((r: any) => ({ ...r, faixa_experiencia: faixaExperiencia(Number(r.tempo_experiencia_meses || 0)),

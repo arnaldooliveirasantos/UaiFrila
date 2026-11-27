@@ -13,7 +13,7 @@ import { descriptografar } from '../utils/Criptografia';
 // Notificação 60 min antes de expirar (worker). Status da cobrança vem SEMPRE do provedor
 // (webhook só dispara a consulta; nunca confiamos cegamente no corpo do webhook).
 export class PagamentoService extends BaseService<any> {
-  private repo = new PagamentoRepository();
+  protected repo = new PagamentoRepository();
   private provedorSvc = new ProvedorPagamentoService();
   private calculoSvc = new CalculoPagamentoService();
   private variavelSvc = new VariavelSistemaService();

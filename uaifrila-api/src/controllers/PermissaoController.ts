@@ -34,7 +34,7 @@ export class PermissaoController extends BaseController {
     try {
       this.checkRole(req, ['ADMIN', 'SUPER_ADMIN']);
       // :id da rota = id da linha em permissoes.
-      const permissao = await this.service.atualizar(req.params.id, req.body || {});
+      const permissao = await this.service.atualizar(Number(req.params.id), req.body || {});
       return res.json({ success: true, sucesso: true, data: permissao, permissao });
     } catch (e: any) { return this.handleError(res, e); }
   };

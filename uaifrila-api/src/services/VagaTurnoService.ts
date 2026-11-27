@@ -87,6 +87,6 @@ export class VagaTurnoService extends BaseService<VagaTurnoModel> {
   async resumo(vagaId: number): Promise<any> {
     const lista = await this.listarPorVaga(vagaId);
     const dias = new Set(lista.map((x: any) => String(x.data).slice(0, 10))).size;
-    return { vaga_id: vagaId, dias, turnos: lista.length, minutos_total: lista.reduce((s: number, x: any) => s + Number(x.duracaoMinutos ?? x.duracao_minutos ?? 0), 0), valor_total: lista.reduce((s: number, x: any) => s + Number(x.valorServico ?? x.valor_servico ?? 0), 0), valor_transporte_total: lista.reduce((s: number, x: any) => s + Number((x as any).valorTransporte ?? (x as any).valor_transporte ?? 0), 0), turnos: lista };
+    return { vaga_id: vagaId, dias, qtd_turnos: lista.length, minutos_total: lista.reduce((s: number, x: any) => s + Number(x.duracaoMinutos ?? x.duracao_minutos ?? 0), 0), valor_total: lista.reduce((s: number, x: any) => s + Number(x.valorServico ?? x.valor_servico ?? 0), 0), valor_transporte_total: lista.reduce((s: number, x: any) => s + Number((x as any).valorTransporte ?? (x as any).valor_transporte ?? 0), 0), turnos: lista };
   }
 }

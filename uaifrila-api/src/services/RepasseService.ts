@@ -11,7 +11,7 @@ import { descriptografar } from '../utils/Criptografia';
 // Valor = serviço + transporte DO TURNO (sem comissão, sem taxa — já absorvidas no total).
 // Idempotente por chave_idempotencia + UNIQUE em trampo_turno_id.
 export class RepasseService extends BaseService<any> {
-  private repo = new RepasseRepository();
+  protected repo = new RepasseRepository();
   private provedorSvc = new ProvedorPagamentoService();
   private variavelSvc = new VariavelSistemaService();
   private notificacaoSvc = new NotificacaoService();
