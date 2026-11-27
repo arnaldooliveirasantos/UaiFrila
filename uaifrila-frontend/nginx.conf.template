@@ -1,0 +1,28 @@
+server {
+    listen       ${PORT};
+    server_name  _;
+
+    root   /usr/share/nginx/html;
+    index  index.html;
+
+    # SPA: qualquer rota volta para o index.html
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Assets com hash: cache longo
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    # index.html nunca em cache (para deploy novo aparecer na hora)
+    location = /index.html {
+        expires -1;
+        add_header Cache-Control "no-store";
+    }
+
+    gzip on;
+    gzip_types text/css application/javascript application/json image/svg+xml;
+}
