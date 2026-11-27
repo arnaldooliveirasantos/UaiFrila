@@ -2,11 +2,11 @@
   "name": "uaifrila-api",
   "version": "1.0.0",
   "description": "API REST do Ecossistema UAI FRILA",
-  "main": "dist/server.js",
+  "main": "dist/Server.js",
   "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only -r dotenv/config src/server.ts",
-    "build": "tsc",
-    "start": "node -r dotenv/config dist/server.js",
+    "dev": "ts-node-dev --respawn --transpile-only -r dotenv/config src/Server.ts",
+    "build": "tsc -p Tsconfig.json",
+    "start": "node -r dotenv/config dist/Server.js",
     "test": "jest --runInBand --detectOpenHandles"
   },
   "dependencies": {
