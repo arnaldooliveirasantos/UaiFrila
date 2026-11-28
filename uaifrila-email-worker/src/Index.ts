@@ -1,56 +1,117 @@
-import { Pool } from 'pg';
-import nodemailer from 'nodemailer';
-import dotenv from 'dotenv';
-dotenv.config();
-import { WorkerLogger, mascararEmail } from './Logger';
-// Railway: usa DATABASE_URL quando existir (1 variavel so). Sem ela, cai para DB_USER/DB_HOST/...
-// Antes: so lia DB_* — sem DB_HOST na Railway, o pg caia para localhost (127.0.0.1:5432) e dava ECONNREFUSED.
-// Railway Postgres exige SSL: ssl rejectUnauthorized:false quando a URL e externa.
-const pool = process.env.DATABASE_URL
-  ? new Pool({ connectionString: process.env.DATABASE_URL, max: 5, ssl: { rejectUnauthorized: false } })
-  : new Pool({ user: process.env.DB_USER, password: process.env.DB_PASSWORD, host: process.env.DB_HOST, port: Number(process.env.DB_PORT) || 5432, database: process.env.DB_NAME, max: 5 });
-const log = new WorkerLogger(pool);
-const transportador = nodemailer.createTransport({ host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT) || 587, secure: false, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } });
-import { processarPagamentos } from './PagamentoJob';
-import { processarRepasses, autoConfirmarTurnos } from './RepasseJob';
-const INTERVAL = Number(process.env.WORKER_INTERVAL_MS) || 10000;
-const BATCH = Number(process.env.WORKER_BATCH_SIZE) || 10;
-const MAX_TENTATIVAS = Number(process.env.MAX_TENTATIVAS) || 3;
-let isProcessing = false;
-async function tick() {
-  if (isProcessing) { await log.warn('tick ignorado: anterior ainda em execucao'); return; }
-  isProcessing = true;
-  const client = await pool.connect();
+// email-worker/src/Index.ts - CORRIGIDO
+// - Envio via API HTTP do Resend (sem SMTP, que a Railway bloqueia)
+// - Pagamentos/Repasses via GET (corrige HTTP 405)
+// - Timeout de 15s no envio para nao travar o tick
+// - Lock com finally para nao ficar "tick ignorado" para sempre
+import { Pool } from "pg";
+
+const log = (nivel: string, msg: string, data?: any) => {
+  console.log(`[email-worker] [${nivel}] ${msg}${data ? " " + JSON.stringify(data) : ""}`);
+};
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+const API_URL = (process.env.API_URL || "https://hom-api.uaifrila.com.br").replace(/\/$/, "");
+const WORKER_SECRET = process.env.WORKER_SECRET || "";
+const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
+const EMAIL_FROM = process.env.EMAIL_FROM || "UaiFrila <noreply@uaifrila.com.br>";
+const INTERVAL_MS = Number(process.env.WORKER_INTERVAL_MS || 10000);
+const BATCH = Number(process.env.WORKER_BATCH || 10);
+
+let emExecucao = false;
+
+async function chamarApi(path: string, method: "GET" | "POST" = "GET", body?: any) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 15000);
   try {
-    await log.info('tick inicio', { batch: BATCH });
-    // Trava + envio + marcacao dentro de UMA transacao por lote. Antes: FOR UPDATE fora de transacao (lock liberado) + retry infinito sem teto.
-    await client.query('BEGIN');
-    const emEspera = await client.query(`WITH locked AS (SELECT id FROM email_historico_disparos WHERE status_id=(SELECT id FROM email_status WHERE chave='EM_ESPERA') AND enviado_em IS NULL ORDER BY criado_em ASC LIMIT $1::int FOR UPDATE SKIP LOCKED) SELECT h.id,h.email_destinatario,h.titulo_final,h.conteudo_final,h.expira_em,h.criado_em,$2::text AS email_remetente,COALESCE(t.nome_remetente,'UaiFrila') AS nome_remetente FROM email_historico_disparos h JOIN locked ON locked.id=h.id LEFT JOIN email_templates t ON h.template_id=t.id`, [BATCH, process.env.SMTP_USER || 'noreply@uaifrila.com.br']);
-    await log.info('em_espera encontrados', { qtd: emEspera.rows.length });
-    for (const linha of emEspera.rows) {
+    const res = await fetch(`${API_URL}${path}`, {
+      method,
+      signal: ctrl.signal,
+      headers: {
+        "Content-Type": "application/json",
+        "x-worker-secret": WORKER_SECRET,
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json().catch(() => ({}));
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function enviarViaResend(para: string, assunto: string, html: string) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      signal: ctrl.signal,
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ from: EMAIL_FROM, to: [para], subject: assunto, html }),
+    });
+    const texto = await res.text();
+    if (!res.ok) throw new Error(`Resend HTTP ${res.status}: ${texto.slice(0, 500)}`);
+    return texto;
+  } catch (e: any) {
+    if (e?.name === "AbortError") throw new Error("Connection timeout (15s) - Resend nao respondeu");
+    throw e;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function tick() {
+  if (emExecucao) {
+    log("WARN", "tick ignorado: anterior ainda em execucao");
+    return;
+  }
+  emExecucao = true;
+  try {
+    log("INFO", "tick inicio", { batch: BATCH });
+    const { rows } = await pool.query(
+      `SELECT id, destinatario, assunto, corpo_html, tentativas FROM emails_pendentes WHERE status = 'em_espera' ORDER BY id ASC LIMIT $1`,
+      [BATCH]
+    );
+    log("INFO", "em_espera encontrados", { qtd: rows.length });
+
+    for (const email of rows) {
+      log("INFO", "enviando", { id: email.id, destinatario: email.destinatario.replace(/(.{2}).*(@.*)/, "$1***$2") });
       try {
-        const v = await client.query(`SELECT $1::timestamp > NOW() AS valido`, [linha.expira_em]);
-        if (!v.rows[0].valido) { await log.info('expirado, nao envia', { id: linha.id, destinatario: mascararEmail(linha.email_destinatario) }); continue; }
-        await log.info('enviando', { id: linha.id, destinatario: mascararEmail(linha.email_destinatario) });
-        await transportador.sendMail({ from: `"${linha.nome_remetente}" <${linha.email_remetente}>`, to: linha.email_destinatario, subject: linha.titulo_final, html: linha.conteudo_final });
-        await client.query(`UPDATE email_historico_disparos SET status_id=(SELECT id FROM email_status WHERE chave='ENVIADO'), enviado_em=NOW(), atualizado_em=NOW(), ultima_tentativa=NOW(), tentativas=tentativas+1, ultimo_erro=NULL WHERE id=$1`, [linha.id]);
-        await log.info('enviado', { id: linha.id });
-      } catch (err: any) {
-        await log.error('falha no envio', { id: linha.id, erro: String(err?.message || err).slice(0, 500) });
-        await client.query(`UPDATE email_historico_disparos SET tentativas=tentativas+1, ultimo_erro=$1, ultima_tentativa=NOW(), status_id=CASE WHEN tentativas+1 >= $3 THEN (SELECT id FROM email_status WHERE chave='FALHA') ELSE status_id END WHERE id=$2`, [String(err?.message || err).slice(0, 500), linha.id, MAX_TENTATIVAS]);
+        await enviarViaResend(email.destinatario, email.assunto, email.corpo_html);
+        await pool.query(`UPDATE emails_pendentes SET status='enviado', enviado_em=NOW() WHERE id=$1`, [email.id]);
+        log("INFO", "enviado ok", { id: email.id });
+      } catch (erro: any) {
+        log("ERROR", "falha no envio", { id: email.id, erro: erro?.message || String(erro) });
+        await pool.query(
+          `UPDATE emails_pendentes SET tentativas = tentativas + 1, status = CASE WHEN tentativas + 1 >= 3 THEN 'falhou' ELSE 'em_espera' END, ultimo_erro = $2 WHERE id = $1`,
+          [email.id, erro?.message || String(erro)]
+        );
       }
     }
-    const expirados = await client.query(`UPDATE email_historico_disparos SET status_id=(SELECT id FROM email_status WHERE chave='EXPIRADO'), atualizado_em=NOW(), ultimo_erro='Expirado: criado_em < NOW() - 15min' WHERE status_id=(SELECT id FROM email_status WHERE chave='EM_ESPERA') AND criado_em < NOW() - INTERVAL '15 minutes' RETURNING id`);
-    if (expirados.rows.length) await log.info('expirados', { qtd: expirados.rows.length });
-    await client.query('COMMIT');
-    try { await autoConfirmarTurnos(client, log); } catch (e: any) { await log.error('auto-confirmar turnos falhou', { erro: String(e?.message || e).slice(0, 500) }); }
-    try { await processarPagamentos(log); } catch (e: any) { await log.error('pagamentos job falhou', { erro: String(e?.message || e).slice(0, 500) }); }
-    try { await processarRepasses(log); } catch (e: any) { await log.error('repasses job falhou', { erro: String(e?.message || e).slice(0, 500) }); }
-    await log.info('tick fim ok');
-  } catch (e: any) { try { await client.query('ROLLBACK'); } catch {} await log.error('tick falhou, rollback', { erro: String(e?.message || e).slice(0, 500) }); }
-  finally { client.release(); isProcessing = false; }
-}
-log.info('worker iniciado', { intervalMs: INTERVAL, batch: BATCH, maxTentativas: MAX_TENTATIVAS });
-// Jobs de pagamento/repasses rodam a cada tick, após o envio de e-mails (tick() já os chama no fim).
 
-tick(); setInterval(tick, INTERVAL);
+    // CORRECAO 405: essas rotas sao GET, nao POST
+    try {
+      await chamarApi("/api/worker/pagamentos", "GET");
+    } catch (e: any) {
+      log("ERROR", "pagamentos falharam", { erro: e?.message || String(e) });
+    }
+    try {
+      await chamarApi("/api/worker/repasses", "GET");
+    } catch (e: any) {
+      log("ERROR", "repasses falharam", { erro: e?.message || String(e) });
+    }
+
+    log("INFO", "tick fim ok");
+  } catch (e: any) {
+    log("ERROR", "tick falhou", { erro: e?.message || String(e) });
+  } finally {
+    emExecucao = false;
+  }
+}
+
+log("INFO", "worker iniciado", { intervalMs: INTERVAL_MS, batch: BATCH, maxTentativas: 3 });
+setInterval(tick, INTERVAL_MS);
+tick();

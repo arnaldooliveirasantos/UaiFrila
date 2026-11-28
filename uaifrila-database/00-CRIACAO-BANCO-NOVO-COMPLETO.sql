@@ -1103,7 +1103,7 @@ INSERT INTO permissoes (chave, nome, categoria, descricao, tipo_usuario_id) VALU
 ('GERENCIAR_PERMISSOES','Gerenciar permissoes','admin','Gerenciar permissoes e matriz RBAC',(SELECT id FROM tipos_usuario WHERE chave='SUPER_ADMIN'))
 ON CONFLICT (chave, tipo_usuario_id) DO UPDATE SET nome=EXCLUDED.nome, categoria=EXCLUDED.categoria, descricao=EXCLUDED.descricao;
 
-INSERT INTO vaga_templates (nome, funcao_id, titulo, descricao, turnos_json)
+/*INSERT INTO vaga_templates (nome, funcao_id, titulo, descricao, turnos_json)
 VALUES
   ('Garçom para casamento',
    (SELECT id FROM funcoes WHERE nome = 'Garçom'),
@@ -1120,7 +1120,7 @@ VALUES
    'Bartender para festa',
    'Preparar drinks do cardápio da festa. Insumos e utensílios fornecidos pelo contratante.',
    '[{"data":"","hora_inicio":"19:00","hora_fim":"01:00","valor_servico":250}]'::jsonb)
-ON CONFLICT (nome) DO NOTHING;
+ON CONFLICT (nome) DO NOTHING;*/
 
 INSERT INTO provedores_pagamento (provedor, ativo, ambiente, taxa_pix_percentual, taxa_cartao_percentual, config_json)
 VALUES ('MERCADO_PAGO', true, 'sandbox', 1, 5, '{"base_url":"https://api.mercadopago.com"}'::jsonb),
@@ -1164,6 +1164,34 @@ GRANT SELECT ON ALL TABLES IN SCHEMA public TO uaifrila_readonly_dev;
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO uaifrila_readonly_dev;
 
 GRANT CONNECT ON DATABASE uaifrila TO uaifrila_worker_dev;
+GRANT USAGE ON SCHEMA public TO uaifrila_worker_dev;
+GRANT SELECT, INSERT, UPDATE ON transacoes TO uaifrila_worker_dev;
+GRANT SELECT, INSERT, UPDATE ON email_historico_disparos TO uaifrila_worker_dev;
+GRANT SELECT, INSERT, UPDATE ON trampos TO uaifrila_worker_dev;
+GRANT SELECT, INSERT, UPDATE ON candidaturas TO uaifrila_worker_dev;
+GRANT SELECT ON vagas TO uaifrila_worker_dev;
+GRANT SELECT ON usuarios TO uaifrila_worker_dev;
+GRANT SELECT ON variaveis_sistema TO uaifrila_worker_dev;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO uaifrila_worker_dev;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO uaifrila_worker_dev;
+
+GRANT ALL ON SCHEMA public TO PUBLIC;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO PUBLIC;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO PUBLIC;
+
+
+GRANT CONNECT ON DATABASE railway TO uaifrila_app_dev;
+GRANT USAGE ON SCHEMA public TO uaifrila_app_dev;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO uaifrila_app_dev;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO uaifrila_app_dev;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO uaifrila_app_dev;
+
+GRANT CONNECT ON DATABASE railway TO uaifrila_readonly_dev;
+GRANT USAGE ON SCHEMA public TO uaifrila_readonly_dev;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO uaifrila_readonly_dev;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO uaifrila_readonly_dev;
+
+GRANT CONNECT ON DATABASE railway TO uaifrila_worker_dev;
 GRANT USAGE ON SCHEMA public TO uaifrila_worker_dev;
 GRANT SELECT, INSERT, UPDATE ON transacoes TO uaifrila_worker_dev;
 GRANT SELECT, INSERT, UPDATE ON email_historico_disparos TO uaifrila_worker_dev;
