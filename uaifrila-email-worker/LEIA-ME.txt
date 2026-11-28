@@ -1,0 +1,21 @@
+EMAIL-WORKER COMPLETO - TROCA TUDO
+
+1. No seu PC, APAGUE a pasta email-worker inteira (faz backup antes se quiser, mas nao deixe ela la).
+2. Descompacte este zip e renomeie a pasta para email-worker.
+3. Estrutura final tem que ser:
+   email-worker/package.json
+   email-worker/tsconfig.json
+   email-worker/Dockerfile
+   email-worker/src/index.ts  (UNICO arquivo de codigo, tudo em minusculo)
+4. No Railway, servico email-worker:
+   Settings -> Root Directory = email-worker (ou vazio se o repo ja for so o worker)
+   Settings -> Builder: se usar Dockerfile, deixa Dockerfile. Se usar Nixpacks, o start e: npm run build && npm start
+   Variables: confira DATABASE_URL, API_URL=https://hom-api.uaifrila.com.br, WORKER_SECRET igual ao da API, RESEND_API_KEY real, EMAIL_FROM verificado, WORKER_INTERVAL_MS=10000, MAX_TENTATIVAS=3
+   Apague variaveis antigas de envio que nao estao no .env.example
+5. Commit + push + Redeploy.
+6. Primeira linha do log TEM QUE SER:
+   worker V3 COMPLETO - envio via Resend HTTP
+   Se nao aparecer, o deploy ainda esta usando pasta/repo antigo.
+7. Solicite um codigo no front. Log esperado: enviando -> enviado ok em poucos segundos.
+8. Se der Resend HTTP 403: dominio nao verificado ou remetente errado. Se der 401: chave invalida.
+9. Se der HTTP 405 em pagamentos/repasses: confira na API se as rotas sao /api/worker/pagamentos e /api/worker/repasses com GET.
