@@ -9,3 +9,4 @@ uaifrila-email-worker/.env
 /Uaifrila-smartPhones/node_modules
 Uaifrila-smartPhones/.env
 /Uaifrila-smartPhones/build
+uaifrila-email-worker/package-lock.json
